@@ -49,7 +49,7 @@ void request_server_termination(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "usage: tmate-ssh-server [-A] [-b ip] [-h hostname] [-k keys_dir] [-p listen_port] [-q ssh_port_advertized] [-w websocket_hostname] [-z websocket_port] [-x] [-v]\n");
+	fprintf(stderr, "usage: tmtv-server [-A] [-b ip] [-h hostname] [-k keys_dir] [-p listen_port] [-q ssh_port_advertized] [-w websocket_hostname] [-z websocket_port] [-x] [-v]\n");
 }
 
 static char* get_full_hostname(void)
@@ -163,7 +163,7 @@ int main(int argc, char **argv, char **envp)
 	 * logging, or just rely on log_debug() which goes to the tmux log.
 	 */
 	if (tmate_settings->log_level > 0)
-		log_open("tmate-ssh-server");
+		log_open("tmtv-server");
 
 	setup_locale();
 
@@ -245,7 +245,7 @@ void set_session_token(struct tmate_session *session, const char *token)
 
 	size_t size = cmdline_end - cmdline;
 	memset(cmdline, 0, size);
-	snprintf(cmdline, size-1, "tmate-ssh-server [%s] %s %s",
+	snprintf(cmdline, size-1, "tmtv-server [%s] %s %s",
 		tmate_session->obfuscated_session_token,
 		session->ssh_client.role == TMATE_ROLE_DAEMON ? "(daemon)" : "(pty client)",
 		session->ssh_client.ip_address);

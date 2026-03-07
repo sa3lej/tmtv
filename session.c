@@ -116,7 +116,7 @@ session_create(const char *prefix, const char *name, const char *cwd,
 
 #ifdef TMATE
 	if (next_session_id != 0) {
-		tmate_info("multi sessions is not supported with tmate");
+		tmate_info("multi sessions is not supported with tmtv");
 		return (NULL);
 	}
 #endif

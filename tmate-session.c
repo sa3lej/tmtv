@@ -204,10 +204,10 @@ void tmate_session_start(void)
 	 */
 	if (tmate_foreground) {
 		tmate_set_val("foreground", "true");
-		tmate_info("To connect to the session locally, run: tmate -S %s attach", socket_path);
+		tmate_info("To connect to the session locally, run: tmtv -S %s attach", socket_path);
 	} else {
-		cfg_add_cause("%s", "Tip: if you wish to use tmate only for remote access, run: tmate -F");
-		cfg_add_cause("%s", "To see the following messages again, run in a tmate session: tmate show-messages");
+		cfg_add_cause("%s", "Tip: if you wish to use tmtv only for remote access, run: tmtv -F");
+		cfg_add_cause("%s", "To see the following messages again, run in a tmtv session: tmtv show-messages");
 		cfg_add_cause("%s", "Press <q> or <ctrl-c> to continue");
 		cfg_add_cause("%s", "---------------------------------------------------------------------");
 	}
