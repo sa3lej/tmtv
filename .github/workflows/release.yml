@@ -77,7 +77,7 @@ jobs:
           BREW="$(brew --prefix)"
           OPENSSL="$(brew --prefix openssl@3)"
 
-          # Collect .a paths — use pkg name AND formula name variants
+          # Collect .a paths for all deps
           STATIC_LIBS=""
           for pkg in libevent libssh msgpack-c utf8proc openssl@3; do
             prefix=$(brew --prefix "$pkg" 2>/dev/null) || continue
@@ -85,9 +85,31 @@ jobs:
               [ -f "$a" ] && STATIC_LIBS="$STATIC_LIBS $a"
             done
           done
-          echo "=== Static libs found ==="
+
+          # utf8proc may not ship .a — build from source if missing
+          if ! echo "$STATIC_LIBS" | grep -q utf8proc; then
+            echo "No static libutf8proc found, building from source..."
+            UTF8_PREFIX=$(brew --prefix utf8proc)
+            UTF8_SRC=$(find "$UTF8_PREFIX" -name "utf8proc.c" 2>/dev/null | head -1)
+            if [ -z "$UTF8_SRC" ]; then
+              # Fall back: compile from Homebrew's include + downloaded source
+              curl -sL https://raw.githubusercontent.com/JuliaStrings/utf8proc/master/utf8proc.c -o /tmp/utf8proc_lib.c
+              curl -sL https://raw.githubusercontent.com/JuliaStrings/utf8proc/master/utf8proc_data.c -o /tmp/utf8proc_data.c
+              gcc -c -O2 -I"$UTF8_PREFIX/include" /tmp/utf8proc_lib.c -o /tmp/utf8proc_lib.o
+              gcc -c -O2 -I"$UTF8_PREFIX/include" /tmp/utf8proc_data.c -o /tmp/utf8proc_data.o
+              ar rcs /tmp/libutf8proc.a /tmp/utf8proc_lib.o /tmp/utf8proc_data.o
+            else
+              UTF8_DIR=$(dirname "$UTF8_SRC")
+              gcc -c -O2 -I"$UTF8_PREFIX/include" "$UTF8_SRC" -o /tmp/utf8proc_lib.o
+              gcc -c -O2 -I"$UTF8_PREFIX/include" "$UTF8_DIR/utf8proc_data.c" -o /tmp/utf8proc_data.o
+              ar rcs /tmp/libutf8proc.a /tmp/utf8proc_lib.o /tmp/utf8proc_data.o
+            fi
+            STATIC_LIBS="$STATIC_LIBS /tmp/libutf8proc.a"
+          fi
+
+          echo "=== Static libs ==="
           echo "$STATIC_LIBS" | tr ' ' '\n' | grep .
-          echo "========================="
+          echo "==================="
 
           sh autogen.sh
           ./configure --enable-utf8proc \
