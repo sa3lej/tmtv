@@ -205,7 +205,7 @@
   var container = document.getElementById('terminal-container');
   term.open(container);
 
-  /* WebGL disabled for testing — use canvas renderer */
+  try { term.loadAddon(new WebglAddon.WebglAddon()); } catch (e) { /* canvas fallback */ }
 
   var statusEl = document.getElementById('status');
   var fadeTimer = null;
@@ -221,134 +221,20 @@
     }
   }
 
-  /* --- Attribute decoding ---
-   * Packed as: (flags << 24) | (attr << 16) | (bg << 8) | fg
-   * tmux default color: 8 or 9 (COLOUR_DEFAULT)
-   */
-
-  function attrToSgr(packed) {
-    var fg    = packed & 0xFF;
-    var bg    = (packed >> 8) & 0xFF;
-    var attr  = (packed >> 16) & 0xFF;
-    var parts = [];
-
-    if (attr & 0x01) parts.push('1');  /* bold */
-    if (attr & 0x02) parts.push('2');  /* dim */
-    if (attr & 0x40) parts.push('3');  /* italic */
-    if (attr & 0x04) parts.push('4');  /* underline */
-    if (attr & 0x08) parts.push('5');  /* blink */
-    if (attr & 0x10) parts.push('7');  /* reverse */
-    if (attr & 0x80) parts.push('9');  /* strikethrough */
-
-    /* fg: 8,9 = default (skip), 0-7 = standard, 10-15 = bright, 16-255 = 256-color */
-    if (fg <= 7)               parts.push(String(30 + fg));
-    else if (fg >= 10 && fg <= 15) parts.push(String(90 + fg - 8));
-    else if (fg >= 16 && fg < 256) parts.push('38;5;' + fg);
-    /* fg 8,9 = default, emit nothing */
-
-    /* bg: same logic */
-    if (bg <= 7)               parts.push(String(40 + bg));
-    else if (bg >= 10 && bg <= 15) parts.push(String(100 + bg - 8));
-    else if (bg >= 16 && bg < 256) parts.push('48;5;' + bg);
-    /* bg 8,9 = default, emit nothing */
-
-    return parts.length ? '\x1b[' + parts.join(';') + 'm' : '';
-  }
-
-  /* --- Snapshot rendering (atomic, flicker-free) --- */
-
-  var hasSnapshot = false;
-
-  /* Non-overlapping write queue: only start next write after previous completes */
-  var writeInProgress = false;
-  var pendingBuf = null;
-
-  function scheduleWrite(buf) {
-    if (writeInProgress) {
-      /* Drop intermediate frames, keep only latest */
-      pendingBuf = buf;
-      return;
-    }
-    writeInProgress = true;
-    term.write(buf, function() {
-      writeInProgress = false;
-      if (pendingBuf) {
-        var next = pendingBuf;
-        pendingBuf = null;
-        writeInProgress = true;
-        term.write(next, function() {
-          writeInProgress = false;
-        });
-      }
-    });
-  }
-
-  function renderSnapshot(panes) {
-    if (!panes || !panes.length) return;
-    hasSnapshot = true;
-
-    var pane = panes[0];
-    var cursor = pane[1];
-    var lines  = pane[3];
-
-    var sy = lines.length;
-    var sx = 80;
-    for (var k = 0; k < lines.length; k++) {
-      var a = lines[k][1];
-      if (a && a.length > sx) sx = a.length;
-    }
-
-    if (term.cols !== sx || term.rows !== sy) {
-      term.resize(sx, sy);
-    }
-
-    /* Build frame: home cursor, write each line, clear to EOL */
-    var parts = [];
-    parts.push('\x1b[?25l\x1b[H'); /* hide cursor, home */
-
-    for (var i = 0; i < lines.length; i++) {
-      var lineData = lines[i];
-      var rawText = lineData[0];
-      var attrs   = lineData[1];
-
-      /* Ensure text is a string */
-      var text;
-      if (typeof rawText === 'string') {
-        text = rawText;
-      } else if (rawText instanceof Uint8Array) {
-        text = new TextDecoder().decode(rawText);
-      } else {
-        text = String(rawText);
-      }
-
-      /* DIAGNOSTIC: plain text only, no SGR */
-      var clean = '';
-      var chars = Array.from(text);
-      for (var j = 0; j < chars.length; j++) {
-        var cc = chars[j].codePointAt(0);
-        clean += (cc < 0x20 || cc === 0x7f) ? ' ' : chars[j];
-      }
-
-      parts.push(clean);
-      parts.push('\x1b[K'); /* clear to end of line */
-      if (i < lines.length - 1) parts.push('\r\n');
-    }
-
-    /* Position cursor and show it */
-    if (cursor && cursor.length === 2) {
-      parts.push('\x1b[' + (cursor[1] + 1) + ';' + (cursor[0] + 1) + 'H');
-    }
-    parts.push('\x1b[?25h'); /* show cursor */
-
-    scheduleWrite(parts.join(''));
-  }
-
   /* --- SSE connection --- */
+
+  /* Extract session token from /s/TOKEN path (for future multi-session routing) */
+  var pathMatch = location.pathname.match(/^\/s\/([^\/]+)/);
+  var sessionToken = pathMatch ? pathMatch[1] : null;
 
   var ssePort = new URLSearchParams(location.search).get('port');
   var sseUrl = ssePort
     ? 'http://' + (location.hostname || 'localhost') + ':' + ssePort
     : '/ws';
+
+  if (sessionToken) {
+    document.getElementById('titlebar-text').textContent = 'tmtv — ' + sessionToken.substring(0, 8);
+  }
 
   function connect() {
     setStatus('Connecting...');
@@ -390,12 +276,6 @@
     var type = msg[0];
 
     switch (type) {
-      case CTL_SNAPSHOT:
-        /* Grid snapshots contain unparsed escape sequences —
-         * the tmate server doesn't process terminal input.
-         * Ignore snapshots; rely on PTY data for rendering. */
-        break;
-
       case CTL_DEAMON_OUT_MSG:
         handleDaemonMsg(msg[1]);
         break;
