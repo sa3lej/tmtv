@@ -958,10 +958,6 @@ window_pane_create(struct window *w, u_int sx, u_int sy, u_int hlimit)
 
 	wp->pipe_fd = -1;
 
-#ifdef TMATE
-	wp->tmate_off = 0;
-#endif
-
 	wp->control_bg = -1;
 	wp->control_fg = -1;
 
@@ -1052,19 +1048,18 @@ window_pane_read_callback(__unused struct bufferevent *bufev, void *data)
 
 #ifdef TMATE
 	/*
-	 * In tmux 3.6a, input_parse_pane() drains the evbuffer after each
-	 * read callback, so the buffer shrinks between calls.  If tmate_off
-	 * exceeds the current buffer size, the buffer was drained — reset
-	 * to send all current data.
+	 * tmux 3.6a: use the canonical offset tracking (wp->offset) to find
+	 * new data.  This is the same mechanism input_parse_pane uses, so we
+	 * see exactly the bytes it will parse.  Don't advance the offset —
+	 * input_parse_pane will do that.
 	 */
-	if (wp->tmate_off > size)
-		wp->tmate_off = 0;
-	if (size > wp->tmate_off) {
-		new_data = EVBUFFER_DATA(evb) + wp->tmate_off;
-		new_size = size - wp->tmate_off;
-		tmate_pty_data(wp, new_data, new_size);
+	{
+		void *tmate_new;
+		size_t tmate_newsz;
+		tmate_new = window_pane_get_new_data(wp, &wp->offset, &tmate_newsz);
+		if (tmate_newsz > 0)
+			tmate_pty_data(wp, tmate_new, tmate_newsz);
 	}
-	wp->tmate_off = size;
 #endif
 
 	TAILQ_FOREACH(c, &clients, entry) {

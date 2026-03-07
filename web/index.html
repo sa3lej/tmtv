@@ -6,50 +6,155 @@
 <title>tmtv</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
+
   body {
-    background: #1a1a2e;
+    background: #0c0c16;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(40, 20, 80, 0.3) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 50%, rgba(20, 40, 80, 0.2) 0%, transparent 60%);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     height: 100vh;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    font-family: "JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace;
+    overflow: hidden;
   }
+
   #status {
-    color: #7f8c8d;
-    font-size: 13px;
-    padding: 8px 16px;
+    color: #555;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 6px 12px;
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    text-align: center;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 10;
+    background: rgba(12, 12, 22, 0.8);
+    border-radius: 12px;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.05);
+    transition: opacity 0.8s ease, color 0.4s ease, border-color 0.4s ease;
+    opacity: 1;
   }
-  #status.connected { color: #2ecc71; }
-  #status.error { color: #e74c3c; }
+  #status.connected {
+    color: #3ddc84;
+    border-color: rgba(61, 220, 132, 0.15);
+  }
+  #status.connected.fade { opacity: 0; pointer-events: none; }
+  #status.error {
+    color: #ff6b6b;
+    border-color: rgba(255, 107, 107, 0.2);
+  }
+
+  #terminal-wrap {
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.06),
+      0 8px 40px rgba(0,0,0,0.6),
+      0 2px 12px rgba(0,0,0,0.3);
+  }
+
+  #titlebar {
+    background: linear-gradient(180deg, #333346 0%, #2a2a3d 100%);
+    height: 38px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    position: relative;
+    border-bottom: 1px solid rgba(0,0,0,0.4);
+  }
+  .dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+  }
+  .dot.red { background: #ff5f57; box-shadow: 0 0 4px #ff5f57; }
+  .dot.yellow { background: #febc2e; box-shadow: 0 0 4px #febc2e; }
+  .dot.green { background: #28c840; box-shadow: 0 0 4px #28c840; }
+  #titlebar-text {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #888;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+  }
+
   #terminal-container {
-    padding: 12px;
+    padding: 8px 10px;
+    padding-bottom: 0;
     background: #0d0d1a;
-    border-radius: 8px;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    position: relative;
   }
+
+  #tmux-status {
+    background: #005f00;
+    color: #e0e0e0;
+    font-family: "JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace;
+    font-size: 14px;
+    line-height: 20px;
+    padding: 1px 4px;
+    display: flex;
+    justify-content: space-between;
+    min-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  #tmux-status-left { color: #ffffff; font-weight: bold; }
+  #tmux-status-right { color: #d0d0d0; }
+
+  /* Subtle scanline effect */
+  #terminal-container::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.02) 2px,
+      rgba(0,0,0,0.02) 4px
+    );
+    z-index: 1;
+  }
+
+  .xterm-viewport::-webkit-scrollbar { display: none; }
+  .xterm-viewport { scrollbar-width: none; }
 </style>
 </head>
 <body>
 <div id="status">Connecting...</div>
-<div id="terminal-container"></div>
+<div id="terminal-wrap">
+  <div id="titlebar">
+    <div class="dot red"></div>
+    <div class="dot yellow"></div>
+    <div class="dot green"></div>
+    <span id="titlebar-text">tmtv</span>
+  </div>
+  <div id="terminal-container"></div>
+  <div id="tmux-status">
+    <span id="tmux-status-left">[0] 0:bash*</span>
+    <span id="tmux-status-right"></span>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@msgpack/msgpack@3.0.0-beta2/dist.es5+umd/msgpack.min.js"></script>
 <script>
 (function() {
   'use strict';
 
-  /* --- Protocol constants (from tmate-protocol.h) --- */
+  /* --- Protocol constants --- */
   var CTL_HEADER         = 0;
   var CTL_DEAMON_OUT_MSG = 1;
   var CTL_SNAPSHOT       = 2;
@@ -64,51 +169,62 @@
   var term = new Terminal({
     fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace',
     fontSize: 14,
+    lineHeight: 1.15,
     theme: {
       background: '#0d0d1a',
       foreground: '#e0e0e0',
       cursor: '#528bff',
-      selectionBackground: 'rgba(82, 139, 255, 0.3)'
+      cursorAccent: '#0d0d1a',
+      selectionBackground: 'rgba(82, 139, 255, 0.3)',
+      black: '#1a1a2e',
+      red: '#ff6b6b',
+      green: '#3ddc84',
+      yellow: '#ffd93d',
+      blue: '#6c9efc',
+      magenta: '#c084fc',
+      cyan: '#67e8f9',
+      white: '#e0e0e0',
+      brightBlack: '#4a4a5e',
+      brightRed: '#ff8a8a',
+      brightGreen: '#6ee7a0',
+      brightYellow: '#ffe066',
+      brightBlue: '#93b8fc',
+      brightMagenta: '#d4a5fc',
+      brightCyan: '#8ef0fc',
+      brightWhite: '#ffffff'
     },
-    scrollback: 5000,
-    cursorBlink: false,
+    cols: 80,
+    rows: 24,
+    scrollback: 0,
+    cursorBlink: true,
+    cursorStyle: 'block',
     disableStdin: true,
     allowProposedApi: true
   });
 
-  var fitAddon = new FitAddon.FitAddon();
-  term.loadAddon(fitAddon);
-
   var container = document.getElementById('terminal-container');
   term.open(container);
 
-  try {
-    var webglAddon = new WebglAddon.WebglAddon();
-    term.loadAddon(webglAddon);
-  } catch (e) {
-    console.log('WebGL not available, using canvas renderer');
-  }
-
-  fitAddon.fit();
-  window.addEventListener('resize', function() { fitAddon.fit(); });
+  /* WebGL disabled for testing — use canvas renderer */
 
   var statusEl = document.getElementById('status');
+  var fadeTimer = null;
 
   function setStatus(msg, cls) {
     statusEl.textContent = msg;
     statusEl.className = cls || '';
+    if (fadeTimer) clearTimeout(fadeTimer);
+    if (cls === 'connected') {
+      fadeTimer = setTimeout(function() {
+        statusEl.classList.add('fade');
+      }, 2000);
+    }
   }
 
-  /* --- Attribute decoding (from do_snapshot pack format) --- */
-  /* packed as: (flags << 24) | (attr << 16) | (bg << 8) | fg */
-
-  var FG_COLORS = [
-    '#000000', '#cc0000', '#4e9a06', '#c4a000',
-    '#3465a4', '#75507b', '#06989a', '#d3d7cf',
-    /* bright */
-    '#555753', '#ef2929', '#8ae234', '#fce94f',
-    '#729fcf', '#ad7fa8', '#34e2e2', '#eeeeec'
-  ];
+  /* --- Attribute decoding ---
+   * Packed as: (flags << 24) | (attr << 16) | (bg << 8) | fg
+   * tmux default color: 8 or 9 (COLOUR_DEFAULT)
+   */
 
   function attrToSgr(packed) {
     var fg    = packed & 0xFF;
@@ -117,67 +233,114 @@
     var parts = [];
 
     if (attr & 0x01) parts.push('1');  /* bold */
-    if (attr & 0x04) parts.push('4');  /* underline */
     if (attr & 0x02) parts.push('2');  /* dim */
+    if (attr & 0x40) parts.push('3');  /* italic */
+    if (attr & 0x04) parts.push('4');  /* underline */
     if (attr & 0x08) parts.push('5');  /* blink */
     if (attr & 0x10) parts.push('7');  /* reverse */
-    if (attr & 0x40) parts.push('3');  /* italic */
     if (attr & 0x80) parts.push('9');  /* strikethrough */
 
-    if (fg >= 0 && fg <= 7)        parts.push(String(30 + fg));
-    else if (fg >= 8 && fg <= 15)  parts.push(String(90 + fg - 8));
+    /* fg: 8,9 = default (skip), 0-7 = standard, 10-15 = bright, 16-255 = 256-color */
+    if (fg <= 7)               parts.push(String(30 + fg));
+    else if (fg >= 10 && fg <= 15) parts.push(String(90 + fg - 8));
     else if (fg >= 16 && fg < 256) parts.push('38;5;' + fg);
+    /* fg 8,9 = default, emit nothing */
 
-    if (bg >= 0 && bg <= 7)        parts.push(String(40 + bg));
-    else if (bg >= 8 && bg <= 15)  parts.push(String(100 + bg - 8));
+    /* bg: same logic */
+    if (bg <= 7)               parts.push(String(40 + bg));
+    else if (bg >= 10 && bg <= 15) parts.push(String(100 + bg - 8));
     else if (bg >= 16 && bg < 256) parts.push('48;5;' + bg);
+    /* bg 8,9 = default, emit nothing */
 
     return parts.length ? '\x1b[' + parts.join(';') + 'm' : '';
   }
 
-  /* --- Snapshot rendering --- */
+  /* --- Snapshot rendering (atomic, flicker-free) --- */
+
+  var hasSnapshot = false;
+
+  /* Non-overlapping write queue: only start next write after previous completes */
+  var writeInProgress = false;
+  var pendingBuf = null;
+
+  function scheduleWrite(buf) {
+    if (writeInProgress) {
+      /* Drop intermediate frames, keep only latest */
+      pendingBuf = buf;
+      return;
+    }
+    writeInProgress = true;
+    term.write(buf, function() {
+      writeInProgress = false;
+      if (pendingBuf) {
+        var next = pendingBuf;
+        pendingBuf = null;
+        writeInProgress = true;
+        term.write(next, function() {
+          writeInProgress = false;
+        });
+      }
+    });
+  }
 
   function renderSnapshot(panes) {
     if (!panes || !panes.length) return;
+    hasSnapshot = true;
 
-    /* Use first pane for now */
     var pane = panes[0];
-    var paneId = pane[0];
-    var cursor = pane[1];  /* [cx, cy] */
-    var mode   = pane[2];
+    var cursor = pane[1];
     var lines  = pane[3];
 
-    term.reset();
+    var sy = lines.length;
+    var sx = 80;
+    for (var k = 0; k < lines.length; k++) {
+      var a = lines[k][1];
+      if (a && a.length > sx) sx = a.length;
+    }
+
+    if (term.cols !== sx || term.rows !== sy) {
+      term.resize(sx, sy);
+    }
+
+    /* Build frame: home cursor, write each line, clear to EOL */
+    var parts = [];
+    parts.push('\x1b[?25l\x1b[H'); /* hide cursor, home */
 
     for (var i = 0; i < lines.length; i++) {
       var lineData = lines[i];
-      var text  = lineData[0]; /* UTF-8 string */
-      var attrs = lineData[1]; /* array of packed attrs */
+      var rawText = lineData[0];
+      var attrs   = lineData[1];
 
-      if (attrs && attrs.length > 0) {
-        /* Render character by character with attributes */
-        var chars = Array.from(text);
-        var out = '';
-        for (var j = 0; j < chars.length && j < attrs.length; j++) {
-          var sgr = attrToSgr(attrs[j]);
-          if (sgr) out += sgr;
-          out += chars[j];
-          if (sgr) out += '\x1b[0m';
-        }
-        /* Any remaining chars without attrs */
-        for (; j < chars.length; j++) out += chars[j];
-        term.write(out);
+      /* Ensure text is a string */
+      var text;
+      if (typeof rawText === 'string') {
+        text = rawText;
+      } else if (rawText instanceof Uint8Array) {
+        text = new TextDecoder().decode(rawText);
       } else {
-        term.write(text);
+        text = String(rawText);
       }
 
-      if (i < lines.length - 1) term.write('\r\n');
+      /* DIAGNOSTIC: plain text only, no SGR */
+      var clean = '';
+      var chars = Array.from(text);
+      for (var j = 0; j < chars.length; j++) {
+        var cc = chars[j].codePointAt(0);
+        clean += (cc < 0x20 || cc === 0x7f) ? ' ' : chars[j];
+      }
+
+      parts.push(clean);
+      parts.push('\x1b[K'); /* clear to end of line */
+      if (i < lines.length - 1) parts.push('\r\n');
     }
 
-    /* Position cursor */
+    /* Position cursor and show it */
     if (cursor && cursor.length === 2) {
-      term.write('\x1b[' + (cursor[1] + 1) + ';' + (cursor[0] + 1) + 'H');
+      parts.push('\x1b[' + (cursor[1] + 1) + ';' + (cursor[0] + 1) + 'H');
     }
+    parts.push('\x1b[?25h'); /* show cursor */
+
+    scheduleWrite(parts.join(''));
   }
 
   /* --- SSE connection --- */
@@ -193,31 +356,30 @@
     var es = new EventSource(sseUrl);
 
     es.onopen = function() {
-      console.log('SSE connected');
       setStatus('Connected', 'connected');
     };
 
     es.onmessage = function(evt) {
-      /* SSE data is base64-encoded msgpack */
       var binary = atob(evt.data);
       var bytes = new Uint8Array(binary.length);
       for (var i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
       }
 
-      var msg;
+      /* SSE events may contain multiple concatenated msgpack values */
       try {
-        msg = MessagePack.decode(bytes);
+        var iter = MessagePack.decodeMulti(bytes);
+        var result = iter.next();
+        while (!result.done) {
+          handleMessage(result.value);
+          result = iter.next();
+        }
       } catch (e) {
-        console.error('msgpack decode error:', e);
-        return;
+        /* Ignore trailing decode errors */
       }
-
-      handleMessage(msg);
     };
 
     es.onerror = function() {
-      console.log('SSE error/disconnected, will auto-reconnect');
       setStatus('Disconnected. Reconnecting...', 'error');
     };
   }
@@ -229,7 +391,9 @@
 
     switch (type) {
       case CTL_SNAPSHOT:
-        renderSnapshot(msg[1]);
+        /* Grid snapshots contain unparsed escape sequences —
+         * the tmate server doesn't process terminal input.
+         * Ignore snapshots; rely on PTY data for rendering. */
         break;
 
       case CTL_DEAMON_OUT_MSG:
@@ -237,8 +401,6 @@
         break;
 
       case CTL_HEADER:
-        /* [CTL_HEADER, version, ip, pubkey, token, token_ro, ssh_cmd, client_ver, client_proto] */
-        console.log('Session header:', msg);
         break;
     }
   }
@@ -250,7 +412,6 @@
 
     switch (type) {
       case OUT_PTY_DATA:
-        /* [OUT_PTY_DATA, pane_id, binary_data] */
         if (inner.length >= 3) {
           var ptyData = inner[2];
           if (ptyData instanceof Uint8Array) {
@@ -262,25 +423,24 @@
         break;
 
       case OUT_SYNC_LAYOUT:
-        /* [OUT_SYNC_LAYOUT, [sx, sy, windows, active_win_id]] */
-        if (inner.length >= 2 && Array.isArray(inner[1])) {
-          var layout = inner[1];
-          var sx = layout[0];
-          var sy = layout[1];
-          if (sx > 0 && sy > 0) {
+        if (inner.length >= 3) {
+          var sx = inner[1];
+          var sy = inner[2];
+          if (sx > 0 && sy > 0 && (term.cols !== sx || term.rows !== sy)) {
             term.resize(sx, sy);
           }
         }
         break;
 
       case OUT_HEADER:
-        console.log('Daemon header:', inner);
         break;
 
       case OUT_STATUS:
-        /* [OUT_STATUS, left_status, right_status] */
         if (inner.length >= 3) {
-          setStatus(inner[1] || '', 'connected');
+          var leftEl = document.getElementById('tmux-status-left');
+          var rightEl = document.getElementById('tmux-status-right');
+          if (leftEl && inner[1]) leftEl.textContent = inner[1];
+          if (rightEl && inner[2]) rightEl.textContent = inner[2];
         }
         break;
 

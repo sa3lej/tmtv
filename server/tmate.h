@@ -253,6 +253,7 @@ struct tmate_session {
 	TAILQ_HEAD(, ws_client) ws_clients;
 	struct evconnlistener *ws_listener;
 	int ws_listen_fd; /* pre-bound socket, created before jail */
+	struct event *ev_ws_snapshot; /* periodic snapshot timer */
 
 	/* only for role client-pty */
 	int pty;

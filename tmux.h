@@ -1245,9 +1245,6 @@ struct window_pane {
 
 	struct style	 scrollbar_style;
 
-	/* tmate: PTY data replication offset */
-	size_t		 tmate_off;
-
 	TAILQ_ENTRY(window_pane) entry;  /* link in list of all panes */
 	TAILQ_ENTRY(window_pane) sentry; /* link in list of last visited */
 	RB_ENTRY(window_pane) tree_entry;
