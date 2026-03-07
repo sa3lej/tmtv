@@ -187,9 +187,19 @@ void tmate_spawn_daemon(struct tmate_session *session)
 
 	tmate_daemon_init(session);
 
-	close_fds_except((int[]){session->tmux_socket_fd,
-				 ssh_get_fd(session->ssh_client.session),
-				 STDERR_FILENO}, 3);
+	/* Bind SSE socket before jail (CLONE_NEWNET isolates network) */
+	tmate_bind_websocket_socket(session);
+
+	{
+		int keep_fds[4];
+		int nfds = 0;
+		keep_fds[nfds++] = session->tmux_socket_fd;
+		keep_fds[nfds++] = ssh_get_fd(session->ssh_client.session);
+		keep_fds[nfds++] = STDERR_FILENO;
+		if (session->ws_listen_fd >= 0)
+			keep_fds[nfds++] = session->ws_listen_fd;
+		close_fds_except(keep_fds, nfds);
+	}
 
 	get_in_jail();
 
