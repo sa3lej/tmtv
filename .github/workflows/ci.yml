@@ -35,9 +35,14 @@ jobs:
           ./configure
           make -j$(nproc)
 
-      - name: Verify binary
+      - name: Verify client binary
         run: |
           ./tmtv -V
+
+      - name: Verify server binary
+        run: |
+          ls -la tmtv-server
+          ./tmtv-server 2>&1 | head -1 || true
 
       - name: Run tests
         run: |

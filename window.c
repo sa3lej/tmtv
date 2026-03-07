@@ -58,7 +58,11 @@ struct windows windows;
 
 /* Global panes tree. */
 struct window_pane_tree all_window_panes;
+#ifdef TMATE_SERVER_BUILD
+u_int	next_window_pane_id;
+#else
 static u_int	next_window_pane_id;
+#endif
 static u_int	next_window_id;
 static u_int	next_active_point;
 

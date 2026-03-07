@@ -14,11 +14,17 @@
 
 struct tmate_session;
 
-/* Logging — use tmux 3.6a log_debug/fatalx */
+/* Logging — use tmux 3.6a log_debug, but ensure fatal messages hit stderr */
 
 #define tmate_debug(...) log_debug(__VA_ARGS__)
-#define tmate_info(...)  log_debug(__VA_ARGS__)
-#define tmate_fatal(...) fatalx(__VA_ARGS__)
+#define tmate_info(fmt, ...) do { \
+	fprintf(stderr, fmt "\n", ##__VA_ARGS__); \
+	log_debug(fmt, ##__VA_ARGS__); \
+} while (0)
+#define tmate_fatal(fmt, ...) do { \
+	fprintf(stderr, "fatal: " fmt "\n", ##__VA_ARGS__); \
+	fatalx(fmt, ##__VA_ARGS__); \
+} while (0)
 #define tmate_fatal_quiet(...)  ({tmate_debug(__VA_ARGS__); exit(1);})
 
 /* tmate-auth-keys.c */

@@ -351,6 +351,7 @@ getversion(void)
 #endif
 }
 
+#ifndef TMATE_SERVER_BUILD
 int
 main(int argc, char **argv)
 {
@@ -546,3 +547,4 @@ main(int argc, char **argv)
 	/* Pass control to the client. */
 	exit(client_main(osdep_event_init(), argc, argv, flags, feat));
 }
+#endif /* !TMATE_SERVER_BUILD */

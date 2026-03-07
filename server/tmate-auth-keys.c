@@ -191,7 +191,6 @@ bool would_tmate_session_allow_auth(const char *token, const char *pubkey)
 		.type = pubkey ? MSG_IDENTIFY_TMATE_AUTH_PUBKEY :
 				 MSG_IDENTIFY_TMATE_AUTH_NONE,
 		.len = IMSG_HEADER_SIZE + (pubkey ? strlen(pubkey)+1 : 0),
-		.flags = 0,
 		.peerid = PROTOCOL_VERSION,
 		.pid = -1,
 	};
