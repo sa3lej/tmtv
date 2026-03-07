@@ -43,13 +43,17 @@ void tmate_notify_later(int timeout, const char *fmt, ...)
 	va_end(ap);
 
 	/*
-	 * FIXME leaks when calling tmate_notify_later()
-	 * multiple times.
+	 * tmux 3.6a / libevent2: ev_notify_timer is a pointer.
+	 * Allocate if needed, then use evtimer_assign.
 	 */
-
-	evtimer_set(&tmate_session->ev_notify_timer,
-		    __tmate_notify_later, msg);
-	evtimer_add(&tmate_session->ev_notify_timer, &tv);
+	if (tmate_session->ev_notify_timer == NULL)
+		tmate_session->ev_notify_timer = evtimer_new(
+			tmate_session->ev_base, __tmate_notify_later, msg);
+	else
+		evtimer_assign(tmate_session->ev_notify_timer,
+			       tmate_session->ev_base,
+			       __tmate_notify_later, msg);
+	evtimer_add(tmate_session->ev_notify_timer, &tv);
 }
 
 void tmate_send_client_ready(void)
@@ -155,42 +159,26 @@ void tmate_client_cmd_str(int client_id, const char *cmd)
 	pack(string, cmd);
 }
 
-struct args_entry {
-	u_char			 flag;
-	char			*value;
-	RB_ENTRY(args_entry)	 entry;
-};
-
+/*
+ * tmux 3.6a: struct args is opaque. Use args_print() + cmd_get_entry()
+ * to serialize, matching the client-side extract_cmd pattern.
+ */
 static void extract_cmd(struct cmd *cmd, int *_argc, char ***_argv)
 {
-	struct args_entry *entry;
-	struct args* args = cmd->args;
-	int argc = 0;
-	char **argv;
-	int next = 0, i;
+	char *args_str;
+	char *cmdline;
+	const struct cmd_entry *entry = cmd_get_entry(cmd);
 
-	argc++; /* cmd name */
-	RB_FOREACH(entry, args_tree, &args->tree) {
-		argc++;
-		if (entry->value != NULL)
-			argc++;
-	}
-	argc += args->argc;
-	argv = xmalloc(sizeof(char *) * argc);
+	args_str = args_print(cmd_get_args(cmd));
+	if (args_str != NULL && *args_str != '\0')
+		xasprintf(&cmdline, "%s %s", entry->name, args_str);
+	else
+		cmdline = xstrdup(entry->name);
+	free(args_str);
 
-	argv[next++] = xstrdup(cmd->entry->name);
-
-	RB_FOREACH(entry, args_tree, &args->tree) {
-		xasprintf(&argv[next++], "-%c", entry->flag);
-		if (entry->value != NULL)
-			argv[next++] = xstrdup(entry->value);
-	}
-
-	for (i = 0; i < args->argc; i++)
-		argv[next++] = xstrdup(args->argv[i]);
-
-	*_argc = argc;
-	*_argv = argv;
+	*_argv = cmd_copy_argv(1, (char *[]){cmdline});
+	*_argc = 1;
+	free(cmdline);
 }
 
 void tmate_client_cmd_args(int client_id, int argc, const char **argv)
@@ -211,16 +199,17 @@ void tmate_client_cmd(int client_id, struct cmd *cmd)
 	int argc;
 	char **argv;
 
+	extract_cmd(cmd, &argc, &argv);
 	cmd_str = cmd_print(cmd);
 	if (tmate_session->client_protocol_version < 6) {
 		tmate_client_cmd_str(client_id, cmd_str);
 		free(cmd_str);
+		cmd_free_argv(argc, argv);
 		return;
 	}
 	tmate_debug("Remote cmd (cid=%d): %s", client_id, cmd_str);
 	free(cmd_str);
 
-	extract_cmd(cmd, &argc, &argv);
 	tmate_client_cmd_args(client_id, argc, (const char **)argv);
 	cmd_free_argv(argc, argv);
 }
