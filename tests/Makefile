@@ -38,11 +38,13 @@ server-unit: $(SERVER_TESTS)
 test-msgpack: test-msgpack.c test-harness.h
 	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) -o $@ $< $(LDFLAGS) $(MSGPACK_LIBS)
 
-# Extract DEFS from parent Makefile (configure-generated HAVE_* flags)
+# Extract DEFS and CPPFLAGS from parent Makefile (configure-generated flags)
 PARENT_DEFS := $(shell $(MAKE) -C .. -n -p 2>/dev/null | grep '^DEFS = ' | head -1 | sed 's/^DEFS = //')
+PARENT_CPPFLAGS := $(shell $(MAKE) -C .. -n -p 2>/dev/null | grep '^CPPFLAGS = ' | head -1 | sed 's/^CPPFLAGS = //')
+UTF8PROC_CFLAGS := $(shell pkg-config --cflags libutf8proc 2>/dev/null)
 
 test-server-header: test-server-header.c test-harness.h ../server/tmate.h ../server/tmate-protocol.h
-	$(CC) $(CFLAGS) $(PARENT_DEFS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
+	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
 
 functional:
 	@echo ""
