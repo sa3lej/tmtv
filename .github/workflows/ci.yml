@@ -52,7 +52,7 @@ jobs:
             pkg-config \
             libevent \
             libssh \
-            msgpack-cxx \
+            msgpack-c \
             bison \
             utf8proc
 

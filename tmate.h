@@ -15,7 +15,6 @@
 
 /* Global foreground mode flag (defined in tmux.c) */
 extern int tmate_foreground;
-extern char *socket_path;
 
 /* tmate-msgpack.c */
 
