@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            autoconf \
+            automake \
+            pkg-config \
+            libevent-dev \
+            libncurses-dev \
+            libssh-dev \
+            libmsgpack-dev \
+            libbsd-dev \
+            bison \
+            libutf8proc-dev
+
+      - name: Build
+        run: |
+          sh autogen.sh
+          ./configure
+          make -j$(nproc)
+
+      - name: Package binaries
+        run: |
+          mkdir -p dist
+          cp tmtv dist/tmtv-linux-amd64
+          cp tmtv-server dist/tmtv-server-linux-amd64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: dist/
+
+  build-macos:
+    name: Build macOS client
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install \
+            autoconf \
+            automake \
+            pkg-config \
+            libevent \
+            libssh \
+            msgpack-c \
+            bison \
+            utf8proc
+
+      - name: Build
+        run: |
+          export PATH="$(brew --prefix bison)/bin:$PATH"
+          sh autogen.sh
+          ./configure --enable-utf8proc
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp tmtv dist/tmtv-macos-arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-binaries
+          path: dist/
+
+  release:
+    name: Create Release
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/*
