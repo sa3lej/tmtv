@@ -39,6 +39,10 @@ jobs:
         run: |
           ./tmtv -V
 
+      - name: Run tests
+        run: |
+          cd tests && make all
+
   build-macos:
     name: Build (macOS)
     runs-on: macos-latest
@@ -67,3 +71,7 @@ jobs:
       - name: Verify binary
         run: |
           ./tmtv -V
+
+      - name: Run tests
+        run: |
+          cd tests && make all
