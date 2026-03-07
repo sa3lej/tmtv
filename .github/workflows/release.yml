@@ -68,78 +68,65 @@ jobs:
             libssh \
             msgpack-c \
             openssl@3 \
-            bison \
-            utf8proc
+            bison
 
-      - name: Build and repackage portable binary
+      - name: Build utf8proc static library
+        run: |
+          # Homebrew utf8proc doesn't ship a .a, so build from source
+          git clone --depth 1 https://github.com/JuliaStrings/utf8proc.git /tmp/utf8proc
+          cd /tmp/utf8proc
+          make libutf8proc.a
+          # Install to a local prefix
+          mkdir -p /tmp/utf8proc-static/{lib,include}
+          cp libutf8proc.a /tmp/utf8proc-static/lib/
+          cp utf8proc.h /tmp/utf8proc-static/include/
+
+      - name: Build fully static binary
         run: |
           export PATH="$(brew --prefix bison)/bin:$PATH"
           BREW="$(brew --prefix)"
+          OPENSSL="$(brew --prefix openssl@3)"
+
+          # Gather all static archives
+          STATIC_LIBS=""
+          for pkg in libevent libssh msgpack-c openssl@3; do
+            prefix=$(brew --prefix "$pkg")
+            for a in "$prefix"/lib/*.a; do
+              [ -f "$a" ] && STATIC_LIBS="$STATIC_LIBS $a"
+            done
+          done
+          STATIC_LIBS="$STATIC_LIBS /tmp/utf8proc-static/lib/libutf8proc.a"
+
+          echo "=== Static libs ==="
+          echo "$STATIC_LIBS" | tr ' ' '\n'
 
           sh autogen.sh
-          ./configure --enable-utf8proc
-          make -j$(sysctl -n hw.ncpu)
+          ./configure --enable-utf8proc \
+            CPPFLAGS="-I${BREW}/include -I${OPENSSL}/include -I/tmp/utf8proc-static/include" \
+            LDFLAGS="-L${BREW}/lib -L${OPENSSL}/lib -L/tmp/utf8proc-static/lib"
+          make -j$(sysctl -n hw.ncpu) \
+            LIBS="$STATIC_LIBS -lncurses -lz -lresolv -framework Security -framework CoreFoundation -framework GSS"
 
-          # Bundle all non-system dylibs alongside the binary
-          mkdir -p dist/lib
-          cp tmtv dist/
-          # Find and copy all Homebrew dylibs the binary depends on
-          otool -L tmtv | grep '/opt/homebrew\|/usr/local' | awk '{print $1}' | while read dylib; do
-            cp "$dylib" dist/lib/
-            # Rewrite the binary to look for dylibs in @executable_path/lib/
-            install_name_tool -change "$dylib" "@executable_path/lib/$(basename $dylib)" dist/tmtv
-          done
-          # Also fix dylib cross-references (dylibs that depend on each other)
-          for lib in dist/lib/*.dylib; do
-            otool -L "$lib" | grep '/opt/homebrew\|/usr/local' | awk '{print $1}' | while read dep; do
-              base=$(basename "$dep")
-              if [ -f "dist/lib/$base" ]; then
-                install_name_tool -change "$dep" "@loader_path/$base" "$lib"
-              else
-                cp "$dep" dist/lib/
-                install_name_tool -change "$dep" "@loader_path/$(basename $dep)" "$lib"
-              fi
-            done
-          done
-          # Repeat for any new libs added in the previous pass
-          for lib in dist/lib/*.dylib; do
-            otool -L "$lib" | grep '/opt/homebrew\|/usr/local' | awk '{print $1}' | while read dep; do
-              base=$(basename "$dep")
-              if [ ! -f "dist/lib/$base" ]; then
-                cp "$dep" dist/lib/
-              fi
-              install_name_tool -change "$dep" "@loader_path/$base" "$lib"
-            done
-          done
-
-          # Ad-hoc codesign everything so macOS Gatekeeper allows loading
-          for lib in dist/lib/*.dylib; do
-            codesign --force --sign - "$lib"
-          done
-          codesign --force --sign - dist/tmtv
-
-          echo "=== Final binary deps ==="
-          otool -L dist/tmtv
-          echo "=== Bundled libs ==="
-          ls -la dist/lib/
-
-      - name: Verify portable binary
+      - name: Verify no external dylib deps
         run: |
-          if otool -L dist/tmtv | grep -q '/opt/homebrew\|/usr/local/Cellar'; then
-            echo "ERROR: Binary still has absolute Homebrew paths"
-            otool -L dist/tmtv
+          echo "=== otool -L tmtv ==="
+          otool -L tmtv
+          if otool -L tmtv | grep -q '/opt/homebrew\|/usr/local/Cellar'; then
+            echo "ERROR: Binary links to Homebrew shared libraries"
             exit 1
           fi
-          echo "Binary is portable."
+          echo "Binary is fully static (no Homebrew dylibs)."
 
       - name: Package binary
         run: |
-          cd dist && tar czf ../tmtv-macos-arm64.tar.gz tmtv lib/
+          mkdir -p dist
+          cp tmtv dist/tmtv-macos-arm64
+          codesign --force --sign - dist/tmtv-macos-arm64
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-binaries
-          path: tmtv-macos-arm64.tar.gz
+          path: dist/
 
   release:
     name: Create Release
