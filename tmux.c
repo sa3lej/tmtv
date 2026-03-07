@@ -344,7 +344,11 @@ find_home(void)
 const char *
 getversion(void)
 {
+#ifdef TMATE
+	return (TMTV_VERSION);
+#else
 	return (TMUX_VERSION);
+#endif
 }
 
 int
@@ -413,7 +417,7 @@ main(int argc, char **argv)
 			usage(0);
 		case 'V':
 			printf("tmtv %s (based on tmux %s)\n",
-		    TMTV_VERSION, TMUX_BASE_VERSION);
+			    TMTV_VERSION, TMUX_VERSION);
 			exit(0);
 		case 'l':
 			flags |= CLIENT_LOGIN;
