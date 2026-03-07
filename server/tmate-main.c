@@ -31,21 +31,20 @@ struct tmate_settings _tmate_settings = {
 	.bind_addr	 	= NULL,
 	.websocket_port      	= TMATE_DEFAULT_WEBSOCKET_PORT,
 	.tmate_host      	= NULL,
-	.log_level      	= LOG_INFO,
+	.log_level      	= 0,
 	.use_proxy_protocol	= false,
 	.authorized_keys_only	= false,
 };
 
 struct tmate_settings *tmate_settings = &_tmate_settings;
 
-extern int server_fd;
-extern void server_send_exit(void);
 void request_server_termination(void)
 {
-	if (server_fd) {
-		server_send_exit();
-	} else
-		exit(1);
+	/*
+	 * tmux 3.6a: server_fd and server_send_exit() are static.
+	 * Use SIGTERM to trigger clean shutdown.
+	 */
+	kill(getpid(), SIGTERM);
 }
 
 static void usage(void)
@@ -159,7 +158,12 @@ int main(int argc, char **argv, char **envp)
 		}
 	}
 
-	init_logging(tmate_settings->log_level);
+	/*
+	 * tmux 3.6a: no init_logging(). Use log_open() for file-based
+	 * logging, or just rely on log_debug() which goes to the tmux log.
+	 */
+	if (tmate_settings->log_level > 0)
+		log_open("tmate-ssh-server");
 
 	setup_locale();
 
@@ -224,10 +228,10 @@ void set_session_token(struct tmate_session *session, const char *token)
 		session->ssh_client.role == TMATE_ROLE_DAEMON ? "(daemon)" : "(pty client)",
 		session->ssh_client.ip_address);
 
-	char *log_prefix;
-	xasprintf(&log_prefix, "[%s] ", session->obfuscated_session_token);
-	set_log_prefix(log_prefix);
-	free(log_prefix);
+	/*
+	 * tmux 3.6a: no set_log_prefix(). Log prefix not supported.
+	 * Session token is visible in the process title instead.
+	 */
 }
 
 void close_fds_except(int *fd_to_preserve, int num_fds)
@@ -310,4 +314,3 @@ void setup_ncurse(int fd, const char *name)
 	if (setupterm((char *)name, fd, &error) != OK)
 		tmate_fatal("Cannot setup terminal");
 }
-

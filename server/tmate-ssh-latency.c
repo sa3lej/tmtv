@@ -5,7 +5,7 @@
 #include <netinet/tcp.h>
 #include <sys/wait.h>
 #include <stdio.h>
-#include <event.h>
+#include <event2/event.h>
 #include <arpa/inet.h>
 #include <time.h>
 
@@ -21,8 +21,18 @@ void start_keepalive_timer(struct tmate_ssh_client *client, int timeout_ms)
 
 	client->keepalive_interval_ms = timeout_ms;
 
-	evtimer_set(&client->ev_keepalive_timer, on_keepalive_timer, client);
-	evtimer_add(&client->ev_keepalive_timer, &tv);
+	/*
+	 * tmux 3.6a / libevent2: ev_keepalive_timer is a pointer.
+	 * Allocate with evtimer_new if needed, else reassign.
+	 */
+	if (client->ev_keepalive_timer == NULL)
+		client->ev_keepalive_timer = evtimer_new(
+			tmate_session->ev_base, on_keepalive_timer, client);
+	else
+		evtimer_assign(client->ev_keepalive_timer,
+			       tmate_session->ev_base,
+			       on_keepalive_timer, client);
+	evtimer_add(client->ev_keepalive_timer, &tv);
 }
 
 static void on_keepalive_timer(__unused evutil_socket_t fd,
