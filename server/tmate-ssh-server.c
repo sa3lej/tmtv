@@ -76,20 +76,11 @@ static int subsystem_request(__unused ssh_session session,
 
 static int exec_request(__unused ssh_session session,
 			__unused ssh_channel channel,
-			const char *command, void *userdata)
+			__unused const char *command,
+			__unused void *userdata)
 {
-	struct tmate_ssh_client *client = userdata;
-
-	if (client->role)
-		return 1;
-
-	if (!tmate_has_websocket())
-		return 1;
-
-	client->role = TMATE_ROLE_EXEC;
-	client->exec_command = xstrdup(command);
-
-	return 0;
+	/* Exec role required external websocket server (removed) */
+	return 1;
 }
 
 static ssh_channel channel_open_request_cb(ssh_session session, void *userdata)
@@ -242,13 +233,7 @@ static void client_bootstrap(struct tmate_session *_session)
 	setsockopt(fd, IPPROTO_IP, IP_TOS, &flag, sizeof(flag));
 	}
 
-	/*
-	 * We should die early if we can't connect to websocket server. This
-	 * way the tmate daemon will pick another server to work on.
-	 */
-	_session->websocket_fd = -1;
-	if (tmate_has_websocket())
-		_session->websocket_fd = tmate_connect_to_websocket();
+	/* WebSocket listener is started later in tmate_spawn_daemon() */
 
 	ssh_server_cb.userdata = client;
 	ssh_callbacks_init(&ssh_server_cb);

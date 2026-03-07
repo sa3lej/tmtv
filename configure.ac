@@ -330,6 +330,22 @@ if test "x$found_msgpack" = xno; then
 	AC_MSG_ERROR("msgpack not found (required for tmate)")
 fi
 
+# Look for OpenSSL/libcrypto (for WebSocket SHA1 handshake).
+PKG_CHECK_MODULES(
+	LIBCRYPTO,
+	[libcrypto],
+	[
+		AM_CPPFLAGS="$LIBCRYPTO_CFLAGS $AM_CPPFLAGS"
+		CPPFLAGS="$LIBCRYPTO_CFLAGS $SAVED_CPPFLAGS"
+		LIBS="$LIBCRYPTO_LIBS $LIBS"
+		found_libcrypto=yes
+	],
+	found_libcrypto=no
+)
+if test "x$found_libcrypto" = xno; then
+	AC_MSG_ERROR("libcrypto (OpenSSL) not found (required for WebSocket)")
+fi
+
 # Look for libbsd (for fparseln on Linux).
 PKG_CHECK_MODULES(
 	LIBBSD,

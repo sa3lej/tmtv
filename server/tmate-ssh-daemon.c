@@ -82,7 +82,7 @@ static void tmate_daemon_init(struct tmate_session *session)
 	tmate_encoder_init(&session->daemon_encoder, on_daemon_encoder_write, session);
 	tmate_decoder_init(&session->daemon_decoder, on_daemon_decoder_read, session);
 
-	tmate_init_websocket(session, NULL);
+	tmate_init_websocket(session);
 }
 
 static void handle_sigterm(__unused int sig)
@@ -188,12 +188,14 @@ void tmate_spawn_daemon(struct tmate_session *session)
 	tmate_daemon_init(session);
 
 	close_fds_except((int[]){session->tmux_socket_fd,
-				 ssh_get_fd(session->ssh_client.session),
-				 session->websocket_fd}, 3);
+				 ssh_get_fd(session->ssh_client.session)}, 2);
 
 	get_in_jail();
 
 	event_reinit(session->ev_base);
+
+	/* Start WebSocket listener after event_reinit (correct base) */
+	tmate_start_websocket_listener(session);
 
 	signal(SIGTERM, handle_sigterm);
 

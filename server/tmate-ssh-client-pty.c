@@ -34,27 +34,21 @@ static int on_ssh_channel_read(__unused ssh_session _session,
 	return written;
 }
 
-static int on_ssh_message_callback(__unused ssh_session _session,
-				   ssh_message msg, void *arg)
+static int on_pty_window_change(__unused ssh_session _session,
+				__unused ssh_channel channel,
+				int width, int height,
+				__unused int pxwidth, __unused int pxheight,
+				void *userdata)
 {
-	struct tmate_session *session = arg;
+	struct tmate_session *session = userdata;
+	struct winsize ws;
 
-	if (ssh_message_type(msg) == SSH_REQUEST_CHANNEL &&
-	    ssh_message_subtype(msg) == SSH_CHANNEL_REQUEST_WINDOW_CHANGE) {
-		struct winsize ws;
+	ws.ws_col = width;
+	ws.ws_row = height;
 
-		ws.ws_col = ssh_message_channel_request_pty_width(msg);
-		ws.ws_row = ssh_message_channel_request_pty_height(msg);
+	ioctl(session->pty, TIOCSWINSZ, &ws);
+	kill(0, SIGWINCH);
 
-		ioctl(session->pty, TIOCSWINSZ, &ws);
-		/*
-		 * tmux 3.6a: client_signal() doesn't exist as a public function.
-		 * Send SIGWINCH directly to the process group.
-		 */
-		kill(0, SIGWINCH);
-
-		return 1;
-	}
 	return 0;
 }
 
@@ -104,11 +98,9 @@ static void tmate_client_pty_init(struct tmate_session *session)
 	memset(&client->channel_cb, 0, sizeof(client->channel_cb));
 	ssh_callbacks_init(&client->channel_cb);
 	client->channel_cb.userdata = session;
-	client->channel_cb.channel_data_function = on_ssh_channel_read,
+	client->channel_cb.channel_data_function = on_ssh_channel_read;
+	client->channel_cb.channel_pty_window_change_function = on_pty_window_change;
 	ssh_set_channel_callbacks(client->channel, &client->channel_cb);
-
-	ssh_set_message_callback(session->ssh_client.session,
-				 on_ssh_message_callback, session);
 
 	setblocking(session->pty, 0);
 	/*
@@ -211,13 +203,6 @@ void tmate_spawn_pty_client(struct tmate_session *session)
 		goto connect_ok;
 
 connect_failed:
-		if (tmate_has_websocket()) {
-			/* Turn the response into an exec to show a better error */
-			client->exec_command = xstrdup("explain-session-not-found");
-			tmate_spawn_exec(session);
-			/* No return */
-		}
-
 		random_sleep(); /* for making timing attacks harder */
 		ssh_echo(client, EXPIRED_TOKEN_ERROR_STR);
 		tmate_fatal("Expired token");
@@ -251,7 +236,6 @@ connect_ok:
 
 	tmate_client_pty_init(session);
 
-	/* the unused session->websocket_fd will get closed automatically */
 	close_fds_except((int[]){STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO,
 				 session->tmux_socket_fd,
 				 ssh_get_fd(session->ssh_client.session),
