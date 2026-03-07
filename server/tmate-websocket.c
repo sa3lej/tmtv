@@ -141,6 +141,79 @@ static void sse_send_data(struct bufferevent *bev,
  * a msgpack PTY_DATA message and sent as a single SSE event.
  */
 
+/*
+ * Send a SYNC_LAYOUT message to an SSE client so the browser knows
+ * the terminal dimensions and window names.
+ * Format: [CTL_DEAMON_OUT_MSG, [OUT_SYNC_LAYOUT, sx, sy, [[idx, name, [], -1], ...], active_idx]]
+ */
+static void sse_send_sync_layout(struct bufferevent *bev)
+{
+	struct session *s;
+	struct winlink *wl;
+	struct window *w;
+	int num_windows = 0;
+	int active_idx = -1;
+	msgpack_sbuffer sbuf;
+	msgpack_packer pk;
+
+	s = RB_MIN(sessions, &sessions);
+	if (!s)
+		return;
+
+	RB_FOREACH(wl, winlinks, &s->windows) {
+		if (wl->window)
+			num_windows++;
+	}
+	if (!num_windows)
+		return;
+
+	if (s->curw)
+		active_idx = s->curw->idx;
+
+	/* Get size from active window */
+	int sx = 80, sy = 24;
+	if (s->curw && s->curw->window) {
+		sx = s->curw->window->sx;
+		sy = s->curw->window->sy;
+	}
+
+	msgpack_sbuffer_init(&sbuf);
+	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+
+	/* Outer: [CTL_DEAMON_OUT_MSG, inner] */
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, 1);  /* CTL_DEAMON_OUT_MSG */
+
+	/* Inner: [OUT_SYNC_LAYOUT, sx, sy, windows, active_idx] */
+	msgpack_pack_array(&pk, 5);
+	msgpack_pack_int(&pk, 1);  /* OUT_SYNC_LAYOUT */
+	msgpack_pack_int(&pk, sx);
+	msgpack_pack_int(&pk, sy);
+
+	/* Windows array */
+	msgpack_pack_array(&pk, num_windows);
+	RB_FOREACH(wl, winlinks, &s->windows) {
+		w = wl->window;
+		if (!w)
+			continue;
+		/* [idx, name, panes(empty), active_pane_id(-1)] */
+		msgpack_pack_array(&pk, 4);
+		msgpack_pack_int(&pk, wl->idx);
+		msgpack_pack_str(&pk, strlen(w->name));
+		msgpack_pack_str_body(&pk, w->name, strlen(w->name));
+		msgpack_pack_array(&pk, 0); /* no panes needed for browser */
+		msgpack_pack_int(&pk, -1);
+	}
+
+	msgpack_pack_int(&pk, active_idx);
+
+	sse_send_data(bev, (unsigned char *)sbuf.data, sbuf.size);
+	msgpack_sbuffer_destroy(&sbuf);
+
+	tmate_info("sse_sync_layout: %dx%d, %d windows, active=%d",
+		   sx, sy, num_windows, active_idx);
+}
+
 static void sse_send_screen_dump(struct bufferevent *bev)
 {
 	struct session *s;
@@ -503,6 +576,8 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		wc->handshake_done = true;
 		tmate_info("SSE client connected");
 
+		/* Send layout sync so browser knows terminal size + window names */
+		sse_send_sync_layout(wc->bev);
 		/* Send current screen state from tmux grid */
 		sse_send_screen_dump(wc->bev);
 		return;

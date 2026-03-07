@@ -59,11 +59,16 @@
       0 0 0 1px rgba(255,255,255,0.06),
       0 8px 40px rgba(0,0,0,0.6),
       0 2px 12px rgba(0,0,0,0.3);
+    display: flex;
+    flex-direction: column;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
   }
 
   #titlebar {
     background: linear-gradient(180deg, #333346 0%, #2a2a3d 100%);
     height: 38px;
+    min-height: 38px;
     display: flex;
     align-items: center;
     padding: 0 14px;
@@ -93,6 +98,8 @@
     padding-bottom: 0;
     background: #0d0d1a;
     position: relative;
+    flex: 1;
+    overflow: hidden;
   }
 
   #tmux-status {
@@ -142,13 +149,14 @@
   </div>
   <div id="terminal-container"></div>
   <div id="tmux-status">
-    <span id="tmux-status-left">[0] 0:bash*</span>
+    <span id="tmux-status-left"></span>
     <span id="tmux-status-right"></span>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@msgpack/msgpack@3.0.0-beta2/dist.es5+umd/msgpack.min.js"></script>
 <script>
 (function() {
@@ -157,13 +165,16 @@
   /* --- Protocol constants --- */
   var CTL_HEADER         = 0;
   var CTL_DEAMON_OUT_MSG = 1;
-  var CTL_SNAPSHOT       = 2;
 
   var OUT_HEADER      = 0;
   var OUT_SYNC_LAYOUT = 1;
   var OUT_PTY_DATA    = 2;
   var OUT_STATUS      = 5;
   var OUT_FIN         = 8;
+
+  /* --- Track server-side terminal size (exposed for debugging) --- */
+  var serverCols = window.serverCols = 80;
+  var serverRows = window.serverRows = 24;
 
   /* --- Terminal setup --- */
   var term = new Terminal({
@@ -205,7 +216,56 @@
   var container = document.getElementById('terminal-container');
   term.open(container);
 
+  /* Load addons */
+  var fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
   try { term.loadAddon(new WebglAddon.WebglAddon()); } catch (e) { /* canvas fallback */ }
+
+  /* Resize the terminal-wrap to fit the server's terminal dimensions.
+   * Measures xterm cell size, calculates pixel dimensions, and resizes. */
+  function sizeToServer() {
+    try {
+      /* Get cell dimensions from xterm's render service */
+      var dims = term._core._renderService.dimensions;
+      var cellWidth, cellHeight;
+      if (dims && dims.css && dims.css.cell) {
+        cellWidth = dims.css.cell.width;
+        cellHeight = dims.css.cell.height;
+      }
+      if (!cellWidth || !cellHeight) {
+        /* Fallback: measure from a character in the terminal */
+        cellWidth = 8.4;
+        cellHeight = 17;
+      }
+
+      /* terminal content area = cells + padding (10px left + 10px right, 8px top) */
+      var contentW = Math.ceil(serverCols * cellWidth) + 20;
+      var contentH = Math.ceil(serverRows * cellHeight) + 8;
+      /* total = titlebar(38) + content + status(20) */
+      var totalH = 38 + contentH + 20;
+
+      var wrap = document.getElementById('terminal-wrap');
+      var maxW = window.innerWidth - 32;
+      var maxH = window.innerHeight - 32;
+
+      wrap.style.width = Math.min(contentW, maxW) + 'px';
+      wrap.style.height = Math.min(totalH, maxH) + 'px';
+    } catch (e) {
+      /* If render service isn't ready, just set wrap size with fallback cell sizes */
+      var wrap = document.getElementById('terminal-wrap');
+      wrap.style.width = Math.min(serverCols * 8.4 + 20, window.innerWidth - 32) + 'px';
+      wrap.style.height = Math.min(38 + serverRows * 17 + 8 + 20, window.innerHeight - 32) + 'px';
+    }
+
+    /* Always resize the terminal to match server */
+    if (term.cols !== serverCols || term.rows !== serverRows) {
+      term.resize(serverCols, serverRows);
+    }
+    window.serverCols = serverCols;
+    window.serverRows = serverRows;
+  }
+
+  window.addEventListener('resize', function() { sizeToServer(); });
 
   var statusEl = document.getElementById('status');
   var fadeTimer = null;
@@ -221,9 +281,29 @@
     }
   }
 
+  /* --- Build tmux-style status from sync_layout windows --- */
+  function updateWindowList(windows, activeIdx) {
+    if (!Array.isArray(windows)) return;
+
+    var parts = [];
+    for (var i = 0; i < windows.length; i++) {
+      var win = windows[i];
+      if (!Array.isArray(win) || win.length < 2) continue;
+      var idx = win[0];
+      var name = win[1];
+      var marker = (idx === activeIdx) ? '*' : '-';
+      parts.push(idx + ':' + name + marker);
+    }
+
+    var leftEl = document.getElementById('tmux-status-left');
+    if (leftEl && parts.length > 0) {
+      leftEl.textContent = '[0] ' + parts.join(' ');
+    }
+  }
+
   /* --- SSE connection --- */
 
-  /* Extract session token from /s/TOKEN path (for future multi-session routing) */
+  /* Extract session token from /s/TOKEN path */
   var pathMatch = location.pathname.match(/^\/s\/([^\/]+)/);
   var sessionToken = pathMatch ? pathMatch[1] : null;
 
@@ -306,8 +386,14 @@
         if (inner.length >= 3) {
           var sx = inner[1];
           var sy = inner[2];
-          if (sx > 0 && sy > 0 && (term.cols !== sx || term.rows !== sy)) {
-            term.resize(sx, sy);
+          if (sx > 0 && sy > 0) {
+            serverCols = sx;
+            serverRows = sy;
+            sizeToServer();
+          }
+          /* Parse window names: inner[3] = [[idx, name, panes...], ...] */
+          if (inner.length >= 5) {
+            updateWindowList(inner[3], inner[4]);
           }
         }
         break;
