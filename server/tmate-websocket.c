@@ -214,12 +214,9 @@ static void sse_send_sync_layout(struct bufferevent *bev)
 		   sx, sy, num_windows, active_idx);
 }
 
-static void sse_send_screen_dump(struct bufferevent *bev)
+static void sse_send_pane_dump(struct bufferevent *bev,
+			       struct window_pane *pane)
 {
-	struct session *s;
-	struct winlink *wl;
-	struct window *w;
-	struct window_pane *pane;
 	struct screen *screen;
 	struct grid *grid;
 	struct grid_cell gc;
@@ -227,25 +224,7 @@ static void sse_send_screen_dump(struct bufferevent *bev)
 	struct evbuffer *vt;
 	unsigned char *vt_data;
 	size_t vt_len;
-	unsigned char *msg;
-	size_t msg_len;
 	int prev_fg, prev_bg, prev_attr;
-
-	s = RB_MIN(sessions, &sessions);
-	if (!s)
-		return;
-
-	wl = s->curw;
-	if (!wl)
-		return;
-
-	w = wl->window;
-	if (!w)
-		return;
-
-	pane = w->active;
-	if (!pane)
-		return;
 
 	screen = pane->screen;
 	grid = screen->grid;
@@ -267,13 +246,10 @@ static void sse_send_screen_dump(struct bufferevent *bev)
 
 	for (y = 0; y < sy; y++) {
 		unsigned int grid_y = grid->hsize + y;
-		struct grid_line *gl = (grid_y < grid->hsize + grid->sy)
-			? &grid->linedata[grid_y] : NULL;
 
 		for (x = 0; x < sx; x++) {
 			grid_get_cell(grid, x, grid_y, &gc);
 
-			/* Emit SGR if attributes changed */
 			int fg = gc.fg;
 			int bg = gc.bg;
 			int attr = gc.attr;
@@ -283,22 +259,21 @@ static void sse_send_screen_dump(struct bufferevent *bev)
 				int n = 0;
 				n += snprintf(sgr + n, sizeof(sgr) - n, "\033[0");
 
-				if (attr & 0x01) /* bold */
+				if (attr & 0x01)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";1");
-				if (attr & 0x02) /* dim */
+				if (attr & 0x02)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";2");
-				if (attr & 0x40) /* italic */
+				if (attr & 0x40)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";3");
-				if (attr & 0x04) /* underline */
+				if (attr & 0x04)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";4");
-				if (attr & 0x08) /* blink */
+				if (attr & 0x08)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";5");
-				if (attr & 0x10) /* reverse */
+				if (attr & 0x10)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";7");
-				if (attr & 0x80) /* strikethrough */
+				if (attr & 0x80)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";9");
 
-				/* fg: 0-7 = standard, 8/9 = default, 10-15 = bright */
 				if (fg <= 7)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";%d", 30 + fg);
 				else if (fg >= 10 && fg <= 15)
@@ -306,7 +281,6 @@ static void sse_send_screen_dump(struct bufferevent *bev)
 				else if (fg >= 16 && fg < 256)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";38;5;%d", fg);
 
-				/* bg */
 				if (bg <= 7)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";%d", 40 + bg);
 				else if (bg >= 10 && bg <= 15)
@@ -322,7 +296,6 @@ static void sse_send_screen_dump(struct bufferevent *bev)
 				prev_attr = attr;
 			}
 
-			/* Emit character */
 			if (gc.data.size == 1 &&
 			    ((unsigned char)gc.data.data[0] < 0x20 ||
 			     (unsigned char)gc.data.data[0] == 0x7f)) {
@@ -352,7 +325,7 @@ static void sse_send_screen_dump(struct bufferevent *bev)
 	vt_len = evbuffer_get_length(vt);
 	vt_data = evbuffer_pullup(vt, vt_len);
 
-	/* Wrap in msgpack: [CTL_DEAMON_OUT_MSG, [OUT_PTY_DATA, 0, <data>]] */
+	/* Wrap in msgpack: [CTL_DEAMON_OUT_MSG, [OUT_PTY_DATA, pane_id, <data>]] */
 	{
 		msgpack_sbuffer sbuf;
 		msgpack_packer pk;
@@ -364,7 +337,7 @@ static void sse_send_screen_dump(struct bufferevent *bev)
 		msgpack_pack_int(&pk, 1);  /* CTL_DEAMON_OUT_MSG */
 		msgpack_pack_array(&pk, 3);
 		msgpack_pack_int(&pk, 2);  /* OUT_PTY_DATA */
-		msgpack_pack_int(&pk, 0);  /* window 0 */
+		msgpack_pack_int(&pk, pane->id);
 		msgpack_pack_bin(&pk, vt_len);
 		msgpack_pack_bin_body(&pk, vt_data, vt_len);
 
@@ -375,8 +348,31 @@ static void sse_send_screen_dump(struct bufferevent *bev)
 
 	evbuffer_free(vt);
 
-	tmate_info("screen_dump: %zu vt100 bytes, grid %ux%u, cursor %u,%u",
-		   vt_len, sx, sy, screen->cx, screen->cy);
+	tmate_info("pane_dump: pane=%d %zu vt100 bytes, grid %ux%u",
+		   pane->id, vt_len, sx, sy);
+}
+
+static void sse_send_screen_dump(struct bufferevent *bev)
+{
+	struct session *s;
+	struct winlink *wl;
+	struct window *w;
+	struct window_pane *wp;
+
+	s = RB_MIN(sessions, &sessions);
+	if (!s || !s->curw)
+		return;
+
+	wl = s->curw;
+	w = wl->window;
+	if (!w)
+		return;
+
+	/* Dump all panes in the active window */
+	TAILQ_FOREACH(wp, &w->panes, entry) {
+		if (wp->screen)
+			sse_send_pane_dump(bev, wp);
+	}
 }
 
 /* --- HTTP request parsing (minimal: just wait for headers) --- */

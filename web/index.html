@@ -94,12 +94,17 @@
   }
 
   #terminal-container {
-    padding: 8px 10px;
-    padding-bottom: 0;
     background: #0d0d1a;
     position: relative;
     flex: 1;
     overflow: hidden;
+  }
+
+  /* Pane border lines (drawn between panes) */
+  .pane-border {
+    position: absolute;
+    background: #333346;
+    z-index: 2;
   }
 
   #tmux-status {
@@ -131,7 +136,7 @@
       rgba(0,0,0,0.02) 2px,
       rgba(0,0,0,0.02) 4px
     );
-    z-index: 1;
+    z-index: 3;
   }
 
   .xterm-viewport::-webkit-scrollbar { display: none; }
@@ -156,7 +161,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@msgpack/msgpack@3.0.0-beta2/dist.es5+umd/msgpack.min.js"></script>
 <script>
 (function() {
@@ -181,97 +185,199 @@
   var OUT_STATUS      = 5;
   var OUT_FIN         = 8;
 
-  /* --- Track server-side terminal size (exposed for debugging) --- */
+  /* --- Shared terminal config --- */
+  var FONT = '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace';
+  var THEME = {
+    background: '#0d0d1a',
+    foreground: '#e0e0e0',
+    cursor: '#528bff',
+    cursorAccent: '#0d0d1a',
+    selectionBackground: 'rgba(82, 139, 255, 0.3)',
+    black: '#1a1a2e',
+    red: '#ff6b6b',
+    green: '#3ddc84',
+    yellow: '#ffd93d',
+    blue: '#6c9efc',
+    magenta: '#c084fc',
+    cyan: '#67e8f9',
+    white: '#e0e0e0',
+    brightBlack: '#4a4a5e',
+    brightRed: '#ff8a8a',
+    brightGreen: '#6ee7a0',
+    brightYellow: '#ffe066',
+    brightBlue: '#93b8fc',
+    brightMagenta: '#d4a5fc',
+    brightCyan: '#8ef0fc',
+    brightWhite: '#ffffff'
+  };
+
+  /* --- Multi-pane state --- */
   var serverCols = window.serverCols = 80;
   var serverRows = window.serverRows = 24;
-
-  /* --- Terminal setup --- */
-  var term = new Terminal({
-    fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace',
-    fontSize: 14,
-    lineHeight: 1.15,
-    theme: {
-      background: '#0d0d1a',
-      foreground: '#e0e0e0',
-      cursor: '#528bff',
-      cursorAccent: '#0d0d1a',
-      selectionBackground: 'rgba(82, 139, 255, 0.3)',
-      black: '#1a1a2e',
-      red: '#ff6b6b',
-      green: '#3ddc84',
-      yellow: '#ffd93d',
-      blue: '#6c9efc',
-      magenta: '#c084fc',
-      cyan: '#67e8f9',
-      white: '#e0e0e0',
-      brightBlack: '#4a4a5e',
-      brightRed: '#ff8a8a',
-      brightGreen: '#6ee7a0',
-      brightYellow: '#ffe066',
-      brightBlue: '#93b8fc',
-      brightMagenta: '#d4a5fc',
-      brightCyan: '#8ef0fc',
-      brightWhite: '#ffffff'
-    },
-    cols: 80,
-    rows: 24,
-    scrollback: 0,
-    cursorBlink: true,
-    cursorStyle: 'block',
-    disableStdin: true,
-    allowProposedApi: true
-  });
-
+  var panes = {};       // pane_id -> { term, el, sx, sy }
+  var cellW = 0, cellH = 0;
   var container = document.getElementById('terminal-container');
-  term.open(container);
 
-  /* Load addons */
-  var fitAddon = new FitAddon.FitAddon();
-  term.loadAddon(fitAddon);
-  try { term.loadAddon(new WebglAddon.WebglAddon()); } catch (e) { /* canvas fallback */ }
-
-  /* Resize the terminal-wrap to fit the server's terminal dimensions.
-   * Measures xterm cell size, calculates pixel dimensions, and resizes. */
-  function sizeToServer() {
+  /* Measure cell size using a temporary terminal */
+  function ensureCellSize() {
+    if (cellW > 0 && cellH > 0) return;
+    var tmp = document.createElement('div');
+    tmp.style.position = 'absolute';
+    tmp.style.visibility = 'hidden';
+    tmp.style.left = '-9999px';
+    document.body.appendChild(tmp);
+    var t = new Terminal({
+      fontFamily: FONT, fontSize: 14, lineHeight: 1.15,
+      cols: 10, rows: 2, allowProposedApi: true
+    });
+    t.open(tmp);
     try {
-      /* Get cell dimensions from xterm's render service */
-      var dims = term._core._renderService.dimensions;
-      var cellWidth, cellHeight;
+      var dims = t._core._renderService.dimensions;
       if (dims && dims.css && dims.css.cell) {
-        cellWidth = dims.css.cell.width;
-        cellHeight = dims.css.cell.height;
+        cellW = dims.css.cell.width;
+        cellH = dims.css.cell.height;
       }
-      if (!cellWidth || !cellHeight) {
-        /* Fallback: measure from a character in the terminal */
-        cellWidth = 8.4;
-        cellHeight = 17;
+    } catch (e) {}
+    t.dispose();
+    document.body.removeChild(tmp);
+    if (!cellW || !cellH) { cellW = 8.4; cellH = 16.1; }
+  }
+
+  function createPaneTerminal(sx, sy) {
+    var t = new Terminal({
+      fontFamily: FONT,
+      fontSize: 14,
+      lineHeight: 1.15,
+      theme: THEME,
+      cols: sx,
+      rows: sy,
+      scrollback: 0,
+      cursorBlink: false,
+      cursorStyle: 'block',
+      disableStdin: true,
+      allowProposedApi: true
+    });
+    return t;
+  }
+
+  /* Rebuild pane layout from SYNC_LAYOUT windows array.
+   * windows: [[idx, name, [[pane_id, sx, sy, xoff, yoff], ...], active_pane_id], ...]
+   * activeWinIdx: currently active window index */
+  function updatePaneLayout(windows, activeWinIdx) {
+    if (!Array.isArray(windows)) return;
+
+    /* Find the active window's pane list */
+    var paneList = null;
+    var activePaneId = -1;
+    for (var i = 0; i < windows.length; i++) {
+      var win = windows[i];
+      if (!Array.isArray(win)) continue;
+      if (win[0] === activeWinIdx) {
+        paneList = win[2];
+        activePaneId = win[3];
+        break;
+      }
+    }
+    if (!paneList || !Array.isArray(paneList)) return;
+
+    ensureCellSize();
+
+    var seen = {};
+
+    /* Remove old border lines */
+    var oldBorders = container.querySelectorAll('.pane-border');
+    for (var i = 0; i < oldBorders.length; i++)
+      oldBorders[i].remove();
+
+    for (var i = 0; i < paneList.length; i++) {
+      var p = paneList[i];
+      if (!Array.isArray(p) || p.length < 5) continue;
+      var id = p[0], sx = p[1], sy = p[2], xoff = p[3], yoff = p[4];
+      seen[id] = true;
+
+      var left = Math.round(xoff * cellW);
+      var top = Math.round(yoff * cellH);
+      var width = Math.round(sx * cellW);
+      var height = Math.round(sy * cellH);
+
+      if (panes[id]) {
+        /* Update existing pane */
+        var pane = panes[id];
+        pane.el.style.left = left + 'px';
+        pane.el.style.top = top + 'px';
+        pane.el.style.width = width + 'px';
+        pane.el.style.height = height + 'px';
+        if (pane.term.cols !== sx || pane.term.rows !== sy) {
+          pane.term.resize(sx, sy);
+        }
+        pane.sx = sx;
+        pane.sy = sy;
+      } else {
+        /* Create new pane */
+        var el = document.createElement('div');
+        el.style.position = 'absolute';
+        el.style.left = left + 'px';
+        el.style.top = top + 'px';
+        el.style.width = width + 'px';
+        el.style.height = height + 'px';
+        el.style.overflow = 'hidden';
+        container.appendChild(el);
+
+        var t = createPaneTerminal(sx, sy);
+        t.open(el);
+        try { t.loadAddon(new WebglAddon.WebglAddon()); } catch (e) {}
+
+        panes[id] = { term: t, el: el, sx: sx, sy: sy };
       }
 
-      /* terminal content area = cells + padding (10px left + 10px right, 8px top) */
-      var contentW = Math.ceil(serverCols * cellWidth) + 20;
-      var contentH = Math.ceil(serverRows * cellHeight) + 8;
-      /* total = titlebar(38) + content + status(20) */
-      var totalH = 38 + contentH + 20;
+      /* Set cursor blink only on active pane */
+      panes[id].term.options.cursorBlink = (id === activePaneId);
 
-      var wrap = document.getElementById('terminal-wrap');
-      var maxW = window.innerWidth - 32;
-      var maxH = window.innerHeight - 32;
-
-      wrap.style.width = Math.min(contentW, maxW) + 'px';
-      wrap.style.height = Math.min(totalH, maxH) + 'px';
-    } catch (e) {
-      /* If render service isn't ready, just set wrap size with fallback cell sizes */
-      var wrap = document.getElementById('terminal-wrap');
-      wrap.style.width = Math.min(serverCols * 8.4 + 20, window.innerWidth - 32) + 'px';
-      wrap.style.height = Math.min(38 + serverRows * 17 + 8 + 20, window.innerHeight - 32) + 'px';
+      /* Draw borders: if xoff > 0, draw a vertical line to the left */
+      if (xoff > 0) {
+        var border = document.createElement('div');
+        border.className = 'pane-border';
+        border.style.left = (left - 1) + 'px';
+        border.style.top = top + 'px';
+        border.style.width = '1px';
+        border.style.height = height + 'px';
+        container.appendChild(border);
+      }
+      /* If yoff > 0, draw a horizontal line above */
+      if (yoff > 0) {
+        var border = document.createElement('div');
+        border.className = 'pane-border';
+        border.style.left = left + 'px';
+        border.style.top = (top - 1) + 'px';
+        border.style.width = width + 'px';
+        border.style.height = '1px';
+        container.appendChild(border);
+      }
     }
 
-    /* Always resize the terminal to match server */
-    if (term.cols !== serverCols || term.rows !== serverRows) {
-      term.resize(serverCols, serverRows);
+    /* Remove panes no longer in layout */
+    for (var id in panes) {
+      if (!seen[id]) {
+        panes[id].term.dispose();
+        panes[id].el.remove();
+        delete panes[id];
+      }
     }
-    window.serverCols = serverCols;
-    window.serverRows = serverRows;
+  }
+
+  /* Resize the terminal-wrap to fit the server's terminal dimensions */
+  function sizeToServer() {
+    ensureCellSize();
+    var contentW = Math.ceil(serverCols * cellW);
+    var contentH = Math.ceil(serverRows * cellH);
+    var totalH = 38 + contentH + 20;
+
+    var wrap = document.getElementById('terminal-wrap');
+    var maxW = window.innerWidth - 32;
+    var maxH = window.innerHeight - 32;
+
+    wrap.style.width = Math.min(contentW, maxW) + 'px';
+    wrap.style.height = Math.min(totalH, maxH) + 'px';
   }
 
   window.addEventListener('resize', function() { sizeToServer(); });
@@ -312,7 +418,6 @@
 
   /* --- SSE connection --- */
 
-  /* Extract session token from /s/TOKEN path */
   var pathMatch = location.pathname.match(/^\/s\/([^\/]+)/);
   var sessionToken = pathMatch ? pathMatch[1] : null;
 
@@ -328,35 +433,49 @@
   function connect() {
     setStatus('Connecting...');
 
-    var es = new EventSource(sseUrl);
-
-    es.onopen = function() {
+    fetch(sseUrl).then(function(response) {
+      if (!response.ok) throw new Error('HTTP ' + response.status);
       setStatus('Connected', 'connected');
-    };
 
-    es.onmessage = function(evt) {
-      var binary = atob(evt.data);
-      var bytes = new Uint8Array(binary.length);
-      for (var i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buf = '';
+
+      function pump() {
+        return reader.read().then(function(result) {
+          if (result.done) {
+            setStatus('Session ended', 'error');
+            return;
+          }
+          buf += decoder.decode(result.value, { stream: true });
+
+          var parts = buf.split('\n\n');
+          buf = parts.pop();
+          for (var i = 0; i < parts.length; i++) {
+            var line = parts[i];
+            if (line.indexOf('data: ') !== 0) continue;
+            var b64 = line.substring(6);
+            try {
+              var binary = atob(b64);
+              var bytes = new Uint8Array(binary.length);
+              for (var j = 0; j < binary.length; j++)
+                bytes[j] = binary.charCodeAt(j);
+              var iter = MessagePack.decodeMulti(bytes);
+              var msg = iter.next();
+              while (!msg.done) {
+                handleMessage(msg.value);
+                msg = iter.next();
+              }
+            } catch (e) {}
+          }
+          return pump();
+        });
       }
-
-      /* SSE events may contain multiple concatenated msgpack values */
-      try {
-        var iter = MessagePack.decodeMulti(bytes);
-        var result = iter.next();
-        while (!result.done) {
-          handleMessage(result.value);
-          result = iter.next();
-        }
-      } catch (e) {
-        /* Ignore trailing decode errors */
-      }
-    };
-
-    es.onerror = function() {
+      return pump();
+    }).catch(function(err) {
       setStatus('Disconnected. Reconnecting...', 'error');
-    };
+      setTimeout(connect, 2000);
+    });
   }
 
   function handleMessage(msg) {
@@ -382,11 +501,26 @@
     switch (type) {
       case OUT_PTY_DATA:
         if (inner.length >= 3) {
+          var paneId = inner[1];
           var ptyData = inner[2];
-          if (ptyData instanceof Uint8Array) {
-            term.write(ptyData);
-          } else if (typeof ptyData === 'string') {
-            term.write(ptyData);
+          /* Route to correct pane terminal */
+          var pane = panes[paneId];
+          if (pane) {
+            if (ptyData instanceof Uint8Array) {
+              pane.term.write(ptyData);
+            } else if (typeof ptyData === 'string') {
+              pane.term.write(ptyData);
+            }
+          } else {
+            /* Fallback: write to first available pane (e.g. screen dump with id 0) */
+            for (var k in panes) {
+              if (ptyData instanceof Uint8Array) {
+                panes[k].term.write(ptyData);
+              } else if (typeof ptyData === 'string') {
+                panes[k].term.write(ptyData);
+              }
+              break;
+            }
           }
         }
         break;
@@ -402,9 +536,9 @@
             window.serverRows = sy;
             sizeToServer();
           }
-          /* Parse window names: inner[3] = [[idx, name, panes...], ...] */
           if (inner.length >= 5) {
             updateWindowList(inner[3], inner[4]);
+            updatePaneLayout(inner[3], inner[4]);
           }
         }
         break;

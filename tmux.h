@@ -1310,6 +1310,7 @@ struct window {
 	char			*tmate_last_sync_name;
 	u_int			 tmate_last_sync_sx;
 	u_int			 tmate_last_sync_sy;
+	u_int			 tmate_last_layout_hash;
 
 	RB_ENTRY(window)	 entry;
 };

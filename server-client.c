@@ -2684,6 +2684,7 @@ server_client_loop(void)
 	RB_FOREACH(w, windows, &windows) {
 #ifdef TMATE
 		int tmate_should_sync_layout = 0;
+		u_int layout_hash = 0;
 		if (w->tmate_last_sync_active_pane != w->active)
 			tmate_should_sync_layout = 1;
 		if (w->sx != w->tmate_last_sync_sx ||
@@ -2699,11 +2700,23 @@ server_client_loop(void)
 		}
 		check_window_name(w);
 #ifdef TMATE
+		/* Hash pane layout to detect pane resize/split/close */
+		TAILQ_FOREACH(wp, &w->panes, entry) {
+			layout_hash ^= (wp->id * 73856093u) ^
+				       (wp->sx * 19349663u) ^
+				       (wp->sy * 83492791u) ^
+				       (wp->xoff * 41729581u) ^
+				       (wp->yoff * 57648391u);
+		}
+		if (layout_hash != w->tmate_last_layout_hash)
+			tmate_should_sync_layout = 1;
 		if (w->tmate_last_sync_name == NULL ||
 		    strcmp(w->name, w->tmate_last_sync_name) != 0)
 			tmate_should_sync_layout = 1;
-		if (tmate_should_sync_layout)
+		if (tmate_should_sync_layout) {
+			w->tmate_last_layout_hash = layout_hash;
 			tmate_sync_layout();
+		}
 #endif
 	}
 
