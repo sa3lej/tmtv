@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tmtv — terminal sharing</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0c0c16;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(40, 20, 80, 0.3) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 50%, rgba(20, 40, 80, 0.2) 0%, transparent 60%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: "Inter", -apple-system, sans-serif;
+    color: #e0e0e0;
+    overflow: hidden;
+  }
+
+  .logo {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #6c9efc 0%, #c084fc 50%, #3ddc84 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .tagline {
+    color: #666;
+    font-size: 14px;
+    font-weight: 300;
+    letter-spacing: 0.5px;
+    margin-bottom: 48px;
+  }
+
+  .card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    padding: 40px;
+    width: 420px;
+    max-width: 90vw;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+  }
+
+  .card h2 {
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 20px;
+    color: #aaa;
+  }
+
+  .input-group {
+    display: flex;
+    gap: 10px;
+  }
+
+  .input-group input {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 15px;
+    color: #e0e0e0;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .input-group input::placeholder { color: #444; }
+  .input-group input:focus { border-color: rgba(108, 158, 252, 0.4); }
+
+  .input-group button {
+    background: linear-gradient(135deg, #6c9efc, #8b7cf0);
+    border: none;
+    border-radius: 10px;
+    padding: 14px 24px;
+    font-family: "Inter", sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+    white-space: nowrap;
+  }
+  .input-group button:hover { opacity: 0.9; }
+  .input-group button:active { transform: scale(0.97); }
+
+  .hint {
+    margin-top: 16px;
+    font-size: 12px;
+    color: #444;
+    line-height: 1.6;
+  }
+  .hint code {
+    font-family: "JetBrains Mono", monospace;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+
+  .footer {
+    position: fixed;
+    bottom: 20px;
+    font-size: 11px;
+    color: #333;
+    letter-spacing: 0.3px;
+  }
+  .footer a { color: #555; text-decoration: none; }
+  .footer a:hover { color: #888; }
+</style>
+</head>
+<body>
+  <div class="logo">tmtv</div>
+  <div class="tagline">share your terminal, keep your tmux</div>
+
+  <div class="card">
+    <h2>View a session</h2>
+    <form class="input-group" onsubmit="go(event)">
+      <input type="text" id="token" placeholder="session token" autofocus autocomplete="off" spellcheck="false">
+      <button type="submit">Watch</button>
+    </form>
+    <div class="hint">
+      Paste the session token shown in your tmtv status bar.<br>
+      Or open a direct link: <code>/s/TOKEN</code>
+    </div>
+  </div>
+
+  <div class="footer">
+    powered by <a href="https://github.com/sa3lej/tmtv">tmtv</a> &mdash; tmate + tmux 3.6a
+  </div>
+
+<script>
+function go(e) {
+  e.preventDefault();
+  var token = document.getElementById('token').value.trim();
+  if (token) window.location.href = '/s/' + encodeURIComponent(token);
+}
+</script>
+</body>
+</html>
