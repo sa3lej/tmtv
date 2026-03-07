@@ -14,20 +14,32 @@ LDFLAGS ?=
 MSGPACK_CFLAGS := $(shell pkg-config --cflags msgpack-c 2>/dev/null || pkg-config --cflags msgpack 2>/dev/null)
 MSGPACK_LIBS := $(shell pkg-config --libs msgpack-c 2>/dev/null || pkg-config --libs msgpack 2>/dev/null)
 
+LIBSSH_CFLAGS := $(shell pkg-config --cflags libssh 2>/dev/null)
+LIBEVENT_CFLAGS := $(shell pkg-config --cflags libevent 2>/dev/null)
+
 UNIT_TESTS = test-msgpack
+SERVER_TESTS = test-server-header
 TMTV ?= ../tmtv
 
-.PHONY: all unit functional hooks clean
+.PHONY: all unit server-unit functional hooks clean
 
-all: unit functional hooks
+all: unit server-unit functional hooks
 
 unit: $(UNIT_TESTS)
 	@echo ""
 	@echo "Running unit tests..."
 	@for t in $(UNIT_TESTS); do ./$$t || exit 1; done
 
+server-unit: $(SERVER_TESTS)
+	@echo ""
+	@echo "Running server unit tests..."
+	@for t in $(SERVER_TESTS); do ./$$t || exit 1; done
+
 test-msgpack: test-msgpack.c test-harness.h
 	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) -o $@ $< $(LDFLAGS) $(MSGPACK_LIBS)
+
+test-server-header: test-server-header.c test-harness.h ../server/tmate.h ../server/tmate-protocol.h
+	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
 
 functional:
 	@echo ""

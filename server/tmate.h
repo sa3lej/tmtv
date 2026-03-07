@@ -1,21 +1,24 @@
-#ifndef TMATE_H
-#define TMATE_H
+#ifndef TMATE_SERVER_H
+#define TMATE_SERVER_H
 
 #include <sys/types.h>
 #include <msgpack.h>
 #include <libssh/libssh.h>
 #include <libssh/callbacks.h>
-#include <event.h>
+#include <event2/event.h>
+#include <event2/bufferevent.h>
+#include <event2/buffer.h>
 #include <time.h>
 
 #include "tmux.h"
+
 struct tmate_session;
 
-/* log.c */
+/* Logging — use tmux 3.6a log_debug/fatalx */
 
-#define tmate_debug(...) log_emit(LOG_DEBUG, __VA_ARGS__)
-#define tmate_info(...)  log_emit(LOG_INFO,  __VA_ARGS__)
-#define tmate_fatal(...) fatalx( __VA_ARGS__)
+#define tmate_debug(...) log_debug(__VA_ARGS__)
+#define tmate_info(...)  log_debug(__VA_ARGS__)
+#define tmate_fatal(...) fatalx(__VA_ARGS__)
 #define tmate_fatal_quiet(...)  ({tmate_debug(__VA_ARGS__); exit(1);})
 
 /* tmate-auth-keys.c */
@@ -34,7 +37,7 @@ struct tmate_encoder {
 	tmate_encoder_write_cb *ready_callback;
 	void *userdata;
 	struct evbuffer *buffer;
-	struct event ev_buffer;
+	struct event *ev_buffer;	/* libevent2: heap-allocated */
 	bool ev_active;
 };
 
@@ -83,6 +86,9 @@ extern msgpack_object_type unpack_peek_type(struct tmate_unpacker *uk);
 	     (tmp_uk)->argc > 0 && (init_unpacker(nested_uk, (tmp_uk)->argv[0]), 1);	\
 	     (tmp_uk)->argv++, (tmp_uk)->argc--)
 
+/* tmate-protocol.h — protocol version and message types */
+#include "tmate-protocol.h"
+
 /* tmate-daemon-encoder.c */
 
 extern void printflike(1, 2) tmate_notify(const char *fmt, ...);
@@ -118,7 +124,7 @@ extern void tmate_dispatch_daemon_message(struct tmate_session *session,
 /* tmate-ssh-daemon.c */
 
 #define TMATE_KEYFRAME_INTERVAL_SEC 10
-#define TMATE_KEYFRAME_MAX_SIZE 1024*1024
+#define TMATE_KEYFRAME_MAX_SIZE (1024*1024)
 
 extern void tmate_spawn_daemon(struct tmate_session *session);
 extern void tmate_hook_set_option(const char *name, const char *val);
@@ -166,9 +172,9 @@ struct tmate_ssh_client {
 
 	struct winsize winsize_pty;
 
-	struct event ev_ssh;
+	struct event *ev_ssh;			/* libevent2: heap-allocated */
 
-	struct event ev_keepalive_timer;
+	struct event *ev_keepalive_timer;	/* libevent2: heap-allocated */
 	int keepalive_interval_ms;
 };
 
@@ -215,7 +221,7 @@ struct tmate_session {
 	struct tmate_ssh_client ssh_client;
 	int tmux_socket_fd;
 
-	/* only for role deamon */
+	/* only for role daemon */
 	ssh_key *authorized_keys; /* array with NULL as last element */
 
 	const char *session_token;
@@ -226,7 +232,7 @@ struct tmate_session {
 	struct tmate_decoder daemon_decoder;
 	const char *client_version;
 	int client_protocol_version;
-	struct event ev_notify_timer;
+	struct event *ev_notify_timer;	/* libevent2: heap-allocated */
 	bool fin_received;
 
 	int websocket_fd;
@@ -238,7 +244,7 @@ struct tmate_session {
 
 	/* only for role client-pty */
 	int pty;
-	struct event ev_pty;
+	struct event *ev_pty;		/* libevent2: heap-allocated */
 	bool readonly;
 
 	/* only for role-exec */
@@ -266,8 +272,6 @@ struct random_stream {
 };
 
 extern void tmate_init_rand(void);
-extern void tmate_get_random_bytes(void *buffer, ssize_t len);
-extern long tmate_get_random_long(void);
 extern void random_stream_init(struct random_stream *rs);
 extern char *random_stream_get(struct random_stream *rs, size_t count);
 extern void setup_ncurse(int fd, const char *name);
@@ -296,18 +300,4 @@ extern void tmate_preload_trace_lib(void);
 extern void tmate_print_stack_trace(void);
 extern void tmate_catch_sigsegv(void);
 
-/* tmux.c */
-
-extern void tmux_server_init(void);
-
-/* server.c */
-extern int server_create_socket(void);
-
-/* log.c */
-extern FILE *log_file;
-
-/* client.c */
-extern void client_signal(int sig);
-extern int client_connect(struct event_base *base, const char *path, int start_server);
-
-#endif
+#endif /* TMATE_SERVER_H */
