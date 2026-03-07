@@ -22,6 +22,7 @@ fuzz/*-fuzzer
 tags
 tmux
 tmux.1.*
+!tests/Makefile
 tests/test-msgpack
 tests/test-*
 !tests/test-*.c
