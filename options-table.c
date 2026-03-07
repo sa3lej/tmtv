@@ -1022,12 +1022,12 @@ const struct options_table_entry options_table[] = {
 	  .text = "Characters considered to separate words."
 	},
 
-	/* tmate options (session scope, stored in global_options). */
+	/* tmtv options (session scope, stored in global_options). */
 	{ .name = "tmate-server-host",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
-	  .text = "tmate server hostname. Empty to run in local-only mode."
+	  .text = "tmtv server hostname. Empty to run in local-only mode."
 	},
 
 	{ .name = "tmate-server-port",
@@ -1036,42 +1036,42 @@ const struct options_table_entry options_table[] = {
 	  .minimum = 1,
 	  .maximum = 65535,
 	  .default_num = 22,
-	  .text = "tmate server SSH port."
+	  .text = "tmtv server SSH port."
 	},
 
 	{ .name = "tmate-server-rsa-fingerprint",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
-	  .text = "tmate server RSA host key fingerprint."
+	  .text = "tmtv server RSA host key fingerprint."
 	},
 
 	{ .name = "tmate-server-ecdsa-fingerprint",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
-	  .text = "tmate server ECDSA host key fingerprint."
+	  .text = "tmtv server ECDSA host key fingerprint."
 	},
 
 	{ .name = "tmate-server-ed25519-fingerprint",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
-	  .text = "tmate server Ed25519 host key fingerprint."
+	  .text = "tmtv server Ed25519 host key fingerprint."
 	},
 
 	{ .name = "tmate-identity",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
-	  .text = "SSH identity file for tmate."
+	  .text = "SSH identity file for tmtv."
 	},
 
 	{ .name = "tmate-authorized-keys",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
-	  .text = "Path to authorized_keys for tmate access control."
+	  .text = "Path to authorized_keys for tmtv access control."
 	},
 
 	{ .name = "tmate-display-time",
@@ -1080,7 +1080,7 @@ const struct options_table_entry options_table[] = {
 	  .minimum = 0,
 	  .maximum = 60000,
 	  .default_num = 5000,
-	  .text = "Duration of tmate status messages in milliseconds."
+	  .text = "Duration of tmtv status messages in milliseconds."
 	},
 
 	{ .name = "tmate-foreground-restart",
@@ -1094,28 +1094,28 @@ const struct options_table_entry options_table[] = {
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
-	  .text = "Internal tmate key=value transport."
+	  .text = "Internal tmtv key=value transport."
 	},
 
 	{ .name = "tmate-api-key",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
-	  .text = "API key for named tmate sessions."
+	  .text = "API key for named tmtv sessions."
 	},
 
 	{ .name = "tmate-session-name",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
-	  .text = "Named session token for tmate."
+	  .text = "Named session token for tmtv."
 	},
 
 	{ .name = "tmate-session-name-ro",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
-	  .text = "Read-only named session token for tmate."
+	  .text = "Read-only named session token for tmtv."
 	},
 
 	/* Window options. */

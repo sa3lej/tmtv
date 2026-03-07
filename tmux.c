@@ -54,8 +54,16 @@ static __dead void
 usage(int status)
 {
 	fprintf(status ? stderr : stdout,
-	    "usage: %s [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]\n"
-	    "            [-S socket-path] [-T features] [command [flags]]\n",
+	    "usage: %s [-2CDFhlNuVv] [-c shell-command] [-f file]\n"
+	    "            [-H server-host] [-k api-key] [-L socket-name]\n"
+	    "            [-P server-port] [-S socket-path] [-T features]\n"
+	    "            [command [flags]]\n"
+	    "\n"
+	    "tmtv options:\n"
+	    "  -F              foreground mode (remote access only, no local session)\n"
+	    "  -H server-host  server hostname to connect to\n"
+	    "  -P server-port  server SSH port (default: 22)\n"
+	    "  -k api-key      API key for named sessions\n",
 	    getprogname());
 	exit(status);
 }
@@ -358,6 +366,9 @@ main(int argc, char **argv)
 	char					*path = NULL, *label = NULL;
 	char					*cause, **var;
 	const char				*s, *cwd;
+	const char				*cli_server_host = NULL;
+	const char				*cli_api_key = NULL;
+	int					 cli_server_port = 0;
 	int					 opt, keys, feat = 0, fflag = 0;
 	uint64_t				 flags = 0;
 	const struct options_table_entry	*oe;
@@ -385,7 +396,7 @@ main(int argc, char **argv)
 		environ_set(global_environ, "PWD", 0, "%s", cwd);
 	expand_paths(TMUX_CONF, &cfg_files, &cfg_nfiles, 1);
 
-	while ((opt = getopt(argc, argv, "2c:CDdf:hlL:NqS:T:uUvV")) != -1) {
+	while ((opt = getopt(argc, argv, "2c:CDdFf:hH:k:lL:NP:qS:T:uUvV")) != -1) {
 		switch (opt) {
 		case '2':
 			tty_add_features(&feat, "256", ":,");
@@ -395,6 +406,20 @@ main(int argc, char **argv)
 			break;
 		case 'D':
 			flags |= CLIENT_NOFORK;
+			break;
+		case 'F':
+			tmate_foreground = 1;
+			break;
+		case 'H':
+			cli_server_host = optarg;
+			break;
+		case 'k':
+			cli_api_key = optarg;
+			break;
+		case 'P':
+			cli_server_port = atoi(optarg);
+			if (cli_server_port < 1 || cli_server_port > 65535)
+				errx(1, "invalid port: %s", optarg);
 			break;
 		case 'C':
 			if (flags & CLIENT_CONTROL)
@@ -496,6 +521,17 @@ main(int argc, char **argv)
 		if (oe->scope & OPTIONS_TABLE_WINDOW)
 			options_default(global_w_options, oe);
 	}
+
+	/* Apply CLI overrides for tmtv server settings. */
+	if (cli_server_host != NULL)
+		options_set_string(global_options, "tmate-server-host", 0,
+		    "%s", cli_server_host);
+	if (cli_server_port != 0)
+		options_set_number(global_options, "tmate-server-port",
+		    cli_server_port);
+	if (cli_api_key != NULL)
+		options_set_string(global_options, "tmate-api-key", 0,
+		    "%s", cli_api_key);
 
 	/*
 	 * The default shell comes from SHELL or from the user's passwd entry
