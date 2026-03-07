@@ -8,6 +8,7 @@
 #include <event2/event.h>
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
+#include <event2/listener.h>
 #include <time.h>
 
 #include "tmux.h"
@@ -220,7 +221,12 @@ struct tmate_settings {
 };
 extern struct tmate_settings *tmate_settings;
 
-typedef void on_websocket_error_cb(struct tmate_session *session, short events);
+struct ws_client {
+	struct tmate_session *session;
+	struct bufferevent *bev;
+	bool handshake_done;
+	TAILQ_ENTRY(ws_client) entry;
+};
 
 struct tmate_session {
 	struct event_base *ev_base;
@@ -241,12 +247,11 @@ struct tmate_session {
 	struct event *ev_notify_timer;	/* libevent2: heap-allocated */
 	bool fin_received;
 
-	int websocket_fd;
-	struct bufferevent *bev_websocket;
+	/* websocket listener for browser viewers */
 	struct tmate_encoder websocket_encoder;
-	struct tmate_decoder websocket_decoder;
 	u_int websocket_sx, websocket_sy;
-	on_websocket_error_cb *on_websocket_error;
+	TAILQ_HEAD(, ws_client) ws_clients;
+	struct evconnlistener *ws_listener;
 
 	/* only for role client-pty */
 	int pty;
@@ -291,13 +296,12 @@ extern void tmate_notify_client_left(struct tmate_session *s, struct client *c);
 extern void tmate_send_websocket_daemon_msg(struct tmate_session *session,
 					struct tmate_unpacker *uk);
 extern void tmate_send_websocket_header(struct tmate_session *session);
-extern void tmate_init_websocket(struct tmate_session *session,
-				 on_websocket_error_cb on_websocket_error);
+extern void tmate_init_websocket(struct tmate_session *session);
+extern void tmate_start_websocket_listener(struct tmate_session *session);
 
-extern int tmate_connect_to_websocket(void);
 static inline bool tmate_has_websocket(void)
 {
-	return !!tmate_settings->websocket_hostname;
+	return tmate_settings->websocket_port > 0;
 }
 
 /* tmate-debug.c */

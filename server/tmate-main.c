@@ -29,7 +29,7 @@ struct tmate_settings _tmate_settings = {
 	.ssh_port_advertized    = -1,
 	.websocket_hostname  	= NULL,
 	.bind_addr	 	= NULL,
-	.websocket_port      	= TMATE_DEFAULT_WEBSOCKET_PORT,
+	.websocket_port      	= 0,
 	.tmate_host      	= NULL,
 	.log_level      	= 0,
 	.use_proxy_protocol	= false,
@@ -49,7 +49,7 @@ void request_server_termination(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "usage: tmtv-server [-A] [-b ip] [-h hostname] [-k keys_dir] [-p listen_port] [-q ssh_port_advertized] [-w websocket_hostname] [-z websocket_port] [-x] [-v]\n");
+	fprintf(stderr, "usage: tmtv-server [-A] [-b ip] [-h hostname] [-k keys_dir] [-p listen_port] [-q ssh_port_advertized] [-z websocket_port] [-x] [-v]\n");
 }
 
 static char* get_full_hostname(void)
@@ -120,7 +120,7 @@ int main(int argc, char **argv, char **envp)
 {
 	int opt;
 
-	while ((opt = getopt(argc, argv, "Ab:h:k:p:q:w:z:xv")) != -1) {
+	while ((opt = getopt(argc, argv, "Ab:h:k:p:q:z:xv")) != -1) {
 		switch (opt) {
 		case 'A':
 			tmate_settings->authorized_keys_only = true;
@@ -139,9 +139,6 @@ int main(int argc, char **argv, char **envp)
 			break;
 		case 'q':
 			tmate_settings->ssh_port_advertized = atoi(optarg);
-			break;
-		case 'w':
-			tmate_settings->websocket_hostname = xstrdup(optarg);
 			break;
 		case 'z':
 			tmate_settings->websocket_port = atoi(optarg);

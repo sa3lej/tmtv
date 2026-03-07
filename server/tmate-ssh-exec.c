@@ -17,12 +17,6 @@ void tmate_dump_exec_response(struct tmate_session *session,
 		tmate_fatal("Cannot stop event loop");
 }
 
-static void on_websocket_error(struct tmate_session *session, __unused short events)
-{
-	tmate_info("Lost websocket server connection");
-	tmate_dump_exec_response(session, 1, "Internal Error\r\n");
-}
-
 static void tmate_client_exec_init(struct tmate_session *session)
 {
 	struct tmate_ssh_client *client = &session->ssh_client;
@@ -31,7 +25,7 @@ static void tmate_client_exec_init(struct tmate_session *session)
 	ssh_callbacks_init(&client->channel_cb);
 	ssh_set_channel_callbacks(client->channel, &client->channel_cb);
 
-	tmate_init_websocket(session, on_websocket_error);
+	tmate_init_websocket(session);
 
 	tmate_websocket_exec(session, client->exec_command);
 }
@@ -42,8 +36,7 @@ void tmate_spawn_exec(struct tmate_session *session)
 
 	tmate_info("Spawning exec client ip=%s", client->ip_address);
 
-	close_fds_except((int[]){ssh_get_fd(session->ssh_client.session),
-				 session->websocket_fd}, 2);
+	close_fds_except((int[]){ssh_get_fd(session->ssh_client.session)}, 1);
 	get_in_jail();
 	event_reinit(session->ev_base);
 
