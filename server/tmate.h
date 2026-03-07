@@ -252,6 +252,7 @@ struct tmate_session {
 	u_int websocket_sx, websocket_sy;
 	TAILQ_HEAD(, ws_client) ws_clients;
 	struct evconnlistener *ws_listener;
+	int ws_listen_fd; /* pre-bound socket, created before jail */
 
 	/* only for role client-pty */
 	int pty;
@@ -297,6 +298,7 @@ extern void tmate_send_websocket_daemon_msg(struct tmate_session *session,
 					struct tmate_unpacker *uk);
 extern void tmate_send_websocket_header(struct tmate_session *session);
 extern void tmate_init_websocket(struct tmate_session *session);
+extern void tmate_bind_websocket_socket(struct tmate_session *session);
 extern void tmate_start_websocket_listener(struct tmate_session *session);
 
 static inline bool tmate_has_websocket(void)

@@ -448,6 +448,7 @@ void tmate_init_websocket(struct tmate_session *session)
 
 	session->websocket_sx = -1;
 	session->websocket_sy = -1;
+	session->ws_listen_fd = -1;
 
 	TAILQ_INIT(&session->ws_clients);
 
@@ -455,33 +456,68 @@ void tmate_init_websocket(struct tmate_session *session)
 			   on_websocket_encoder_write, session);
 }
 
-void tmate_start_websocket_listener(struct tmate_session *session)
+void tmate_bind_websocket_socket(struct tmate_session *session)
 {
 	struct sockaddr_in sin;
-	int port;
+	int port, fd, flag = 1;
 
 	if (!tmate_has_websocket())
 		return;
 
 	port = tmate_settings->websocket_port;
 
+	fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (fd < 0) {
+		tmate_info("Cannot create SSE socket: %s", strerror(errno));
+		return;
+	}
+
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag));
+	evutil_make_socket_nonblocking(fd);
+
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = htonl(INADDR_ANY);
 	sin.sin_port = htons(port);
 
-	session->ws_listener = evconnlistener_new_bind(
-		session->ev_base,
-		on_ws_accept, session,
-		LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE,
-		-1,
-		(struct sockaddr *)&sin, sizeof(sin));
-
-	if (!session->ws_listener) {
-		tmate_info("Cannot start SSE listener on port %d: %s",
+	if (bind(fd, (struct sockaddr *)&sin, sizeof(sin)) < 0) {
+		tmate_info("Cannot bind SSE socket on port %d: %s",
 			   port, strerror(errno));
+		close(fd);
 		return;
 	}
 
-	tmate_info("SSE listener started on port %d", port);
+	if (listen(fd, 128) < 0) {
+		tmate_info("Cannot listen on SSE socket: %s", strerror(errno));
+		close(fd);
+		return;
+	}
+
+	session->ws_listen_fd = fd;
+	tmate_info("SSE socket bound on port %d (fd=%d)", port, fd);
+}
+
+void tmate_start_websocket_listener(struct tmate_session *session)
+{
+	if (!tmate_has_websocket())
+		return;
+
+	if (session->ws_listen_fd < 0) {
+		tmate_info("No SSE socket to register");
+		return;
+	}
+
+	session->ws_listener = evconnlistener_new(
+		session->ev_base,
+		on_ws_accept, session,
+		LEV_OPT_CLOSE_ON_FREE,
+		0, /* backlog: already listening */
+		session->ws_listen_fd);
+
+	if (!session->ws_listener) {
+		tmate_info("Cannot create SSE listener: %s", strerror(errno));
+		return;
+	}
+
+	tmate_info("SSE listener registered on fd=%d", session->ws_listen_fd);
 }

@@ -245,16 +245,17 @@ static void client_bootstrap(struct tmate_session *_session)
 	ssh_set_auth_methods(client->session, SSH_AUTH_METHOD_NONE |
 					      SSH_AUTH_METHOD_PUBLICKEY);
 
-	tmate_debug("Exchanging DH keys");
+	tmate_info("Exchanging DH keys ip=%s", client->ip_address);
 	if (ssh_handle_key_exchange(session) < 0)
-		tmate_fatal_quiet("Error doing the key exchange: %s", ssh_get_error(session));
+		tmate_fatal("Error doing the key exchange: %s", ssh_get_error(session));
+	tmate_info("Key exchange done ip=%s", client->ip_address);
 
 	mainloop = ssh_event_new();
 	ssh_event_add_session(mainloop, session);
 
 	while (!client->role) {
 		if (ssh_event_dopoll(mainloop, -1) == SSH_ERROR)
-			tmate_fatal_quiet("Error polling ssh socket: %s", ssh_get_error(session));
+			tmate_fatal("Error polling ssh socket: %s", ssh_get_error(session));
 	}
 
 	alarm(0);
