@@ -7,7 +7,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <signal.h>
-#include <event.h>
+#include <event2/event.h>
 #include <arpa/inet.h>
 #ifndef IPPROTO_TCP
 #include <netinet/in.h>
@@ -189,7 +189,14 @@ static void on_ssh_read(__unused evutil_socket_t fd, __unused short what, void *
 	if (!ssh_is_connected(client->session)) {
 		tmate_debug("ssh disconnected");
 
-		event_del(&client->ev_ssh);
+		/*
+		 * tmux 3.6a / libevent2: ev_ssh is a pointer (struct event *)
+		 */
+		if (client->ev_ssh) {
+			event_del(client->ev_ssh);
+			event_free(client->ev_ssh);
+			client->ev_ssh = NULL;
+		}
 
 		/* For graceful tmux client termination */
 		request_server_termination();
@@ -198,9 +205,14 @@ static void on_ssh_read(__unused evutil_socket_t fd, __unused short what, void *
 
 static void register_on_ssh_read(struct tmate_ssh_client *client)
 {
-	event_set(&client->ev_ssh, ssh_get_fd(client->session),
-		  EV_READ | EV_PERSIST, on_ssh_read, client);
-	event_add(&client->ev_ssh, NULL);
+	/*
+	 * tmux 3.6a / libevent2: use event_new() instead of event_set()
+	 */
+	client->ev_ssh = event_new(tmate_session->ev_base,
+				   ssh_get_fd(client->session),
+				   EV_READ | EV_PERSIST,
+				   on_ssh_read, client);
+	event_add(client->ev_ssh, NULL);
 }
 
 static void handle_sigalrm(__unused int sig)
@@ -367,11 +379,11 @@ static int get_client_ip(int fd, char *dst, size_t len)
 static void ssh_log_function(int priority, const char *function,
 			     const char *buffer, __unused void *userdata)
 {
-	/* loglevel already applied */
-	log_emit(LOG_DEBUG, "[%s] %s", function, buffer);
+	/* tmux 3.6a: use log_debug instead of log_emit */
+	tmate_debug("[ssh:%s] %s", function, buffer);
 }
 
-static inline int max(int a, int b)
+static inline int max_int(int a, int b)
 {
 	if (a < b)
 		return b;
@@ -399,7 +411,7 @@ static ssh_bind prepare_ssh(const char *keys_dir, const char *bind_addr, int por
 	ssh_bind bind;
 	int ssh_log_level;
 
-	ssh_log_level = SSH_LOG_WARNING + max(log_get_level() - LOG_INFO, 0);
+	ssh_log_level = SSH_LOG_WARNING + max_int(log_get_level(), 0);
 
 	ssh_set_log_callback(ssh_log_function);
 
@@ -440,14 +452,6 @@ static void handle_sigchld(__unused int sig)
 		 * It's not safe to call indirectly malloc() here, because
 		 * of potential deadlocks with other malloc() calls.
 		 */
-#if 0
-		if (WIFEXITED(status))
-			tmate_debug("Child %d exited (%d)", pid, WEXITSTATUS(status));
-		if (WIFSIGNALED(status))
-			tmate_debug("Child %d killed (%d)", pid, WTERMSIG(status));
-		if (WIFSTOPPED(status))
-			tmate_debug("Child %d stopped (%d)", pid, WSTOPSIG(status));
-#endif
 	}
 }
 

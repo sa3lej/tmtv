@@ -146,6 +146,8 @@ void tmate_spawn_daemon(struct tmate_session *session)
 {
 	struct tmate_ssh_client *client = &session->ssh_client;
 	char *token;
+	char *cause = NULL;
+	int fd;
 
 #ifdef DEVENV
 	token = xstrdup("SUPERSECURETOKENFORDEVENV");
@@ -158,9 +160,19 @@ void tmate_spawn_daemon(struct tmate_session *session)
 
 	tmate_info("Spawning daemon ip=%s", client->ip_address);
 
-	session->tmux_socket_fd = server_create_socket();
-	if (session->tmux_socket_fd < 0)
-		tmate_fatal("Cannot create to the tmux socket");
+	/*
+	 * tmux 3.6a: server_create_socket(flags, &cause)
+	 * Returns fd or -1.
+	 */
+	fd = server_create_socket(0, &cause);
+	if (fd < 0) {
+		if (cause) {
+			tmate_fatal("Cannot create tmux socket: %s", cause);
+			free(cause);
+		} else
+			tmate_fatal("Cannot create tmux socket");
+	}
+	session->tmux_socket_fd = fd;
 
 	create_session_ro_symlink(session);
 
@@ -174,15 +186,19 @@ void tmate_spawn_daemon(struct tmate_session *session)
 
 	close_fds_except((int[]){session->tmux_socket_fd,
 				 ssh_get_fd(session->ssh_client.session),
-				 log_file ? fileno(log_file) : -1,
-				 session->websocket_fd}, 4);
+				 session->websocket_fd}, 3);
 
 	get_in_jail();
 	event_reinit(session->ev_base);
 
-	tmux_server_init();
 	signal(SIGTERM, handle_sigterm);
-	server_start(session->ev_base, -1, NULL);
+
+	/*
+	 * tmux 3.6a: server_start(proc, flags, base, lockfd, lockfile)
+	 * We pass NULL for proc (standalone server), 0 flags,
+	 * the session's event base, -1 for no lock fd, NULL for no lock file.
+	 */
+	server_start(NULL, 0, session->ev_base, -1, NULL);
 	/* never reached */
 }
 
