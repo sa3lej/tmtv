@@ -38,8 +38,11 @@ server-unit: $(SERVER_TESTS)
 test-msgpack: test-msgpack.c test-harness.h
 	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) -o $@ $< $(LDFLAGS) $(MSGPACK_LIBS)
 
+# Extract DEFS from parent Makefile (configure-generated HAVE_* flags)
+PARENT_DEFS := $(shell $(MAKE) -C .. -n -p 2>/dev/null | grep '^DEFS = ' | head -1 | sed 's/^DEFS = //')
+
 test-server-header: test-server-header.c test-harness.h ../server/tmate.h ../server/tmate-protocol.h
-	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
+	$(CC) $(CFLAGS) $(PARENT_DEFS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
 
 functional:
 	@echo ""
