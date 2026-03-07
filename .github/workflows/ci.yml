@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, tmtv-rebase]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  build-linux:
+    name: Build (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            autoconf \
+            automake \
+            pkg-config \
+            libevent-dev \
+            libncurses-dev \
+            libssh-dev \
+            libmsgpack-dev \
+            bison \
+            libutf8proc-dev
+
+      - name: Build
+        run: |
+          sh autogen.sh
+          ./configure
+          make -j$(nproc)
+
+      - name: Verify binary
+        run: |
+          ./tmtv -V
+
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install \
+            autoconf \
+            automake \
+            pkg-config \
+            libevent \
+            libssh \
+            msgpack-cxx \
+            bison \
+            utf8proc
+
+      - name: Build
+        run: |
+          export PATH="$(brew --prefix bison)/bin:$PATH"
+          sh autogen.sh
+          ./configure
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Verify binary
+        run: |
+          ./tmtv -V
