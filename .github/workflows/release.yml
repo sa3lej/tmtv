@@ -77,14 +77,17 @@ jobs:
           BREW="$(brew --prefix)"
           OPENSSL="$(brew --prefix openssl@3)"
 
-          # Collect .a paths for all non-system deps
+          # Collect .a paths — use pkg name AND formula name variants
           STATIC_LIBS=""
           for pkg in libevent libssh msgpack-c utf8proc openssl@3; do
-            prefix=$(brew --prefix "$pkg")
+            prefix=$(brew --prefix "$pkg" 2>/dev/null) || continue
             for a in "$prefix"/lib/*.a; do
               [ -f "$a" ] && STATIC_LIBS="$STATIC_LIBS $a"
             done
           done
+          echo "=== Static libs found ==="
+          echo "$STATIC_LIBS" | tr ' ' '\n' | grep .
+          echo "========================="
 
           sh autogen.sh
           ./configure --enable-utf8proc \
