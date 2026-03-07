@@ -48,6 +48,14 @@ jobs:
         run: |
           cd tests && make all
 
+      - name: Upload Linux binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmtv-linux-amd64
+          path: |
+            tmtv
+            tmtv-server
+
   build-macos:
     name: Build (macOS)
     runs-on: macos-latest
@@ -80,3 +88,10 @@ jobs:
       - name: Run tests
         run: |
           cd tests && make all
+
+      - name: Upload macOS binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmtv-macos-arm64
+          path: |
+            tmtv
