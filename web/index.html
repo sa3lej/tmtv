@@ -162,6 +162,15 @@
 (function() {
   'use strict';
 
+  /* --- Helpers --- */
+  var _dec = new TextDecoder();
+  function toStr(v) {
+    if (v instanceof Uint8Array) return _dec.decode(v);
+    if (v && v.buffer instanceof ArrayBuffer) return _dec.decode(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+    if (Array.isArray(v)) return String.fromCharCode.apply(null, v);
+    return String(v);
+  }
+
   /* --- Protocol constants --- */
   var CTL_HEADER         = 0;
   var CTL_DEAMON_OUT_MSG = 1;
@@ -290,7 +299,7 @@
       var win = windows[i];
       if (!Array.isArray(win) || win.length < 2) continue;
       var idx = win[0];
-      var name = win[1];
+      var name = toStr(win[1]);
       var marker = (idx === activeIdx) ? '*' : '-';
       parts.push(idx + ':' + name + marker);
     }
@@ -386,7 +395,6 @@
         if (inner.length >= 3) {
           var sx = inner[1];
           var sy = inner[2];
-          console.log('SYNC_LAYOUT: ' + sx + 'x' + sy + ' (inner len=' + inner.length + ')');
           if (sx > 0 && sy > 0) {
             serverCols = sx;
             serverRows = sy;
@@ -408,8 +416,8 @@
         if (inner.length >= 3) {
           var leftEl = document.getElementById('tmux-status-left');
           var rightEl = document.getElementById('tmux-status-right');
-          if (leftEl && inner[1]) leftEl.textContent = inner[1];
-          if (rightEl && inner[2]) rightEl.textContent = inner[2];
+          if (leftEl && inner[1]) leftEl.textContent = toStr(inner[1]);
+          if (rightEl && inner[2]) rightEl.textContent = toStr(inner[2]);
         }
         break;
 
