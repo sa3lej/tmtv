@@ -25,6 +25,7 @@
 #include <time.h>
 
 #include "tmux.h"
+#include "tmate.h"
 
 struct sessions		sessions;
 u_int			next_session_id;
@@ -112,6 +113,13 @@ session_create(const char *prefix, const char *name, const char *cwd,
     struct environ *env, struct options *oo, struct termios *tio)
 {
 	struct session	*s;
+
+#ifdef TMATE
+	if (next_session_id != 0) {
+		tmate_info("multi sessions is not supported with tmate");
+		return (NULL);
+	}
+#endif
 
 	s = xcalloc(1, sizeof *s);
 	s->references = 1;
@@ -227,6 +235,11 @@ session_destroy(struct session *s, int notify, const char *from)
 	free((void *)s->cwd);
 
 	session_remove_ref(s, __func__);
+
+#ifdef TMATE
+	tmate_info("Session closed");
+	tmate_write_fin();
+#endif
 }
 
 /* Sanitize session name. */
@@ -339,6 +352,10 @@ session_attach(struct session *s, struct window *w, int idx, char **cause)
 	winlink_set_window(wl, w);
 	notify_session_window("window-linked", s, w);
 
+#ifdef TMATE
+	tmate_sync_layout();
+#endif
+
 	session_group_synchronize_from(s);
 	return (wl);
 }
@@ -356,6 +373,10 @@ session_detach(struct session *s, struct winlink *wl)
 	notify_session_window("window-unlinked", s, wl->window);
 	winlink_stack_remove(&s->lastw, wl);
 	winlink_remove(&s->windows, wl);
+
+#ifdef TMATE
+	tmate_sync_layout();
+#endif
 
 	session_group_synchronize_from(s);
 
@@ -498,6 +519,11 @@ session_set_current(struct session *s, struct winlink *wl)
 		window_update_focus(wl->window);
 	}
 	winlink_clear_flags(wl);
+
+#ifdef TMATE
+	tmate_sync_layout();
+#endif
+
 	window_update_activity(wl->window);
 	tty_update_window_offset(wl->window);
 	notify_session("session-window-changed", s);

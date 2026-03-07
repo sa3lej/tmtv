@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "tmux.h"
+#include "tmate.h"
 
 struct client		 *cfg_client;
 int			  cfg_finished;
@@ -50,6 +51,10 @@ cfg_done(__unused struct cmdq_item *item, __unused void *data)
 	if (cfg_finished)
 		return (CMD_RETURN_NORMAL);
 	cfg_finished = 1;
+
+#ifdef TMATE
+	tmate_session_start();
+#endif
 
 	cfg_show_causes(NULL);
 
