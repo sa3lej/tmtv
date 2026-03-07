@@ -193,25 +193,41 @@ static void sse_send_sync_layout(struct bufferevent *bev)
 	/* Windows array */
 	msgpack_pack_array(&pk, num_windows);
 	RB_FOREACH(wl, winlinks, &s->windows) {
+		struct window_pane *wp;
+		int num_panes = 0;
+		int active_pane_id = -1;
+
 		w = wl->window;
 		if (!w)
 			continue;
-		/* [idx, name, panes(empty), active_pane_id(-1)] */
+
+		TAILQ_FOREACH(wp, &w->panes, entry)
+			num_panes++;
+
+		/* [idx, name, [[pane_id, sx, sy, xoff, yoff], ...], active_pane_id] */
 		msgpack_pack_array(&pk, 4);
 		msgpack_pack_int(&pk, wl->idx);
 		msgpack_pack_str(&pk, strlen(w->name));
 		msgpack_pack_str_body(&pk, w->name, strlen(w->name));
-		msgpack_pack_array(&pk, 0); /* no panes needed for browser */
-		msgpack_pack_int(&pk, -1);
+
+		msgpack_pack_array(&pk, num_panes);
+		TAILQ_FOREACH(wp, &w->panes, entry) {
+			msgpack_pack_array(&pk, 5);
+			msgpack_pack_int(&pk, wp->id);
+			msgpack_pack_int(&pk, wp->sx);
+			msgpack_pack_int(&pk, wp->sy);
+			msgpack_pack_int(&pk, wp->xoff);
+			msgpack_pack_int(&pk, wp->yoff);
+			if (wp == w->active)
+				active_pane_id = wp->id;
+		}
+		msgpack_pack_int(&pk, active_pane_id);
 	}
 
 	msgpack_pack_int(&pk, active_idx);
 
 	sse_send_data(bev, (unsigned char *)sbuf.data, sbuf.size);
 	msgpack_sbuffer_destroy(&sbuf);
-
-	tmate_info("sse_sync_layout: %dx%d, %d windows, active=%d",
-		   sx, sy, num_windows, active_idx);
 }
 
 static void sse_send_pane_dump(struct bufferevent *bev,

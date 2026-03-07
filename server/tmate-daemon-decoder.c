@@ -552,15 +552,13 @@ static void restore_snapshot_pane(struct tmate_unpacker *uk)
 }
 
 static void tmate_snapshot(__unused struct tmate_session *session,
-			   struct tmate_unpacker *uk)
+			   __unused struct tmate_unpacker *uk)
 {
-	struct tmate_unpacker panes_uk, pane_uk;
-
-	unpack_array(uk, &panes_uk);
-	while (panes_uk.argc > 0) {
-		unpack_array(&panes_uk, &pane_uk);
-		restore_snapshot_pane(&pane_uk);
-	}
+	/*
+	 * Snapshot restore is not needed — the server builds its own
+	 * grid from PTY data, and SSE clients get screen dumps directly.
+	 * Skip to avoid format mismatches between client/server.
+	 */
 }
 
 void tmate_dispatch_daemon_message(struct tmate_session *session,

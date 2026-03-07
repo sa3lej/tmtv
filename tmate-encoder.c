@@ -372,15 +372,14 @@ static void do_snapshot_grid(struct grid *grid, unsigned int max_history_lines)
 		for (i = 0; i < line->cellsize; i++) {
 			grid_get_cell(grid, i, line_i, &gc);
 			/*
-			 * In tmux 3.6a, gc.fg/gc.bg are int (not u_char).
-			 * Pack as array of [fg, bg, attr, flags] for
-			 * compatibility with wider color values.
+			 * Pack as single int matching server decoder format:
+			 * (flags << 24) | (attr << 16) | (bg << 8) | fg
+			 * Truncates fg/bg to 8 bits (palette colors).
 			 */
-			pack(array, 4);
-			pack(int, gc.fg);
-			pack(int, gc.bg);
-			pack(unsigned_int, gc.attr);
-			pack(unsigned_int, gc.flags);
+			pack(unsigned_int, ((gc.flags << 24) |
+					    (gc.attr  << 16) |
+					    ((gc.bg & 0xFF) << 8) |
+					    (gc.fg & 0xFF)));
 		}
 	}
 

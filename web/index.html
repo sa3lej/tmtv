@@ -96,7 +96,7 @@
   #terminal-container {
     background: #0d0d1a;
     position: relative;
-    flex: 1;
+    flex: 0 0 auto;
     overflow: hidden;
   }
 
@@ -160,7 +160,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@msgpack/msgpack@3.0.0-beta2/dist.es5+umd/msgpack.min.js"></script>
 <script>
 (function() {
@@ -214,13 +213,17 @@
   /* --- Multi-pane state --- */
   var serverCols = window.serverCols = 80;
   var serverRows = window.serverRows = 24;
+  var contentRows = 24; /* actual pane content rows (serverRows - status line) */
   var panes = {};       // pane_id -> { term, el, sx, sy }
+  var pendingData = {}; // pane_id -> [data chunks] buffered before pane created
   var cellW = 0, cellH = 0;
+  var fontSize = 14;
+  var cellRatioW = 0, cellRatioH = 0; // cell size per font point
   var container = document.getElementById('terminal-container');
 
-  /* Measure cell size using a temporary terminal */
-  function ensureCellSize() {
-    if (cellW > 0 && cellH > 0) return;
+  /* Measure cell-to-font ratio using a temporary terminal */
+  function measureCellRatio() {
+    if (cellRatioW > 0) return;
     var tmp = document.createElement('div');
     tmp.style.position = 'absolute';
     tmp.style.visibility = 'hidden';
@@ -234,19 +237,31 @@
     try {
       var dims = t._core._renderService.dimensions;
       if (dims && dims.css && dims.css.cell) {
-        cellW = dims.css.cell.width;
-        cellH = dims.css.cell.height;
+        cellRatioW = dims.css.cell.width / 14;
+        cellRatioH = dims.css.cell.height / 14;
       }
     } catch (e) {}
     t.dispose();
     document.body.removeChild(tmp);
-    if (!cellW || !cellH) { cellW = 8.4; cellH = 16.1; }
+    if (!cellRatioW || !cellRatioH) { cellRatioW = 0.6; cellRatioH = 1.15; }
+  }
+
+  /* Compute optimal font size to fill the viewport */
+  function computeFontSize() {
+    measureCellRatio();
+    var availW = window.innerWidth - 32;
+    var availH = window.innerHeight - 32 - 38 - 20; /* margins, titlebar, status */
+    var maxFromW = availW / (serverCols * cellRatioW);
+    var maxFromH = availH / (contentRows * cellRatioH);
+    fontSize = Math.max(6, Math.min(Math.floor(Math.min(maxFromW, maxFromH)), 22));
+    cellW = fontSize * cellRatioW;
+    cellH = fontSize * cellRatioH;
   }
 
   function createPaneTerminal(sx, sy) {
     var t = new Terminal({
       fontFamily: FONT,
-      fontSize: 14,
+      fontSize: fontSize,
       lineHeight: 1.15,
       theme: THEME,
       cols: sx,
@@ -280,7 +295,18 @@
     }
     if (!paneList || !Array.isArray(paneList)) return;
 
-    ensureCellSize();
+    /* Compute content height from pane layout */
+    var maxRow = 0;
+    for (var i = 0; i < paneList.length; i++) {
+      var p = paneList[i];
+      if (Array.isArray(p) && p.length >= 5) {
+        var bottom = p[4] + p[2]; /* yoff + sy */
+        if (bottom > maxRow) maxRow = bottom;
+      }
+    }
+    if (maxRow > 0) contentRows = maxRow;
+
+    computeFontSize();
 
     var seen = {};
 
@@ -307,6 +333,9 @@
         pane.el.style.top = top + 'px';
         pane.el.style.width = width + 'px';
         pane.el.style.height = height + 'px';
+        if (pane.term.options.fontSize !== fontSize) {
+          pane.term.options.fontSize = fontSize;
+        }
         if (pane.term.cols !== sx || pane.term.rows !== sy) {
           pane.term.resize(sx, sy);
         }
@@ -325,9 +354,17 @@
 
         var t = createPaneTerminal(sx, sy);
         t.open(el);
-        try { t.loadAddon(new WebglAddon.WebglAddon()); } catch (e) {}
 
         panes[id] = { term: t, el: el, sx: sx, sy: sy };
+
+        /* Flush any buffered data for this pane */
+        if (pendingData[id]) {
+          for (var j = 0; j < pendingData[id].length; j++) {
+            var d = pendingData[id][j];
+            t.write(d instanceof Uint8Array ? d : String(d));
+          }
+          delete pendingData[id];
+        }
       }
 
       /* Set cursor blink only on active pane */
@@ -367,9 +404,9 @@
 
   /* Resize the terminal-wrap to fit the server's terminal dimensions */
   function sizeToServer() {
-    ensureCellSize();
+    computeFontSize();
     var contentW = Math.ceil(serverCols * cellW);
-    var contentH = Math.ceil(serverRows * cellH);
+    var contentH = Math.ceil(contentRows * cellH);
     var totalH = 38 + contentH + 20;
 
     var wrap = document.getElementById('terminal-wrap');
@@ -378,6 +415,7 @@
 
     wrap.style.width = Math.min(contentW, maxW) + 'px';
     wrap.style.height = Math.min(totalH, maxH) + 'px';
+    container.style.height = contentH + 'px';
   }
 
   window.addEventListener('resize', function() { sizeToServer(); });
@@ -433,49 +471,32 @@
   function connect() {
     setStatus('Connecting...');
 
-    fetch(sseUrl).then(function(response) {
-      if (!response.ok) throw new Error('HTTP ' + response.status);
+    var es = new EventSource(sseUrl);
+
+    es.onopen = function() {
       setStatus('Connected', 'connected');
+    };
 
-      var reader = response.body.getReader();
-      var decoder = new TextDecoder();
-      var buf = '';
+    es.onmessage = function(evt) {
+      var binary = atob(evt.data);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++)
+        bytes[i] = binary.charCodeAt(i);
+      try {
+        var iter = MessagePack.decodeMulti(bytes);
+        var result = iter.next();
+        while (!result.done) {
+          handleMessage(result.value);
+          result = iter.next();
+        }
+      } catch (e) {}
+    };
 
-      function pump() {
-        return reader.read().then(function(result) {
-          if (result.done) {
-            setStatus('Session ended', 'error');
-            return;
-          }
-          buf += decoder.decode(result.value, { stream: true });
-
-          var parts = buf.split('\n\n');
-          buf = parts.pop();
-          for (var i = 0; i < parts.length; i++) {
-            var line = parts[i];
-            if (line.indexOf('data: ') !== 0) continue;
-            var b64 = line.substring(6);
-            try {
-              var binary = atob(b64);
-              var bytes = new Uint8Array(binary.length);
-              for (var j = 0; j < binary.length; j++)
-                bytes[j] = binary.charCodeAt(j);
-              var iter = MessagePack.decodeMulti(bytes);
-              var msg = iter.next();
-              while (!msg.done) {
-                handleMessage(msg.value);
-                msg = iter.next();
-              }
-            } catch (e) {}
-          }
-          return pump();
-        });
+    es.onerror = function() {
+      if (es.readyState === EventSource.CLOSED) {
+        setStatus('Session ended', 'error');
       }
-      return pump();
-    }).catch(function(err) {
-      setStatus('Disconnected. Reconnecting...', 'error');
-      setTimeout(connect, 2000);
-    });
+    };
   }
 
   function handleMessage(msg) {
@@ -503,24 +524,12 @@
         if (inner.length >= 3) {
           var paneId = inner[1];
           var ptyData = inner[2];
-          /* Route to correct pane terminal */
           var pane = panes[paneId];
           if (pane) {
-            if (ptyData instanceof Uint8Array) {
-              pane.term.write(ptyData);
-            } else if (typeof ptyData === 'string') {
-              pane.term.write(ptyData);
-            }
+            pane.term.write(ptyData instanceof Uint8Array ? ptyData : String(ptyData));
           } else {
-            /* Fallback: write to first available pane (e.g. screen dump with id 0) */
-            for (var k in panes) {
-              if (ptyData instanceof Uint8Array) {
-                panes[k].term.write(ptyData);
-              } else if (typeof ptyData === 'string') {
-                panes[k].term.write(ptyData);
-              }
-              break;
-            }
+            if (!pendingData[paneId]) pendingData[paneId] = [];
+            pendingData[paneId].push(ptyData);
           }
         }
         break;
@@ -534,12 +543,12 @@
             serverRows = sy;
             window.serverCols = sx;
             window.serverRows = sy;
-            sizeToServer();
           }
           if (inner.length >= 5) {
             updateWindowList(inner[3], inner[4]);
             updatePaneLayout(inner[3], inner[4]);
           }
+          sizeToServer();
         }
         break;
 
