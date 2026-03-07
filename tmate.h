@@ -9,9 +9,13 @@
 
 #include "tmux.h"
 
-#define tmate_debug(...) log_emit(LOG_DEBUG, __VA_ARGS__)
-#define tmate_info(...)  log_emit(LOG_INFO,  __VA_ARGS__)
-#define tmate_fatal(...) fatalx( __VA_ARGS__)
+#define tmate_debug(...) log_debug(__VA_ARGS__)
+#define tmate_info(...)  log_debug(__VA_ARGS__)
+#define tmate_fatal(...) fatalx(__VA_ARGS__)
+
+/* Global foreground mode flag (defined in tmux.c) */
+extern int tmate_foreground;
+extern char *socket_path;
 
 /* tmate-msgpack.c */
 

@@ -1,70 +1,34 @@
 #include <time.h>
 #include "tmate.h"
 
-void status_message_callback(int, short, void *);
-
-/* Very similar to status.c:status_message_set */
-
 static void tmate_status_message_client(struct client *c, const char *message)
 {
-	struct timeval		 tv;
-	struct message_entry	*msg, *msg1;
-	int			 delay;
-	u_int			 limit;
+	int delay;
 
-	limit = options_get_number(global_options, "message-limit");
-	delay = options_get_number(c->session ? c->session->options : global_s_options,
-				   "tmate-display-time");
+	delay = options_get_number(c->session ? c->session->options :
+	    global_s_options, "tmate-display-time");
 
-	status_prompt_clear(c);
-	status_message_clear(c);
-
-	xasprintf(&c->message_string, "[tmate] %s", message);
-
-	msg = xcalloc(1, sizeof *msg);
-	msg->msg_time = time(NULL);
-	msg->msg_num = c->message_next++;
-	msg->msg = xstrdup(c->message_string);
-	TAILQ_INSERT_TAIL(&c->message_log, msg, entry);
-
-	TAILQ_FOREACH_SAFE(msg, &c->message_log, entry, msg1) {
-		if (msg->msg_num + limit >= c->message_next)
-			break;
-		free(msg->msg);
-		TAILQ_REMOVE(&c->message_log, msg, entry);
-		free(msg);
-	}
-
-	if (delay > 0) {
-		tv.tv_sec = delay / 1000;
-		tv.tv_usec = (delay % 1000) * 1000L;
-
-		if (event_initialized(&c->message_timer))
-			evtimer_del(&c->message_timer);
-		evtimer_set(&c->message_timer, status_message_callback, c);
-		evtimer_add(&c->message_timer, &tv);
-	}
-
-	c->flags |= CLIENT_STATUS | CLIENT_FORCE_STATUS;
-
-	recalculate_sizes();
+	status_message_set(c, delay, 0, 0, 0, "[tmate] %s", message);
 }
 
 static void tmate_status_message_session(const char *message)
 {
+	struct session *s;
+	struct window_pane *wp;
+	struct window_mode_entry *wme;
+
 	if (tmate_foreground)
 		return;
 
-	struct session *s;
 	s = RB_MIN(sessions, &sessions);
 	if (!s) {
 		cfg_add_cause("%s", message);
 		return;
 	}
 
-	struct window_pane *wp;
 	wp = s->curw->window->active;
-	if (wp->mode == &window_copy_mode)
+	wme = TAILQ_FIRST(&wp->modes);
+	if (wme != NULL && wme->mode == &window_copy_mode)
 		window_copy_add(wp, "%s", message);
 }
 

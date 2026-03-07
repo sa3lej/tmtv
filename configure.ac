@@ -1,6 +1,6 @@
 # configure.ac
 
-AC_INIT([tmux], 3.6a)
+AC_INIT([tmtv], 3.6a)
 AC_PREREQ([2.60])
 
 AC_CONFIG_AUX_DIR(etc)
@@ -268,6 +268,50 @@ AC_CHECK_HEADER(
 )
 if test "x$found_libevent" = xno; then
 	AC_MSG_ERROR("libevent not found")
+fi
+
+# Look for libssh (for tmate).
+PKG_CHECK_MODULES(
+	LIBSSH,
+	[libssh >= 0.8.4],
+	[
+		AM_CPPFLAGS="$LIBSSH_CFLAGS $AM_CPPFLAGS"
+		CPPFLAGS="$LIBSSH_CFLAGS $SAVED_CPPFLAGS"
+		LIBS="$LIBSSH_LIBS $LIBS"
+		found_libssh=yes
+	],
+	found_libssh=no
+)
+if test "x$found_libssh" = xno; then
+	AC_MSG_ERROR("libssh >= 0.8.4 not found (required for tmate)")
+fi
+
+# Look for msgpack (for tmate).
+PKG_CHECK_MODULES(
+	MSGPACK,
+	[msgpack-c >= 1.1.0],
+	[
+		AM_CPPFLAGS="$MSGPACK_CFLAGS $AM_CPPFLAGS"
+		CPPFLAGS="$MSGPACK_CFLAGS $SAVED_CPPFLAGS"
+		LIBS="$MSGPACK_LIBS $LIBS"
+		found_msgpack=yes
+	],
+	[
+		PKG_CHECK_MODULES(
+			MSGPACK,
+			[msgpack >= 1.1.0],
+			[
+				AM_CPPFLAGS="$MSGPACK_CFLAGS $AM_CPPFLAGS"
+				CPPFLAGS="$MSGPACK_CFLAGS $SAVED_CPPFLAGS"
+				LIBS="$MSGPACK_LIBS $LIBS"
+				found_msgpack=yes
+			],
+			found_msgpack=no
+		)
+	]
+)
+if test "x$found_msgpack" = xno; then
+	AC_MSG_ERROR("msgpack not found (required for tmate)")
 fi
 
 # Look for yacc.

@@ -8,7 +8,6 @@
 #include <assert.h>
 
 #include "tmate.h"
-#include "window-copy.h"
 
 static void on_ssh_client_event(struct tmate_ssh_client *client);
 static void __on_ssh_client_event(evutil_socket_t fd, short what, void *arg);
@@ -93,16 +92,17 @@ static void on_ssh_auth_server_complete(struct tmate_ssh_client *connected_clien
 
 static char *get_identity(void)
 {
+	const char *opt;
 	char *identity;
 
-	identity = options_get_string(global_options, "tmate-identity");
-	if (!strlen(identity))
+	opt = options_get_string(global_options, "tmate-identity");
+	if (!strlen(opt))
 		return NULL;
 
-	if (strchr(identity, '/'))
-		identity = xstrdup(identity);
+	if (strchr(opt, '/'))
+		identity = xstrdup(opt);
 	else
-		xasprintf(&identity, "%%d/%s", identity);
+		xasprintf(&identity, "%%d/%s", opt);
 
 	return identity;
 }
@@ -133,38 +133,20 @@ static void on_passphrase_read(const char *passphrase, void *private)
 static void request_passphrase(struct tmate_ssh_client *client)
 {
 	struct window_pane *wp;
-	struct window_copy_mode_data *data;
 
 	/*
-	 * We'll display the prompt on the first pane.
-	 * It doesn't make much sense, but it's simpler to reuse the copy mode
-	 * and its key parsing logic compared to rolling something on our own.
+	 * In tmux 3.6a, the copy mode internals are private.
+	 * Use the status prompt to request passphrase instead.
 	 */
 	wp = RB_MIN(window_pane_tree, &all_window_panes);
+	if (wp == NULL)
+		return;
 
-	if (wp->mode) {
-		data = wp->modedata;
-		if (data->inputtype == WINDOW_COPY_PASSWORD) {
-			/* We are already requesting the passphrase */
-			return;
-		}
-		window_pane_reset_mode(wp);
-	}
-
-	window_pane_set_mode(wp, &window_copy_mode);
-	window_copy_init_from_pane(wp, 0);
-	data = wp->modedata;
-
-	data->inputtype = WINDOW_COPY_PASSWORD;
-	data->inputprompt = "SSH key passphrase";
-
-	mode_key_init(&data->mdata, &mode_key_tree_vi_edit);
-
-	window_copy_update_selection(wp, 1);
-	window_copy_redraw_screen(wp);
-
-	data->password_cb = on_passphrase_read;
-	data->password_cb_private = client;
+	/* TODO: Implement proper passphrase prompt using status_prompt_set
+	 * For now, log a message directing the user to use ssh-agent */
+	tmate_status_message("SSH key requires passphrase. Use ssh-agent or ssh-add.");
+	(void)on_passphrase_read;
+	(void)client;
 }
 
 #define KEEPALIVE_IDLE		30
