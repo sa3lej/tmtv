@@ -1,12 +1,12 @@
 # Obvious program stuff.
-bin_PROGRAMS = tmux
+bin_PROGRAMS = tmtv
 CLEANFILES = tmux.1.mdoc tmux.1.man cmd-parse.c
 
 # Distribution tarball options.
 EXTRA_DIST = \
 	CHANGES README README.ja COPYING example_tmux.conf \
 	osdep-*.c mdoc2man.awk tmux.1
-dist_EXTRA_tmux_SOURCES = compat/*.[ch]
+dist_EXTRA_tmtv_SOURCES = compat/*.[ch]
 
 # Preprocessor flags.
 AM_CPPFLAGS += @XOPEN_DEFINES@ \
@@ -72,7 +72,7 @@ AM_CPPFLAGS += -DTMUX_SOCK_PERM=0
 endif
 
 # List of sources.
-dist_tmux_SOURCES = \
+dist_tmtv_SOURCES = \
 	alerts.c \
 	arguments.c \
 	attributes.c \
@@ -215,32 +215,32 @@ dist_tmux_SOURCES = \
 	tmate-msgpack.c \
 	tmate-session.c \
 	tmate-ssh-client.c
-nodist_tmux_SOURCES = osdep-@PLATFORM@.c
+nodist_tmtv_SOURCES = osdep-@PLATFORM@.c
 
 # Add compat file for forkpty.
 if NEED_FORKPTY
-nodist_tmux_SOURCES += compat/forkpty-@PLATFORM@.c
+nodist_tmtv_SOURCES += compat/forkpty-@PLATFORM@.c
 endif
 
 # Add compat file for systemd.
 if HAVE_SYSTEMD
-nodist_tmux_SOURCES += compat/systemd.c
+nodist_tmtv_SOURCES += compat/systemd.c
 endif
 
 # Add compat file for utf8proc.
 if HAVE_UTF8PROC
-nodist_tmux_SOURCES += compat/utf8proc.c
+nodist_tmtv_SOURCES += compat/utf8proc.c
 endif
 
 # Enable sixel support.
 if ENABLE_SIXEL
-dist_tmux_SOURCES += image.c image-sixel.c
+dist_tmtv_SOURCES += image.c image-sixel.c
 endif
 
 if NEED_FUZZING
 check_PROGRAMS = fuzz/input-fuzzer
 fuzz_input_fuzzer_LDFLAGS = $(FUZZING_LIBS)
-fuzz_input_fuzzer_LDADD = $(LDADD) $(tmux_OBJECTS)
+fuzz_input_fuzzer_LDADD = $(LDADD) $(tmtv_OBJECTS)
 endif
 
 # Install tmux.1 in the right format.

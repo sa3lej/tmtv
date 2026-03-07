@@ -29,7 +29,7 @@ static void tmate_status_message_session(const char *message)
 	wp = s->curw->window->active;
 	wme = TAILQ_FIRST(&wp->modes);
 	if (wme != NULL && wme->mode == &window_copy_mode)
-		window_copy_add(wp, "%s", message);
+		window_copy_add(wp, 0, "%s", message);
 }
 
 void __tmate_status_message(const char *fmt, va_list ap)
