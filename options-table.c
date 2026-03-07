@@ -1022,6 +1022,102 @@ const struct options_table_entry options_table[] = {
 	  .text = "Characters considered to separate words."
 	},
 
+	/* tmate options (session scope, stored in global_options). */
+	{ .name = "tmate-server-host",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "ssh.tmate.io",
+	  .text = "tmate server hostname."
+	},
+
+	{ .name = "tmate-server-port",
+	  .type = OPTIONS_TABLE_NUMBER,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .minimum = 1,
+	  .maximum = 65535,
+	  .default_num = 22,
+	  .text = "tmate server SSH port."
+	},
+
+	{ .name = "tmate-server-rsa-fingerprint",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "tmate server RSA host key fingerprint."
+	},
+
+	{ .name = "tmate-server-ecdsa-fingerprint",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "tmate server ECDSA host key fingerprint."
+	},
+
+	{ .name = "tmate-server-ed25519-fingerprint",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "tmate server Ed25519 host key fingerprint."
+	},
+
+	{ .name = "tmate-identity",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "SSH identity file for tmate."
+	},
+
+	{ .name = "tmate-authorized-keys",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "Path to authorized_keys for tmate access control."
+	},
+
+	{ .name = "tmate-display-time",
+	  .type = OPTIONS_TABLE_NUMBER,
+	  .scope = OPTIONS_TABLE_SESSION,
+	  .minimum = 0,
+	  .maximum = 60000,
+	  .default_num = 5000,
+	  .text = "Duration of tmate status messages in milliseconds."
+	},
+
+	{ .name = "tmate-foreground-restart",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .scope = OPTIONS_TABLE_SESSION,
+	  .default_num = 0,
+	  .text = "Restart session shell in foreground mode."
+	},
+
+	{ .name = "tmate-set",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "Internal tmate key=value transport."
+	},
+
+	{ .name = "tmate-api-key",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "API key for named tmate sessions."
+	},
+
+	{ .name = "tmate-session-name",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "Named session token for tmate."
+	},
+
+	{ .name = "tmate-session-name-ro",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "Read-only named session token for tmate."
+	},
+
 	/* Window options. */
 	{ .name = "aggressive-resize",
 	  .type = OPTIONS_TABLE_FLAG,

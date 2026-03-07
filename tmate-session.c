@@ -140,12 +140,14 @@ void tmate_session_init(struct event_base *base)
 
 static void send_authorized_keys(void)
 {
+	const char *opt_path;
 	char *path;
-	path = options_get_string(global_options, "tmate-authorized-keys");
-	if (strlen(path) == 0)
+
+	opt_path = options_get_string(global_options, "tmate-authorized-keys");
+	if (strlen(opt_path) == 0)
 		return;
 
-	path = xstrdup(path);
+	path = xstrdup(opt_path);
 	tmate_info("Using %s for access control", path);
 
 	FILE *f;

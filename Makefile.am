@@ -204,7 +204,17 @@ dist_tmux_SOURCES = \
 	window-tree.c \
 	window.c \
 	xmalloc.c \
-	xmalloc.h
+	xmalloc.h \
+	tmate.h \
+	tmate-protocol.h \
+	tmate-debug.c \
+	tmate-decoder.c \
+	tmate-encoder.c \
+	tmate-env.c \
+	tmate-msg.c \
+	tmate-msgpack.c \
+	tmate-session.c \
+	tmate-ssh-client.c
 nodist_tmux_SOURCES = osdep-@PLATFORM@.c
 
 # Add compat file for forkpty.
