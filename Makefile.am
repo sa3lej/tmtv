@@ -1,5 +1,8 @@
 # Obvious program stuff.
 bin_PROGRAMS = tmtv
+if IS_LINUX
+bin_PROGRAMS += tmtv-server
+endif
 CLEANFILES = tmux.1.mdoc tmux.1.man cmd-parse.c
 
 # Distribution tarball options.
@@ -218,24 +221,195 @@ dist_tmtv_SOURCES = \
 	tmate-ssh-client.c
 nodist_tmtv_SOURCES = osdep-@PLATFORM@.c
 
+# tmtv-server: tmate SSH server binary (Linux only).
+# Shares tmux core sources with tmtv, but uses server/ tmate files
+# instead of client-side tmate files, and has its own main().
+if IS_LINUX
+tmtv_server_CPPFLAGS = -DTMATE_SERVER_BUILD $(AM_CPPFLAGS)
+dist_tmtv_server_SOURCES = \
+	alerts.c \
+	arguments.c \
+	attributes.c \
+	cfg.c \
+	client.c \
+	cmd-attach-session.c \
+	cmd-bind-key.c \
+	cmd-break-pane.c \
+	cmd-capture-pane.c \
+	cmd-choose-tree.c \
+	cmd-command-prompt.c \
+	cmd-confirm-before.c \
+	cmd-copy-mode.c \
+	cmd-detach-client.c \
+	cmd-display-menu.c \
+	cmd-display-message.c \
+	cmd-display-panes.c \
+	cmd-find-window.c \
+	cmd-find.c \
+	cmd-if-shell.c \
+	cmd-join-pane.c \
+	cmd-kill-pane.c \
+	cmd-kill-server.c \
+	cmd-kill-session.c \
+	cmd-kill-window.c \
+	cmd-list-buffers.c \
+	cmd-list-clients.c \
+	cmd-list-keys.c \
+	cmd-list-panes.c \
+	cmd-list-sessions.c \
+	cmd-list-windows.c \
+	cmd-load-buffer.c \
+	cmd-lock-server.c \
+	cmd-move-window.c \
+	cmd-new-session.c \
+	cmd-new-window.c \
+	cmd-parse.y \
+	cmd-paste-buffer.c \
+	cmd-pipe-pane.c \
+	cmd-queue.c \
+	cmd-refresh-client.c \
+	cmd-rename-session.c \
+	cmd-rename-window.c \
+	cmd-resize-pane.c \
+	cmd-resize-window.c \
+	cmd-respawn-pane.c \
+	cmd-respawn-window.c \
+	cmd-rotate-window.c \
+	cmd-run-shell.c \
+	cmd-save-buffer.c \
+	cmd-select-layout.c \
+	cmd-select-pane.c \
+	cmd-select-window.c \
+	cmd-send-keys.c \
+	cmd-server-access.c \
+	cmd-set-buffer.c \
+	cmd-set-environment.c \
+	cmd-set-option.c \
+	cmd-show-environment.c \
+	cmd-show-messages.c \
+	cmd-show-options.c \
+	cmd-show-prompt-history.c \
+	cmd-source-file.c \
+	cmd-split-window.c \
+	cmd-swap-pane.c \
+	cmd-swap-window.c \
+	cmd-switch-client.c \
+	cmd-unbind-key.c \
+	cmd-wait-for.c \
+	cmd.c \
+	colour.c \
+	compat.h \
+	control-notify.c \
+	control.c \
+	environ.c \
+	file.c \
+	format.c \
+	format-draw.c \
+	grid-reader.c \
+	grid-view.c \
+	grid.c \
+	hyperlinks.c \
+	input-keys.c \
+	input.c \
+	job.c \
+	key-bindings.c \
+	key-string.c \
+	layout-custom.c \
+	layout-set.c \
+	layout.c \
+	log.c \
+	menu.c \
+	mode-tree.c \
+	names.c \
+	notify.c \
+	options-table.c \
+	options.c \
+	paste.c \
+	popup.c \
+	proc.c \
+	regsub.c \
+	resize.c \
+	screen-redraw.c \
+	screen-write.c \
+	screen.c \
+	server-acl.c \
+	server-client.c \
+	server-fn.c \
+	server.c \
+	session.c \
+	spawn.c \
+	status.c \
+	style.c \
+	tmux.c \
+	tmux.h \
+	tmux-protocol.h \
+	tty-acs.c \
+	tty-features.c \
+	tty-keys.c \
+	tty-term.c \
+	tty.c \
+	utf8-combined.c \
+	utf8.c \
+	window-buffer.c \
+	window-client.c \
+	window-clock.c \
+	window-copy.c \
+	window-customize.c \
+	window-tree.c \
+	window.c \
+	xmalloc.c \
+	xmalloc.h \
+	tmate.h \
+	tmate-protocol.h \
+	server/tmate.h \
+	server/tmate-auth-keys.c \
+	server/tmate-daemon-decoder.c \
+	server/tmate-daemon-encoder.c \
+	server/tmate-daemon-legacy.c \
+	server/tmate-debug.c \
+	server/tmate-main.c \
+	server/tmate-msgpack.c \
+	server/tmate-rand.c \
+	server/tmate-ssh-client-pty.c \
+	server/tmate-ssh-daemon.c \
+	server/tmate-ssh-exec.c \
+	server/tmate-ssh-latency.c \
+	server/tmate-ssh-server.c \
+	server/tmate-websocket.c \
+	server/tmate-client-stubs.c
+nodist_tmtv_server_SOURCES = osdep-@PLATFORM@.c
+endif
+
 # Add compat file for forkpty.
 if NEED_FORKPTY
 nodist_tmtv_SOURCES += compat/forkpty-@PLATFORM@.c
+if IS_LINUX
+nodist_tmtv_server_SOURCES += compat/forkpty-@PLATFORM@.c
+endif
 endif
 
 # Add compat file for systemd.
 if HAVE_SYSTEMD
 nodist_tmtv_SOURCES += compat/systemd.c
+if IS_LINUX
+nodist_tmtv_server_SOURCES += compat/systemd.c
+endif
 endif
 
 # Add compat file for utf8proc.
 if HAVE_UTF8PROC
 nodist_tmtv_SOURCES += compat/utf8proc.c
+if IS_LINUX
+nodist_tmtv_server_SOURCES += compat/utf8proc.c
+endif
 endif
 
 # Enable sixel support.
 if ENABLE_SIXEL
 dist_tmtv_SOURCES += image.c image-sixel.c
+if IS_LINUX
+dist_tmtv_server_SOURCES += image.c image-sixel.c
+endif
 endif
 
 if NEED_FUZZING

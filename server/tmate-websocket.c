@@ -219,7 +219,7 @@ void tmate_websocket_exec(struct tmate_session *session, const char *command)
 void tmate_notify_client_join(__unused struct tmate_session *session,
 			      struct client *c)
 {
-	tmate_info("Client joined (cid=%d)", c->id);
+	tmate_info("Client joined (pid=%d)", c->pid);
 
 	if (!tmate_has_websocket())
 		return;
@@ -228,7 +228,7 @@ void tmate_notify_client_join(__unused struct tmate_session *session,
 
 	pack(array, 5);
 	pack(int, TMATE_CTL_CLIENT_JOIN);
-	pack(int, c->id);
+	pack(int, c->pid);
 	pack(string, c->ip_address);
 	pack_string_or_nil(c->pubkey);
 	pack(boolean, c->readonly);
@@ -240,7 +240,7 @@ void tmate_notify_client_left(__unused struct tmate_session *session,
 	if (!(c->flags & CLIENT_IDENTIFIED))
 		return;
 
-	tmate_info("Client left (cid=%d)", c->id);
+	tmate_info("Client left (pid=%d)", c->pid);
 
 	if (!tmate_has_websocket())
 		return;
@@ -252,7 +252,7 @@ void tmate_notify_client_left(__unused struct tmate_session *session,
 
 	pack(array, 2);
 	pack(int, TMATE_CTL_CLIENT_LEFT);
-	pack(int, c->id);
+	pack(int, c->pid);
 }
 
 void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,

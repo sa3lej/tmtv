@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <signal.h>
 #include <unistd.h>
 #include "tmate.h"
 #include "tmate-protocol.h"
@@ -169,7 +170,7 @@ static void tmate_sync_window_panes(struct window *w,
 	window_set_active_pane(w, wp, 0);
 }
 
-static void tmate_sync_windows(struct session *s,
+static void tmate_sync_windows(struct session *s, int sx, int sy,
 			       struct tmate_unpacker *s_uk)
 {
 	struct tmate_unpacker uk, tmp_uk;
@@ -191,7 +192,7 @@ static void tmate_sync_windows(struct session *s,
 			 * tmux 3.6a: no session_new(). Create a window directly
 			 * and link it.
 			 */
-			w = window_create(s->sx, s->sy, 0, 0);
+			w = window_create(sx, sy, 0, 0);
 			wl = session_attach(s, w, idx, NULL);
 			if (!wl)
 				tmate_fatal("can't create window idx=%d", idx);
@@ -251,10 +252,7 @@ static void tmate_sync_layout(__unused struct tmate_session *session,
 			tmate_fatal("can't create main session");
 	}
 
-	s->sx = sx;
-	s->sy = sy;
-
-	tmate_sync_windows(s, uk);
+	tmate_sync_windows(s, sx, sy, uk);
 }
 
 static void tmate_pty_data(__unused struct tmate_session *session,
@@ -362,8 +360,9 @@ static void tmate_failed_cmd(__unused struct tmate_session *session,
 	client_id = unpack_int(uk);
 	cause = unpack_string(uk);
 
+	int cid = 0;
 	TAILQ_FOREACH(c, &clients, entry) {
-		if (c && (int)c->id == client_id) {
+		if (c && cid == client_id) {
 			*cause = toupper((u_char) *cause);
 			/*
 			 * tmux 3.6a: status_message_set(c, delay, ignore_styles,
@@ -372,6 +371,7 @@ static void tmate_failed_cmd(__unused struct tmate_session *session,
 			status_message_set(c, -1, 0, 0, 0, "%s", cause);
 			break;
 		}
+		cid++;
 	}
 
 	free(cause);
@@ -388,7 +388,7 @@ static void tmate_status(__unused struct tmate_session *session,
 	tmate_right_status = unpack_string(uk);
 
 	TAILQ_FOREACH(c, &clients, entry)
-		c->flags |= CLIENT_STATUS;
+		c->flags |= CLIENT_REDRAWSTATUS;
 }
 
 static void tmate_sync_copy_mode(__unused struct tmate_session *session,
@@ -511,19 +511,19 @@ static void restore_snapshot_pane(struct tmate_unpacker *uk)
 	grid_clear_history(screen->grid);
 	restore_snapshot_grid(screen->grid, &grid_uk);
 
-	if (wp->saved_grid != NULL) {
-		grid_destroy(wp->saved_grid);
-		wp->saved_grid = NULL;
+	if (screen->saved_grid != NULL) {
+		grid_destroy(screen->saved_grid);
+		screen->saved_grid = NULL;
 	}
 
 	if (unpack_peek_type(uk) == MSGPACK_OBJECT_NIL)
 		return;
 
 	unpack_array(uk, &grid_uk);
-	wp->saved_cx = unpack_int(&grid_uk);
-	wp->saved_cy = unpack_int(&grid_uk);
-	wp->saved_grid = grid_create(screen->grid->sx, screen->grid->sy, 0);
-	restore_snapshot_grid(wp->saved_grid, &grid_uk);
+	screen->saved_cx = unpack_int(&grid_uk);
+	screen->saved_cy = unpack_int(&grid_uk);
+	screen->saved_grid = grid_create(screen->grid->sx, screen->grid->sy, 0);
+	restore_snapshot_grid(screen->saved_grid, &grid_uk);
 }
 
 static void tmate_snapshot(__unused struct tmate_session *session,

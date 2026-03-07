@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <signal.h>
 #include "tmate.h"
 
