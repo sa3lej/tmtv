@@ -134,6 +134,7 @@ static void tmate_sync_window_panes(struct window *w,
 			 * Pass NULL for other_pane, 0 for flags.
 			 */
 			wp = window_add_pane(w, NULL, TMATE_HLIMIT, 0);
+			wp->ictx = input_init(wp, NULL, &wp->palette);
 			window_set_active_pane(w, wp, 0);
 		}
 
@@ -246,8 +247,10 @@ static void tmate_sync_layout(__unused struct tmate_session *session,
 		 *     environ, options, termios)
 		 * No sx/sy args — set on the session struct after.
 		 */
+		struct options *oo = options_create(global_s_options);
+		struct environ *env = environ_create();
 		s = session_create(NULL, "default", "/",
-				   NULL, NULL, NULL);
+				   env, oo, NULL);
 		if (!s)
 			tmate_fatal("can't create main session");
 	}

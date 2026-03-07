@@ -24,8 +24,15 @@ void tmate_write_fin(void)
 {
 }
 
-void tmate_session_init(__unused struct event_base *base)
+void tmate_session_init(struct event_base *base)
 {
+	/*
+	 * Re-register SSH/websocket events on the (possibly reinited) base.
+	 * tmate_daemon_init() was already called in tmate_spawn_daemon(),
+	 * but server_start() may have called event_reinit() since then.
+	 * The encoder's ev_buffer needs to be re-added to the new base.
+	 */
+	tmate_session->ev_base = base;
 }
 
 void tmate_session_start(void)
