@@ -28,3 +28,4 @@ tests/test-*
 !tests/test-*.c
 !tests/test-*.h
 !tests/test-*.sh
+tests/test-server-header
