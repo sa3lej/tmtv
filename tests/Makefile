@@ -17,9 +17,9 @@ MSGPACK_LIBS := $(shell pkg-config --libs msgpack-c 2>/dev/null || pkg-config --
 UNIT_TESTS = test-msgpack
 TMTV ?= ../tmtv
 
-.PHONY: all unit functional clean
+.PHONY: all unit functional hooks clean
 
-all: unit functional
+all: unit functional hooks
 
 unit: $(UNIT_TESTS)
 	@echo ""
@@ -33,6 +33,16 @@ functional:
 	@echo ""
 	@echo "Running functional tests..."
 	@TMTV=$(TMTV) sh test-functional.sh
+
+hooks:
+	@echo ""
+	@echo "Running tmate hook integration tests..."
+	@TMTV=$(TMTV) sh test-tmate-hooks.sh
+
+wiring:
+	@echo ""
+	@echo "Running hook wiring tests..."
+	@SRCDIR=$(SRCDIR) sh test-hook-wiring.sh
 
 clean:
 	rm -f $(UNIT_TESTS)

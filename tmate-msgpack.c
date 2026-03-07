@@ -11,12 +11,27 @@ static void on_encoder_buffer_ready(__unused evutil_socket_t fd,
 		encoder->ready_callback(encoder->userdata, encoder->buffer);
 }
 
+/*
+ * Cap encoder buffer at 16 MB. When no SSH connection is draining the buffer
+ * (ready_callback is NULL), PTY data accumulates here indefinitely and will
+ * OOM the process. Drop oldest data when the cap is exceeded.
+ */
+#define ENCODER_BUFFER_MAX (16 * 1024 * 1024)
+
 static int on_encoder_write(void *userdata, const char *buf, size_t len)
 {
 	struct tmate_encoder *encoder = userdata;
 
 	if (evbuffer_add(encoder->buffer, buf, len) < 0)
 		tmate_fatal("Cannot buffer encoded data");
+
+	/* Prevent unbounded growth when nothing is draining the buffer */
+	if (!encoder->ready_callback) {
+		size_t buflen = evbuffer_get_length(encoder->buffer);
+		if (buflen > ENCODER_BUFFER_MAX)
+			evbuffer_drain(encoder->buffer,
+			    buflen - ENCODER_BUFFER_MAX);
+	}
 
 	if (!encoder->ev_active) {
 		event_active(encoder->ev_buffer, EV_READ, 0);

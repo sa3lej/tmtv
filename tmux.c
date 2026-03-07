@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include "tmux.h"
+#include "tmate.h"
 
 struct options	*global_options;	/* server options */
 struct options	*global_s_options;	/* session options */
@@ -411,7 +412,8 @@ main(int argc, char **argv)
 		case 'h':
 			usage(0);
 		case 'V':
-			printf("tmux %s\n", getversion());
+			printf("tmtv %s (based on tmux %s)\n",
+		    TMTV_VERSION, TMUX_BASE_VERSION);
 			exit(0);
 		case 'l':
 			flags |= CLIENT_LOGIN;
@@ -534,6 +536,8 @@ main(int argc, char **argv)
 	}
 	socket_path = path;
 	free(label);
+
+	tmate_catch_sigsegv();
 
 	/* Pass control to the client. */
 	exit(client_main(osdep_event_init(), argc, argv, flags, feat));

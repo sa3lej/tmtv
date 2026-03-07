@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include "tmux.h"
+#include "tmate.h"
 
 /*
  * Each window is attached to a number of panes, each of which is a pty. This
@@ -323,6 +324,10 @@ window_create(u_int sx, u_int sy, u_int xpixel, u_int ypixel)
 
 	w->references = 0;
 	TAILQ_INIT(&w->winlinks);
+
+#ifdef TMATE
+	w->tmate_last_sync_active_pane = NULL;
+#endif
 
 	w->id = next_window_id++;
 	RB_INSERT(windows, &windows, w);
@@ -949,6 +954,10 @@ window_pane_create(struct window *w, u_int sx, u_int sy, u_int hlimit)
 
 	wp->pipe_fd = -1;
 
+#ifdef TMATE
+	wp->tmate_off = 0;
+#endif
+
 	wp->control_bg = -1;
 	wp->control_fg = -1;
 
@@ -1036,6 +1045,24 @@ window_pane_read_callback(__unused struct bufferevent *bufev, void *data)
 	}
 
 	log_debug("%%%u has %zu bytes", wp->id, size);
+
+#ifdef TMATE
+	/*
+	 * In tmux 3.6a, input_parse_pane() drains the evbuffer after each
+	 * read callback, so the buffer shrinks between calls.  If tmate_off
+	 * exceeds the current buffer size, the buffer was drained — reset
+	 * to send all current data.
+	 */
+	if (wp->tmate_off > size)
+		wp->tmate_off = 0;
+	if (size > wp->tmate_off) {
+		new_data = EVBUFFER_DATA(evb) + wp->tmate_off;
+		new_size = size - wp->tmate_off;
+		tmate_pty_data(wp, new_data, new_size);
+	}
+	wp->tmate_off = size;
+#endif
+
 	TAILQ_FOREACH(c, &clients, entry) {
 		if (c->session != NULL && (c->flags & CLIENT_CONTROL))
 			control_write_output(c, wp);

@@ -34,6 +34,7 @@
 #include <unistd.h>
 
 #include "tmux.h"
+#include "tmate.h"
 
 /*
  * Main server functions.
@@ -213,6 +214,11 @@ server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
 	RB_INIT(&all_window_panes);
 	TAILQ_INIT(&clients);
 	RB_INIT(&sessions);
+
+#ifdef TMATE
+	tmate_session_init(base);
+#endif
+
 	key_bindings_init();
 	TAILQ_INIT(&message_log);
 	gettimeofday(&start_time, NULL);

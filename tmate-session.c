@@ -96,6 +96,13 @@ static void lookup_and_connect(void)
 	struct evutil_addrinfo hints;
 	const char *tmate_server_host;
 
+	tmate_server_host = options_get_string(global_options,
+					       "tmate-server-host");
+	if (!strlen(tmate_server_host)) {
+		tmate_debug("No tmate-server-host configured, running in local-only mode");
+		return;
+	}
+
 	assert(!tmate_session.ev_dnsbase);
 	tmate_session.ev_dnsbase = evdns_base_new(tmate_session.ev_base, 1);
 	if (!tmate_session.ev_dnsbase)
@@ -107,8 +114,6 @@ static void lookup_and_connect(void)
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
-	tmate_server_host = options_get_string(global_options,
-					       "tmate-server-host");
 	tmate_debug("Looking up %s...", tmate_server_host);
 	(void)evdns_getaddrinfo(tmate_session.ev_dnsbase, tmate_server_host, NULL,
 				&hints, dns_cb, (void *)tmate_server_host);

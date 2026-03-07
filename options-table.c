@@ -1026,8 +1026,8 @@ const struct options_table_entry options_table[] = {
 	{ .name = "tmate-server-host",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
-	  .default_str = "ssh.tmate.io",
-	  .text = "tmate server hostname."
+	  .default_str = "",
+	  .text = "tmate server hostname. Empty to run in local-only mode."
 	},
 
 	{ .name = "tmate-server-port",

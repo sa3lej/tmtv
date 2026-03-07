@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include "tmux.h"
+#include "tmate.h"
 
 enum mouse_where {
 	NOWHERE,
@@ -2681,6 +2682,11 @@ server_client_loop(void)
 	 * their flags now.
 	 */
 	RB_FOREACH(w, windows, &windows) {
+#ifdef TMATE
+		int tmate_should_sync_layout = 0;
+		if (w->tmate_last_sync_active_pane != w->active)
+			tmate_should_sync_layout = 1;
+#endif
 		TAILQ_FOREACH(wp, &w->panes, entry) {
 			if (wp->fd != -1) {
 				server_client_check_pane_resize(wp);
@@ -2689,6 +2695,10 @@ server_client_loop(void)
 			wp->flags &= ~(PANE_REDRAW|PANE_REDRAWSCROLLBAR);
 		}
 		check_window_name(w);
+#ifdef TMATE
+		if (tmate_should_sync_layout)
+			tmate_sync_layout();
+#endif
 	}
 
 	/* Send theme updates. */
