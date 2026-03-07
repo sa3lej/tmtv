@@ -76,10 +76,23 @@ jobs:
           git clone --depth 1 https://github.com/JuliaStrings/utf8proc.git /tmp/utf8proc
           cd /tmp/utf8proc
           make libutf8proc.a
-          # Install to a local prefix
-          mkdir -p /tmp/utf8proc-static/{lib,include}
+          # Install to a local prefix with pkg-config file
+          mkdir -p /tmp/utf8proc-static/{lib/pkgconfig,include}
           cp libutf8proc.a /tmp/utf8proc-static/lib/
           cp utf8proc.h /tmp/utf8proc-static/include/
+          cat > /tmp/utf8proc-static/lib/pkgconfig/libutf8proc.pc << 'PCEOF'
+          prefix=/tmp/utf8proc-static
+          libdir=${prefix}/lib
+          includedir=${prefix}/include
+
+          Name: libutf8proc
+          Description: UTF-8 processing library
+          Version: 2.9.0
+          Libs: -L${libdir} -lutf8proc
+          Cflags: -I${includedir}
+          PCEOF
+          # Remove leading whitespace from heredoc
+          sed -i '' 's/^          //' /tmp/utf8proc-static/lib/pkgconfig/libutf8proc.pc
 
       - name: Build fully static binary
         run: |
@@ -99,6 +112,8 @@ jobs:
 
           echo "=== Static libs ==="
           echo "$STATIC_LIBS" | tr ' ' '\n'
+
+          export PKG_CONFIG_PATH="/tmp/utf8proc-static/lib/pkgconfig:${PKG_CONFIG_PATH}"
 
           sh autogen.sh
           ./configure --enable-utf8proc \
