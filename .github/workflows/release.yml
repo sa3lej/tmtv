@@ -67,6 +67,7 @@ jobs:
             libevent \
             libssh \
             msgpack-c \
+            openssl@3 \
             bison \
             utf8proc
 
@@ -74,10 +75,11 @@ jobs:
         run: |
           export PATH="$(brew --prefix bison)/bin:$PATH"
           BREW="$(brew --prefix)"
+          OPENSSL="$(brew --prefix openssl@3)"
 
           # Collect .a paths for all non-system deps
           STATIC_LIBS=""
-          for pkg in libevent libssh msgpack-c utf8proc; do
+          for pkg in libevent libssh msgpack-c utf8proc openssl@3; do
             prefix=$(brew --prefix "$pkg")
             for a in "$prefix"/lib/*.a; do
               [ -f "$a" ] && STATIC_LIBS="$STATIC_LIBS $a"
@@ -85,13 +87,11 @@ jobs:
           done
 
           sh autogen.sh
-          # Configure finds headers via pkg-config, but we override
-          # LIBS at make time to use static archives instead of -l flags
           ./configure --enable-utf8proc \
-            CPPFLAGS="-I${BREW}/include" \
-            LDFLAGS="-L${BREW}/lib"
+            CPPFLAGS="-I${BREW}/include -I${OPENSSL}/include" \
+            LDFLAGS="-L${BREW}/lib -L${OPENSSL}/lib"
           make -j$(sysctl -n hw.ncpu) \
-            LIBS="$STATIC_LIBS -lncurses -lz -lresolv -framework Security -framework CoreFoundation"
+            LIBS="$STATIC_LIBS -lncurses -lz -lresolv -framework Security -framework CoreFoundation -framework GSS"
 
       - name: Verify no Homebrew dylib deps
         run: |
