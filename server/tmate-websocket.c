@@ -7,7 +7,6 @@
 #include <netinet/in.h>
 #endif
 
-#include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <event2/listener.h>
 
@@ -15,26 +14,19 @@
 #include "tmate-protocol.h"
 
 /*
- * WebSocket listener for browser-based terminal viewing.
+ * SSE (Server-Sent Events) listener for browser-based terminal viewing.
  *
- * Browsers connect via WebSocket, receive msgpack-encoded terminal data
- * (same TMATE_CTL_* protocol), and can optionally send input (future).
+ * Browsers connect via plain HTTP, receive base64-encoded msgpack data
+ * as SSE events (same TMATE_CTL_* protocol payload).
  *
- * Replaces the old outbound websocket client that connected to an
- * external Elixir server (tmate-websocket).
+ * SSE is ideal for view-only streaming: it's one-way (server to browser),
+ * works through any HTTP proxy/CDN, and browsers have built-in
+ * auto-reconnect via the EventSource API.
  */
 
 #define CONTROL_PROTOCOL_VERSION 2
 
-#define WS_GUID "258EAFA5-E914-47DA-95CA-5AB5DC587183"
-#define WS_MAX_HEADER_SIZE 4096
-
-/* WebSocket opcodes */
-#define WS_OP_TEXT         0x1
-#define WS_OP_BINARY       0x2
-#define WS_OP_CLOSE        0x8
-#define WS_OP_PING         0x9
-#define WS_OP_PONG         0xA
+#define SSE_MAX_HEADER_SIZE 4096
 
 #define pack(what, ...) _pack(&tmate_session->websocket_encoder, what, ##__VA_ARGS__)
 
@@ -45,61 +37,25 @@
 		pack(nil); \
 })
 
-/* --- WebSocket framing --- */
+/* --- SSE data sending --- */
 
-static void ws_send_frame(struct bufferevent *bev, int opcode,
+static void sse_send_data(struct bufferevent *bev,
 			  const unsigned char *data, size_t len)
 {
 	struct evbuffer *out = bufferevent_get_output(bev);
-	unsigned char header[10];
-	size_t header_len;
+	int b64_len = 4 * ((len + 2) / 3);
+	unsigned char *b64 = xmalloc(b64_len + 1);
 
-	header[0] = 0x80 | (opcode & 0x0F); /* FIN + opcode */
+	EVP_EncodeBlock(b64, data, len);
 
-	if (len < 126) {
-		header[1] = (unsigned char)len;
-		header_len = 2;
-	} else if (len < 65536) {
-		header[1] = 126;
-		header[2] = (len >> 8) & 0xFF;
-		header[3] = len & 0xFF;
-		header_len = 4;
-	} else {
-		header[1] = 127;
-		header[2] = 0; header[3] = 0;
-		header[4] = 0; header[5] = 0;
-		header[6] = (len >> 24) & 0xFF;
-		header[7] = (len >> 16) & 0xFF;
-		header[8] = (len >> 8) & 0xFF;
-		header[9] = len & 0xFF;
-		header_len = 10;
-	}
+	evbuffer_add(out, "data: ", 6);
+	evbuffer_add(out, b64, b64_len);
+	evbuffer_add(out, "\n\n", 2);
 
-	evbuffer_add(out, header, header_len);
-	if (len > 0)
-		evbuffer_add(out, data, len);
+	free(b64);
 }
 
-/* --- WebSocket handshake --- */
-
-static char *ws_compute_accept_key(const char *client_key)
-{
-	char concat[256];
-	unsigned char sha1_hash[SHA_DIGEST_LENGTH];
-	char *b64;
-	int b64_len;
-
-	snprintf(concat, sizeof(concat), "%s%s", client_key, WS_GUID);
-	SHA1((unsigned char *)concat, strlen(concat), sha1_hash);
-
-	/* base64 encode: output is 4*ceil(n/3) + 1 */
-	b64_len = 4 * ((SHA_DIGEST_LENGTH + 2) / 3);
-	b64 = xmalloc(b64_len + 1);
-	EVP_EncodeBlock((unsigned char *)b64, sha1_hash, SHA_DIGEST_LENGTH);
-	b64[b64_len] = '\0';
-
-	return b64;
-}
+/* --- HTTP request parsing (minimal: just wait for headers) --- */
 
 /* Find needle in haystack, searching at most slen bytes */
 static char *find_in_mem(const char *s, const char *find, size_t slen)
@@ -114,29 +70,14 @@ static char *find_in_mem(const char *s, const char *find, size_t slen)
 	return NULL;
 }
 
-/* Case-insensitive substring search */
-static char *find_header(const char *haystack, const char *needle)
-{
-	size_t nlen = strlen(needle);
-	for (; *haystack; haystack++) {
-		if (strncasecmp(haystack, needle, nlen) == 0)
-			return (char *)haystack;
-	}
-	return NULL;
-}
-
-static int ws_do_handshake(struct ws_client *wc)
+static int sse_do_handshake(struct ws_client *wc)
 {
 	struct evbuffer *input = bufferevent_get_input(wc->bev);
 	size_t len = evbuffer_get_length(input);
 	char *data;
 	char *header_end;
-	char *key_start, *key_end;
-	char ws_key[128];
-	char *accept_key;
-	char response[512];
 
-	if (len > WS_MAX_HEADER_SIZE)
+	if (len > SSE_MAX_HEADER_SIZE)
 		return -1;
 
 	data = (char *)evbuffer_pullup(input, len);
@@ -147,30 +88,14 @@ static int ws_do_handshake(struct ws_client *wc)
 	if (!header_end)
 		return 0; /* need more data */
 
-	key_start = find_header(data, "Sec-WebSocket-Key:");
-	if (!key_start)
-		return -1;
-
-	key_start += strlen("Sec-WebSocket-Key:");
-	while (*key_start == ' ')
-		key_start++;
-
-	key_end = strstr(key_start, "\r\n");
-	if (!key_end || (size_t)(key_end - key_start) >= sizeof(ws_key))
-		return -1;
-
-	memcpy(ws_key, key_start, key_end - key_start);
-	ws_key[key_end - key_start] = '\0';
-
-	accept_key = ws_compute_accept_key(ws_key);
-
-	snprintf(response, sizeof(response),
-		 "HTTP/1.1 101 Switching Protocols\r\n"
-		 "Upgrade: websocket\r\n"
-		 "Connection: Upgrade\r\n"
-		 "Sec-WebSocket-Accept: %s\r\n"
-		 "\r\n", accept_key);
-	free(accept_key);
+	static const char *response =
+		"HTTP/1.1 200 OK\r\n"
+		"Content-Type: text/event-stream\r\n"
+		"Cache-Control: no-cache\r\n"
+		"Connection: keep-alive\r\n"
+		"Access-Control-Allow-Origin: *\r\n"
+		"X-Accel-Buffering: no\r\n"
+		"\r\n";
 
 	evbuffer_drain(input, (header_end - data) + 4);
 	bufferevent_write(wc->bev, response, strlen(response));
@@ -280,7 +205,7 @@ static void tmate_send_snapshot(void)
 
 static void ws_client_free(struct ws_client *wc)
 {
-	tmate_info("WebSocket client disconnected");
+	tmate_info("SSE client disconnected");
 	TAILQ_REMOVE(&wc->session->ws_clients, wc, entry);
 	if (wc->bev)
 		bufferevent_free(wc->bev);
@@ -290,14 +215,11 @@ static void ws_client_free(struct ws_client *wc)
 static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 {
 	struct ws_client *wc = arg;
-	struct evbuffer *input;
-	unsigned char *data;
-	size_t len;
 
 	if (!wc->handshake_done) {
-		int ret = ws_do_handshake(wc);
+		int ret = sse_do_handshake(wc);
 		if (ret < 0) {
-			tmate_info("WebSocket handshake failed");
+			tmate_info("SSE handshake failed");
 			ws_client_free(wc);
 			return;
 		}
@@ -305,66 +227,16 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 			return; /* need more data */
 
 		wc->handshake_done = true;
-		tmate_info("WebSocket client connected");
+		tmate_info("SSE client connected");
 
-		/* Send snapshot to all clients (new one included) */
+		/* Send snapshot to new client */
 		tmate_send_snapshot();
 		return;
 	}
 
-	/* Parse WebSocket frames */
-	input = bufferevent_get_input(wc->bev);
-	for (;;) {
-		len = evbuffer_get_length(input);
-		if (len < 2)
-			return;
-
-		data = evbuffer_pullup(input, len);
-
-		unsigned char opcode = data[0] & 0x0F;
-		bool masked = (data[1] & 0x80) != 0;
-		uint64_t payload_len = data[1] & 0x7F;
-		size_t header_len = 2;
-
-		if (payload_len == 126) {
-			if (len < 4) return;
-			payload_len = ((uint64_t)data[2] << 8) | data[3];
-			header_len = 4;
-		} else if (payload_len == 127) {
-			if (len < 10) return;
-			payload_len = 0;
-			for (int i = 0; i < 8; i++)
-				payload_len = (payload_len << 8) | data[2 + i];
-			header_len = 10;
-		}
-
-		if (masked)
-			header_len += 4;
-
-		if (len < header_len + payload_len)
-			return; /* need more data */
-
-		if (opcode == WS_OP_CLOSE) {
-			ws_send_frame(wc->bev, WS_OP_CLOSE, NULL, 0);
-			ws_client_free(wc);
-			return;
-		}
-
-		if (opcode == WS_OP_PING) {
-			unsigned char *payload = data + header_len;
-			if (masked) {
-				unsigned char *mask = data + header_len - 4;
-				for (uint64_t i = 0; i < payload_len; i++)
-					payload[i] ^= mask[i % 4];
-			}
-			ws_send_frame(wc->bev, WS_OP_PONG, payload, payload_len);
-			evbuffer_drain(input, header_len + payload_len);
-			continue;
-		}
-
-		/* View-only: ignore all other frames */
-		evbuffer_drain(input, header_len + payload_len);
-	}
+	/* SSE is server-push only; drain any client data */
+	struct evbuffer *input = bufferevent_get_input(wc->bev);
+	evbuffer_drain(input, evbuffer_get_length(input));
 }
 
 static void on_ws_client_event(__unused struct bufferevent *bev,
@@ -403,7 +275,7 @@ static void on_ws_accept(__unused struct evconnlistener *listener,
 	bufferevent_enable(wc->bev, EV_READ | EV_WRITE);
 
 	TAILQ_INSERT_TAIL(&session->ws_clients, wc, entry);
-	tmate_debug("WebSocket connection accepted, awaiting handshake");
+	tmate_debug("SSE connection accepted, awaiting HTTP request");
 }
 
 /* --- Encoder broadcast callback --- */
@@ -423,7 +295,7 @@ static void on_websocket_encoder_write(void *userdata, struct evbuffer *buffer)
 
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
 		if (wc->handshake_done)
-			ws_send_frame(wc->bev, WS_OP_BINARY, data, len);
+			sse_send_data(wc->bev, data, len);
 	}
 
 	evbuffer_drain(buffer, len);
@@ -606,10 +478,10 @@ void tmate_start_websocket_listener(struct tmate_session *session)
 		(struct sockaddr *)&sin, sizeof(sin));
 
 	if (!session->ws_listener) {
-		tmate_info("Cannot start WebSocket listener on port %d: %s",
+		tmate_info("Cannot start SSE listener on port %d: %s",
 			   port, strerror(errno));
 		return;
 	}
 
-	tmate_info("WebSocket listener started on port %d", port);
+	tmate_info("SSE listener started on port %d", port);
 }

@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tmtv</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+  }
+  #status {
+    color: #7f8c8d;
+    font-size: 13px;
+    padding: 8px 16px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    z-index: 10;
+  }
+  #status.connected { color: #2ecc71; }
+  #status.error { color: #e74c3c; }
+  #terminal-container {
+    padding: 12px;
+    background: #0d0d1a;
+    border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  }
+</style>
+</head>
+<body>
+<div id="status">Connecting...</div>
+<div id="terminal-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@msgpack/msgpack@3.0.0-beta2/dist.es5+umd/msgpack.min.js"></script>
+<script>
+(function() {
+  'use strict';
+
+  /* --- Protocol constants (from tmate-protocol.h) --- */
+  var CTL_HEADER         = 0;
+  var CTL_DEAMON_OUT_MSG = 1;
+  var CTL_SNAPSHOT       = 2;
+
+  var OUT_HEADER      = 0;
+  var OUT_SYNC_LAYOUT = 1;
+  var OUT_PTY_DATA    = 2;
+  var OUT_STATUS      = 5;
+  var OUT_FIN         = 8;
+
+  /* --- Terminal setup --- */
+  var term = new Terminal({
+    fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace',
+    fontSize: 14,
+    theme: {
+      background: '#0d0d1a',
+      foreground: '#e0e0e0',
+      cursor: '#528bff',
+      selectionBackground: 'rgba(82, 139, 255, 0.3)'
+    },
+    scrollback: 5000,
+    cursorBlink: false,
+    disableStdin: true,
+    allowProposedApi: true
+  });
+
+  var fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+
+  var container = document.getElementById('terminal-container');
+  term.open(container);
+
+  try {
+    var webglAddon = new WebglAddon.WebglAddon();
+    term.loadAddon(webglAddon);
+  } catch (e) {
+    console.log('WebGL not available, using canvas renderer');
+  }
+
+  fitAddon.fit();
+  window.addEventListener('resize', function() { fitAddon.fit(); });
+
+  var statusEl = document.getElementById('status');
+
+  function setStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = cls || '';
+  }
+
+  /* --- Attribute decoding (from do_snapshot pack format) --- */
+  /* packed as: (flags << 24) | (attr << 16) | (bg << 8) | fg */
+
+  var FG_COLORS = [
+    '#000000', '#cc0000', '#4e9a06', '#c4a000',
+    '#3465a4', '#75507b', '#06989a', '#d3d7cf',
+    /* bright */
+    '#555753', '#ef2929', '#8ae234', '#fce94f',
+    '#729fcf', '#ad7fa8', '#34e2e2', '#eeeeec'
+  ];
+
+  function attrToSgr(packed) {
+    var fg    = packed & 0xFF;
+    var bg    = (packed >> 8) & 0xFF;
+    var attr  = (packed >> 16) & 0xFF;
+    var parts = [];
+
+    if (attr & 0x01) parts.push('1');  /* bold */
+    if (attr & 0x04) parts.push('4');  /* underline */
+    if (attr & 0x02) parts.push('2');  /* dim */
+    if (attr & 0x08) parts.push('5');  /* blink */
+    if (attr & 0x10) parts.push('7');  /* reverse */
+    if (attr & 0x40) parts.push('3');  /* italic */
+    if (attr & 0x80) parts.push('9');  /* strikethrough */
+
+    if (fg >= 0 && fg <= 7)        parts.push(String(30 + fg));
+    else if (fg >= 8 && fg <= 15)  parts.push(String(90 + fg - 8));
+    else if (fg >= 16 && fg < 256) parts.push('38;5;' + fg);
+
+    if (bg >= 0 && bg <= 7)        parts.push(String(40 + bg));
+    else if (bg >= 8 && bg <= 15)  parts.push(String(100 + bg - 8));
+    else if (bg >= 16 && bg < 256) parts.push('48;5;' + bg);
+
+    return parts.length ? '\x1b[' + parts.join(';') + 'm' : '';
+  }
+
+  /* --- Snapshot rendering --- */
+
+  function renderSnapshot(panes) {
+    if (!panes || !panes.length) return;
+
+    /* Use first pane for now */
+    var pane = panes[0];
+    var paneId = pane[0];
+    var cursor = pane[1];  /* [cx, cy] */
+    var mode   = pane[2];
+    var lines  = pane[3];
+
+    term.reset();
+
+    for (var i = 0; i < lines.length; i++) {
+      var lineData = lines[i];
+      var text  = lineData[0]; /* UTF-8 string */
+      var attrs = lineData[1]; /* array of packed attrs */
+
+      if (attrs && attrs.length > 0) {
+        /* Render character by character with attributes */
+        var chars = Array.from(text);
+        var out = '';
+        for (var j = 0; j < chars.length && j < attrs.length; j++) {
+          var sgr = attrToSgr(attrs[j]);
+          if (sgr) out += sgr;
+          out += chars[j];
+          if (sgr) out += '\x1b[0m';
+        }
+        /* Any remaining chars without attrs */
+        for (; j < chars.length; j++) out += chars[j];
+        term.write(out);
+      } else {
+        term.write(text);
+      }
+
+      if (i < lines.length - 1) term.write('\r\n');
+    }
+
+    /* Position cursor */
+    if (cursor && cursor.length === 2) {
+      term.write('\x1b[' + (cursor[1] + 1) + ';' + (cursor[0] + 1) + 'H');
+    }
+  }
+
+  /* --- SSE connection --- */
+
+  var ssePort = new URLSearchParams(location.search).get('port');
+  var sseUrl = ssePort
+    ? 'http://' + (location.hostname || 'localhost') + ':' + ssePort
+    : '/ws';
+
+  function connect() {
+    setStatus('Connecting...');
+
+    var es = new EventSource(sseUrl);
+
+    es.onopen = function() {
+      console.log('SSE connected');
+      setStatus('Connected', 'connected');
+    };
+
+    es.onmessage = function(evt) {
+      /* SSE data is base64-encoded msgpack */
+      var binary = atob(evt.data);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      var msg;
+      try {
+        msg = MessagePack.decode(bytes);
+      } catch (e) {
+        console.error('msgpack decode error:', e);
+        return;
+      }
+
+      handleMessage(msg);
+    };
+
+    es.onerror = function() {
+      console.log('SSE error/disconnected, will auto-reconnect');
+      setStatus('Disconnected. Reconnecting...', 'error');
+    };
+  }
+
+  function handleMessage(msg) {
+    if (!Array.isArray(msg) || msg.length < 2) return;
+
+    var type = msg[0];
+
+    switch (type) {
+      case CTL_SNAPSHOT:
+        renderSnapshot(msg[1]);
+        break;
+
+      case CTL_DEAMON_OUT_MSG:
+        handleDaemonMsg(msg[1]);
+        break;
+
+      case CTL_HEADER:
+        /* [CTL_HEADER, version, ip, pubkey, token, token_ro, ssh_cmd, client_ver, client_proto] */
+        console.log('Session header:', msg);
+        break;
+    }
+  }
+
+  function handleDaemonMsg(inner) {
+    if (!Array.isArray(inner) || inner.length < 1) return;
+
+    var type = inner[0];
+
+    switch (type) {
+      case OUT_PTY_DATA:
+        /* [OUT_PTY_DATA, pane_id, binary_data] */
+        if (inner.length >= 3) {
+          var ptyData = inner[2];
+          if (ptyData instanceof Uint8Array) {
+            term.write(ptyData);
+          } else if (typeof ptyData === 'string') {
+            term.write(ptyData);
+          }
+        }
+        break;
+
+      case OUT_SYNC_LAYOUT:
+        /* [OUT_SYNC_LAYOUT, [sx, sy, windows, active_win_id]] */
+        if (inner.length >= 2 && Array.isArray(inner[1])) {
+          var layout = inner[1];
+          var sx = layout[0];
+          var sy = layout[1];
+          if (sx > 0 && sy > 0) {
+            term.resize(sx, sy);
+          }
+        }
+        break;
+
+      case OUT_HEADER:
+        console.log('Daemon header:', inner);
+        break;
+
+      case OUT_STATUS:
+        /* [OUT_STATUS, left_status, right_status] */
+        if (inner.length >= 3) {
+          setStatus(inner[1] || '', 'connected');
+        }
+        break;
+
+      case OUT_FIN:
+        setStatus('Session ended', 'error');
+        break;
+    }
+  }
+
+  /* --- Start --- */
+  connect();
+
+})();
+</script>
+</body>
+</html>
