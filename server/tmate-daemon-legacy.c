@@ -68,7 +68,11 @@ void tmate_translate_legacy_key(int pane_id, key_code key)
 	int lflags = 0;
 	int lkey;
 
-	if (key & KEYC_ESCAPE)	lflags |= LEGACY_KEYC_ESCAPE;
+	/*
+	 * tmux 3.6a: KEYC_ESCAPE renamed to KEYC_META.
+	 * Map the new modifier to the legacy wire format.
+	 */
+	if (key & KEYC_META)	lflags |= LEGACY_KEYC_ESCAPE;
 	if (key & KEYC_CTRL)	lflags |= LEGACY_KEYC_CTRL;
 	if (key & KEYC_SHIFT)	lflags |= LEGACY_KEYC_SHIFT;
 
@@ -122,10 +126,11 @@ void tmate_translate_legacy_key(int pane_id, key_code key)
 		}
 
 		if (justkey > 0x7f) {
-			/* UTF8 */
+			/* UTF8 — tmux 3.6a uses utf8_to_data */
 			int i;
 			struct utf8_data ud;
-			if (utf8_split(justkey, &ud) != UTF8_DONE)
+			utf8_to_data(justkey, &ud);
+			if (ud.size == 0)
 				return;
 
 			for (i = 0; i < ud.size; i++) {

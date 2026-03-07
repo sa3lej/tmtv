@@ -2,7 +2,6 @@
 #include <unistd.h>
 #include "tmate.h"
 #include "tmate-protocol.h"
-#include "window-copy.h"
 
 char *tmate_left_status, *tmate_right_status;
 
@@ -32,7 +31,11 @@ static void tmate_ready(struct tmate_session *session,
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_2);
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_3);
 		tmate_notify("");
-		server_send_exit();
+		/*
+		 * tmux 3.6a: server_send_exit() is static. Use kill(getpid(), SIGTERM)
+		 * to trigger clean shutdown instead.
+		 */
+		kill(getpid(), SIGTERM);
 	}
 	server_add_accept(0);
 }
@@ -103,9 +106,9 @@ static void tmate_sync_window_panes(struct window *w,
 	struct tmate_unpacker uk, tmp_uk;
 	struct window_pane *wp, *wp_tmp;
 	int active_pane_id;
-
-	TAILQ_FOREACH(wp, &w->panes, entry)
-		wp->flags |= PANE_KILL;
+	u_int seen_ids[TMATE_MAX_PANES];
+	int seen_count = 0;
+	int i, found;
 
 	unpack_each(&uk, &tmp_uk, w_uk) {
 		if (++(*num_panes) > TMATE_MAX_PANES)
@@ -125,10 +128,16 @@ static void tmate_sync_window_panes(struct window *w,
 
 		if (!wp) {
 			next_window_pane_id = id;
-			wp = window_add_pane(w, TMATE_HLIMIT);
-			window_set_active_pane(w, wp);
+			/*
+			 * tmux 3.6a: window_add_pane(window, other_pane, hlimit, flags)
+			 * Pass NULL for other_pane, 0 for flags.
+			 */
+			wp = window_add_pane(w, NULL, TMATE_HLIMIT, 0);
+			window_set_active_pane(w, wp, 0);
 		}
-		wp->flags &= ~PANE_KILL;
+
+		if (seen_count < TMATE_MAX_PANES)
+			seen_ids[seen_count++] = id;
 
 		if (wp->xoff != xoff || wp->yoff != yoff ||
 		    wp->sx != sx || wp->sx != sy) {
@@ -140,8 +149,16 @@ static void tmate_sync_window_panes(struct window *w,
 		}
 	}
 
+	/* Remove panes not in the sync message */
 	TAILQ_FOREACH_SAFE(wp, &w->panes, entry, wp_tmp) {
-		if (wp->flags & PANE_KILL)
+		found = 0;
+		for (i = 0; i < seen_count; i++) {
+			if (wp->id == seen_ids[i]) {
+				found = 1;
+				break;
+			}
+		}
+		if (!found)
 			window_remove_pane(w, wp);
 	}
 
@@ -149,7 +166,7 @@ static void tmate_sync_window_panes(struct window *w,
 	wp = window_pane_find_by_id(active_pane_id);
 	if (!wp || wp->window != w)
 		tmate_fatal("Invalid active_pane_id recevied");
-	window_set_active_pane(w, wp);
+	window_set_active_pane(w, wp, 0);
 }
 
 static void tmate_sync_windows(struct session *s,
@@ -160,10 +177,9 @@ static void tmate_sync_windows(struct session *s,
 	struct window *w;
 	int active_window_idx;
 	int num_panes = 0;
-	char *cause;
-
-	RB_FOREACH(wl, winlinks, &s->windows)
-		wl->flags |= WINLINK_KILL;
+	int seen_idxs[512];
+	int seen_count = 0;
+	int i, found;
 
 	unpack_each(&uk, &tmp_uk, s_uk) {
 		int idx    = unpack_int(&uk);
@@ -171,24 +187,37 @@ static void tmate_sync_windows(struct session *s,
 
 		wl = winlink_find_by_index(&s->windows, idx);
 		if (!wl) {
-			wl = session_new(s, name, 0, NULL, NULL, NULL, idx, &cause);
+			/*
+			 * tmux 3.6a: no session_new(). Create a window directly
+			 * and link it.
+			 */
+			w = window_create(s->sx, s->sy, 0, 0);
+			wl = session_attach(s, w, idx, NULL);
 			if (!wl)
 				tmate_fatal("can't create window idx=%d", idx);
+			window_set_name(w, name);
 		}
 
-		wl->flags &= ~WINLINK_KILL;
+		if (seen_count < 512)
+			seen_idxs[seen_count++] = idx;
 		w = wl->window;
 
-		free(w->name);
-		w->name = name;
-		w->sx = s->sx;
-		w->sy = s->sy;
+		window_set_name(w, name);
+		free(name);
 
 		tmate_sync_window_panes(w, &uk, &num_panes);
 	}
 
+	/* Remove windows not in the sync message */
 	RB_FOREACH_SAFE(wl, winlinks, &s->windows, wl_tmp) {
-		if (wl->flags & WINLINK_KILL)
+		found = 0;
+		for (i = 0; i < seen_count; i++) {
+			if (wl->idx == seen_idxs[i]) {
+				found = 1;
+				break;
+			}
+		}
+		if (!found)
 			session_detach(s, wl);
 	}
 
@@ -205,15 +234,19 @@ static void tmate_sync_layout(__unused struct tmate_session *session,
 			      struct tmate_unpacker *uk)
 {
 	struct session *s;
-	char *cause;
 
 	int sx = unpack_int(uk);
 	int sy = unpack_int(uk);
 
 	s = RB_MIN(sessions, &sessions);
 	if (!s) {
-		s = session_create("default", -1, NULL, "/", "/",
-				   NULL, NULL, 0, sx, sy, &cause);
+		/*
+		 * tmux 3.6a: session_create(prefix, name, cwd,
+		 *     environ, options, termios)
+		 * No sx/sy args — set on the session struct after.
+		 */
+		s = session_create(NULL, "default", "/",
+				   NULL, NULL, NULL);
 		if (!s)
 			tmate_fatal("can't create main session");
 	}
@@ -239,8 +272,11 @@ static void tmate_pty_data(__unused struct tmate_session *session,
 	if (!wp)
 		tmate_fatal("can't find pane id=%d (pty_data)", id);
 
-	evbuffer_add(wp->event_input, buf, len);
-	input_parse(wp);
+	/*
+	 * tmux 3.6a: no event_input evbuffer. Feed data directly
+	 * to the input parser via input_parse_buffer().
+	 */
+	input_parse_buffer(wp, (u_char *)buf, len);
 
 	wp->window->flags |= WINDOW_SILENCE;
 }
@@ -248,25 +284,24 @@ static void tmate_pty_data(__unused struct tmate_session *session,
 static void tmate_exec_cmd_str(__unused struct tmate_session *session,
 			       struct tmate_unpacker *uk)
 {
-	struct cmd_q *cmd_q;
-	struct cmd_list *cmdlist;
+	struct cmd_parse_result *pr;
+	struct cmd_parse_input pi;
 	char *cmd_str;
-	char *cause;
 
 	cmd_str = unpack_string(uk);
 
 	tmate_debug("Local cmd: %s", cmd_str);
 
-	if (cmd_string_parse(cmd_str, &cmdlist, NULL, 0, &cause) != 0) {
-		tmate_debug("parse error: %s", cause);
-		free(cause);
+	memset(&pi, 0, sizeof pi);
+	pr = cmd_parse_from_string(cmd_str, &pi);
+	if (pr->status == CMD_PARSE_ERROR) {
+		tmate_debug("parse error: %s", pr->error);
+		free(pr->error);
 		goto out;
 	}
 
-	cmd_q = cmdq_new(NULL);
-	cmdq_run(cmd_q, cmdlist, NULL);
-	cmd_list_free(cmdlist);
-	cmdq_free(cmd_q);
+	cmdq_append(NULL, cmdq_get_command(pr->cmdlist, NULL));
+	cmd_list_free(pr->cmdlist);
 out:
 	free(cmd_str);
 }
@@ -274,42 +309,46 @@ out:
 static void tmate_exec_cmd(__unused struct tmate_session *session,
 			   struct tmate_unpacker *uk)
 {
-	struct cmd_q *cmd_q;
-	struct cmd_list *cmdlist;
-	struct cmd *cmd;
+	struct cmd_parse_result *pr;
+	struct cmd_parse_input pi;
 	char *cmd_str;
-	char *cause;
 	int i;
 	int argc;
 	char **argv;
+	size_t len;
 
 	argc = uk->argc;
 	argv = xmalloc(sizeof(char *) * argc);
 	for (i = 0; i < argc; i++)
 		argv[i] = unpack_string(uk);
 
-	cmd = cmd_parse(argc, argv, NULL, 0, &cause);
-	if (!cmd) {
-		tmate_debug("parse error: %s", cause);
-		free(cause);
+	/* Build a command string from argv and parse it */
+	len = 0;
+	for (i = 0; i < argc; i++)
+		len += strlen(argv[i]) + 1;
+	cmd_str = xmalloc(len);
+	cmd_str[0] = '\0';
+	for (i = 0; i < argc; i++) {
+		if (i > 0)
+			strlcat(cmd_str, " ", len);
+		strlcat(cmd_str, argv[i], len);
+	}
+
+	tmate_debug("Local cmd: %s", cmd_str);
+
+	memset(&pi, 0, sizeof pi);
+	pr = cmd_parse_from_string(cmd_str, &pi);
+	if (pr->status == CMD_PARSE_ERROR) {
+		tmate_debug("parse error: %s", pr->error);
+		free(pr->error);
 		goto out;
 	}
 
-	cmd_str = cmd_print(cmd);
-	tmate_debug("Local cmd: %s", cmd_str);
-	free(cmd_str);
-
-	cmdlist = xcalloc(1, sizeof *cmdlist);
-	cmdlist->references = 1;
-	TAILQ_INIT(&cmdlist->list);
-	TAILQ_INSERT_TAIL(&cmdlist->list, cmd, qentry);
-
-	cmd_q = cmdq_new(NULL);
-	cmdq_run(cmd_q, cmdlist, NULL);
-	cmd_list_free(cmdlist);
-	cmdq_free(cmd_q);
+	cmdq_append(NULL, cmdq_get_command(pr->cmdlist, NULL));
+	cmd_list_free(pr->cmdlist);
 
 out:
+	free(cmd_str);
 	cmd_free_argv(argc, argv);
 }
 
@@ -324,9 +363,13 @@ static void tmate_failed_cmd(__unused struct tmate_session *session,
 	cause = unpack_string(uk);
 
 	TAILQ_FOREACH(c, &clients, entry) {
-		if (c && c->id == client_id) {
+		if (c && (int)c->id == client_id) {
 			*cause = toupper((u_char) *cause);
-			status_message_set(c, "%s", cause);
+			/*
+			 * tmux 3.6a: status_message_set(c, delay, ignore_styles,
+			 *     ignore_keys, exact_position, fmt, ...)
+			 */
+			status_message_set(c, -1, 0, 0, 0, "%s", cause);
 			break;
 		}
 	}
@@ -348,85 +391,22 @@ static void tmate_status(__unused struct tmate_session *session,
 		c->flags |= CLIENT_STATUS;
 }
 
-static void tmate_sync_copy_mode(struct tmate_session *session,
+static void tmate_sync_copy_mode(__unused struct tmate_session *session,
 				 struct tmate_unpacker *uk)
 {
-	struct tmate_unpacker cm_uk, sel_uk, input_uk;
-	struct window_copy_mode_data *data;
-	struct window_pane *wp;
+	/*
+	 * tmux 3.6a: window_copy_mode_data is private to window-copy.c.
+	 * We cannot directly manipulate copy mode state from outside.
+	 * For now, consume the message but skip the copy mode sync.
+	 * A proper fix would require adding accessor functions to window-copy.c.
+	 */
 	int pane_id;
-	int base_backing = 1;
+	struct tmate_unpacker cm_uk;
 
 	pane_id = unpack_int(uk);
-	wp = window_pane_find_by_id(pane_id);
-	if (!wp)
-		tmate_fatal("can't find window pane=%d", pane_id);
-
+	(void)pane_id;
 	unpack_array(uk, &cm_uk);
-
-	if (cm_uk.argc == 0) {
-		if (wp->mode) {
-			data = wp->modedata;
-			free((char *)data->inputprompt);
-			window_pane_reset_mode(wp);
-		}
-		return;
-	}
-
-	if (session->client_protocol_version >= 2)
-		base_backing = unpack_int(&cm_uk);
-
-	if (window_pane_set_mode(wp, &window_copy_mode) == 0) {
-		if (base_backing)
-			window_copy_init_from_pane(wp, 0);
-		else
-			window_copy_init_for_output(wp);
-	}
-	data = wp->modedata;
-
-	data->oy = unpack_int(&cm_uk);
-	data->cx = unpack_int(&cm_uk);
-	data->cy = unpack_int(&cm_uk);
-
-	unpack_array(&cm_uk, &sel_uk);
-
-	if (sel_uk.argc) {
-		data->screen.sel.flag = 1;
-		data->selx = unpack_int(&sel_uk);
-		if (session->client_protocol_version >= 2) {
-			data->sely = -unpack_int(&sel_uk) + screen_hsize(data->backing)
-							  + screen_size_y(data->backing)
-							  - 1;
-		} else
-			data->sely = unpack_int(&sel_uk);
-		data->rectflag = unpack_int(&sel_uk);
-	} else
-		data->screen.sel.flag = 0;
-
-	unpack_array(&cm_uk, &input_uk);
-
-	if (input_uk.argc) {
-		/*
-		 * XXX In the original tmux code, inputprompt is not a
-		 * malloced string, the two piece of code must not run at the
-		 * same time, otherwise, we'll either get a memory leak, or a
-		 * crash.
-		 */
-		data->inputtype = unpack_int(&input_uk);
-
-		free((char *)data->inputprompt);
-		data->inputprompt = unpack_string(&input_uk);
-
-		free(data->inputstr);
-		data->inputstr = unpack_string(&input_uk);
-	} else {
-		data->inputtype = WINDOW_COPY_OFF;
-		free((char *)data->inputprompt);
-		data->inputprompt = NULL;
-	}
-
-	window_copy_update_selection(wp, 1);
-	window_copy_redraw_screen(wp);
+	/* Consume remaining data silently */
 }
 
 static void tmate_write_copy_mode(__unused struct tmate_session *session,
@@ -443,10 +423,15 @@ static void tmate_write_copy_mode(__unused struct tmate_session *session,
 
 	str = unpack_string(uk);
 
-	if (window_pane_set_mode(wp, &window_copy_mode) == 0)
-		window_copy_init_for_output(wp);
+	/*
+	 * tmux 3.6a: window_pane_set_mode() takes 5 args and
+	 * window_copy_init_for_output()/window_copy_add() signatures changed.
+	 * Use the new API.
+	 */
+	if (TAILQ_EMPTY(&wp->modes))
+		window_pane_set_mode(wp, NULL, &window_copy_mode, NULL, NULL);
 
-	window_copy_add(wp, "%s", str);
+	window_copy_add(wp, 0, "%s", str);
 	free(str);
 }
 
@@ -474,10 +459,12 @@ static void restore_snapshot_grid(struct grid *grid, struct tmate_unpacker *uk)
 
 	struct tmate_unpacker lines_uk, line_uk, line_flags_uk;
 
+	memset(&gc, 0, sizeof gc);
+
 	unpack_array(uk, &lines_uk);
 	for (line_i = 0; lines_uk.argc > 0; line_i++) {
 		while (line_i >= grid->hsize + grid->sy)
-			grid_scroll_history(grid);
+			grid_scroll_history(grid, 8);
 
 		unpack_array(&lines_uk, &line_uk);
 		line_str = unpack_string(&line_uk);
@@ -489,7 +476,11 @@ static void restore_snapshot_grid(struct grid *grid, struct tmate_unpacker *uk)
 			utf8_copy(&gc.data, &utf8_data[i]);
 			packed_flags = unpack_int(&line_flags_uk);
 			gc.flags = (packed_flags >> 24) & 0xFF;
-			gc.attr  = (packed_flags >> 16) & 0xFF;
+			gc.attr  = (packed_flags >> 16) & 0xFFFF;
+			/*
+			 * tmux 3.6a: fg/bg are int, not u_char.
+			 * Old protocol packs them as single bytes.
+			 */
 			gc.bg    = (packed_flags >> 8)  & 0xFF;
 			gc.fg    =  packed_flags        & 0xFF;
 			grid_set_cell(grid, i, line_i, &gc);
