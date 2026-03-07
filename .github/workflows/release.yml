@@ -120,7 +120,7 @@ jobs:
             CPPFLAGS="-I${BREW}/include -I${OPENSSL}/include -I/tmp/utf8proc-static/include" \
             LDFLAGS="-L${BREW}/lib -L${OPENSSL}/lib -L/tmp/utf8proc-static/lib"
           make -j$(sysctl -n hw.ncpu) \
-            LIBS="$STATIC_LIBS -lncurses -lz -lresolv -framework Security -framework CoreFoundation -framework GSS"
+            LIBS="$STATIC_LIBS -lncurses -lz -lresolv -lgssapi_krb5 -framework Security -framework CoreFoundation -framework GSS"
 
       - name: Verify no external dylib deps
         run: |
