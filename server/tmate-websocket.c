@@ -28,6 +28,84 @@
 
 #define SSE_MAX_HEADER_SIZE 4096
 
+/* Forward declaration */
+static void sse_send_data(struct bufferevent *bev,
+			  const unsigned char *data, size_t len);
+
+/* --- PTY replay buffer ---
+ * Message-level ring buffer: each entry is a complete encoder write
+ * (one or more complete msgpack messages).  New SSE clients receive
+ * these on connect so they see the current screen state.
+ *
+ * Using message-level granularity avoids splitting msgpack framing
+ * when the buffer wraps — every replayed SSE event is well-formed.
+ */
+#define PTY_REPLAY_MAX_MSGS  4096
+#define PTY_REPLAY_MAX_BYTES (256 * 1024)
+
+static struct {
+	unsigned char *data;
+	size_t         len;
+} pty_replay_msgs[PTY_REPLAY_MAX_MSGS];
+static int    pty_replay_head;        /* next write slot */
+static int    pty_replay_count;       /* messages stored */
+static size_t pty_replay_total_bytes;
+
+static void pty_replay_init(void)
+{
+	memset(pty_replay_msgs, 0, sizeof(pty_replay_msgs));
+	pty_replay_head = 0;
+	pty_replay_count = 0;
+	pty_replay_total_bytes = 0;
+}
+
+static void pty_replay_append(const unsigned char *data, size_t len)
+{
+	/* Evict oldest messages until we have room */
+	while (pty_replay_count > 0 &&
+	       pty_replay_total_bytes + len > PTY_REPLAY_MAX_BYTES) {
+		int tail = (pty_replay_head - pty_replay_count +
+			    PTY_REPLAY_MAX_MSGS) % PTY_REPLAY_MAX_MSGS;
+		pty_replay_total_bytes -= pty_replay_msgs[tail].len;
+		free(pty_replay_msgs[tail].data);
+		pty_replay_msgs[tail].data = NULL;
+		pty_replay_msgs[tail].len = 0;
+		pty_replay_count--;
+	}
+
+	/* Overwrite slot if ring is full */
+	if (pty_replay_msgs[pty_replay_head].data) {
+		pty_replay_total_bytes -= pty_replay_msgs[pty_replay_head].len;
+		free(pty_replay_msgs[pty_replay_head].data);
+	}
+
+	pty_replay_msgs[pty_replay_head].data = xmalloc(len);
+	memcpy(pty_replay_msgs[pty_replay_head].data, data, len);
+	pty_replay_msgs[pty_replay_head].len = len;
+	pty_replay_total_bytes += len;
+
+	pty_replay_head = (pty_replay_head + 1) % PTY_REPLAY_MAX_MSGS;
+	if (pty_replay_count < PTY_REPLAY_MAX_MSGS)
+		pty_replay_count++;
+}
+
+static void pty_replay_send(struct bufferevent *bev)
+{
+	int i, idx, tail;
+
+	if (pty_replay_count == 0)
+		return;
+
+	tail = (pty_replay_head - pty_replay_count +
+		PTY_REPLAY_MAX_MSGS) % PTY_REPLAY_MAX_MSGS;
+	for (i = 0; i < pty_replay_count; i++) {
+		idx = (tail + i) % PTY_REPLAY_MAX_MSGS;
+		if (pty_replay_msgs[idx].data)
+			sse_send_data(bev, pty_replay_msgs[idx].data,
+				      pty_replay_msgs[idx].len);
+	}
+}
+
 #define pack(what, ...) _pack(&tmate_session->websocket_encoder, what, ##__VA_ARGS__)
 
 #define pack_string_or_nil(str) ({ \
@@ -53,6 +131,179 @@ static void sse_send_data(struct bufferevent *bev,
 	evbuffer_add(out, "\n\n", 2);
 
 	free(b64);
+}
+
+/* --- Grid-based screen dump for new client catch-up ---
+ *
+ * Instead of replaying raw PTY data (which loses bytes at SSH read
+ * boundaries), read the server's tmux grid and emit VT100 escape
+ * sequences that xterm.js can render directly.  This is wrapped in
+ * a msgpack PTY_DATA message and sent as a single SSE event.
+ */
+
+static void sse_send_screen_dump(struct bufferevent *bev)
+{
+	struct session *s;
+	struct winlink *wl;
+	struct window *w;
+	struct window_pane *pane;
+	struct screen *screen;
+	struct grid *grid;
+	struct grid_cell gc;
+	unsigned int y, x, sx, sy;
+	struct evbuffer *vt;
+	unsigned char *vt_data;
+	size_t vt_len;
+	unsigned char *msg;
+	size_t msg_len;
+	int prev_fg, prev_bg, prev_attr;
+
+	s = RB_MIN(sessions, &sessions);
+	if (!s)
+		return;
+
+	wl = s->curw;
+	if (!wl)
+		return;
+
+	w = wl->window;
+	if (!w)
+		return;
+
+	pane = w->active;
+	if (!pane)
+		return;
+
+	screen = pane->screen;
+	grid = screen->grid;
+	sx = grid->sx;
+	sy = grid->sy;
+
+	vt = evbuffer_new();
+	if (!vt)
+		return;
+
+	/* Reset terminal and home cursor */
+	evbuffer_add(vt, "\033[!p", 4);     /* DECSTR soft reset */
+	evbuffer_add(vt, "\033[H", 3);      /* cursor home */
+	evbuffer_add(vt, "\033[?25l", 6);   /* hide cursor */
+
+	prev_fg = -1;
+	prev_bg = -1;
+	prev_attr = -1;
+
+	for (y = 0; y < sy; y++) {
+		unsigned int grid_y = grid->hsize + y;
+		struct grid_line *gl = (grid_y < grid->hsize + grid->sy)
+			? &grid->linedata[grid_y] : NULL;
+
+		for (x = 0; x < sx; x++) {
+			grid_get_cell(grid, x, grid_y, &gc);
+
+			/* Emit SGR if attributes changed */
+			int fg = gc.fg;
+			int bg = gc.bg;
+			int attr = gc.attr;
+
+			if (fg != prev_fg || bg != prev_bg || attr != prev_attr) {
+				char sgr[64];
+				int n = 0;
+				n += snprintf(sgr + n, sizeof(sgr) - n, "\033[0");
+
+				if (attr & 0x01) /* bold */
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";1");
+				if (attr & 0x02) /* dim */
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";2");
+				if (attr & 0x40) /* italic */
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";3");
+				if (attr & 0x04) /* underline */
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";4");
+				if (attr & 0x08) /* blink */
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";5");
+				if (attr & 0x10) /* reverse */
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";7");
+				if (attr & 0x80) /* strikethrough */
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";9");
+
+				/* fg: 0-7 = standard, 8/9 = default, 10-15 = bright */
+				if (fg <= 7)
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";%d", 30 + fg);
+				else if (fg >= 10 && fg <= 15)
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";%d", 90 + fg - 10);
+				else if (fg >= 16 && fg < 256)
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";38;5;%d", fg);
+
+				/* bg */
+				if (bg <= 7)
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";%d", 40 + bg);
+				else if (bg >= 10 && bg <= 15)
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";%d", 100 + bg - 10);
+				else if (bg >= 16 && bg < 256)
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";48;5;%d", bg);
+
+				n += snprintf(sgr + n, sizeof(sgr) - n, "m");
+				evbuffer_add(vt, sgr, n);
+
+				prev_fg = fg;
+				prev_bg = bg;
+				prev_attr = attr;
+			}
+
+			/* Emit character */
+			if (gc.data.size == 1 &&
+			    ((unsigned char)gc.data.data[0] < 0x20 ||
+			     (unsigned char)gc.data.data[0] == 0x7f)) {
+				evbuffer_add(vt, " ", 1);
+			} else if (gc.data.size > 0) {
+				evbuffer_add(vt, gc.data.data, gc.data.size);
+			} else {
+				evbuffer_add(vt, " ", 1);
+			}
+		}
+
+		if (y < sy - 1)
+			evbuffer_add(vt, "\r\n", 2);
+	}
+
+	/* Reset attributes, position cursor, show it */
+	{
+		char cpos[32];
+		int clen;
+		evbuffer_add(vt, "\033[0m", 4);
+		clen = snprintf(cpos, sizeof(cpos), "\033[%u;%uH",
+				screen->cy + 1, screen->cx + 1);
+		evbuffer_add(vt, cpos, clen);
+		evbuffer_add(vt, "\033[?25h", 6);
+	}
+
+	vt_len = evbuffer_get_length(vt);
+	vt_data = evbuffer_pullup(vt, vt_len);
+
+	/* Wrap in msgpack: [CTL_DEAMON_OUT_MSG, [OUT_PTY_DATA, 0, <data>]] */
+	{
+		msgpack_sbuffer sbuf;
+		msgpack_packer pk;
+
+		msgpack_sbuffer_init(&sbuf);
+		msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+
+		msgpack_pack_array(&pk, 2);
+		msgpack_pack_int(&pk, 1);  /* CTL_DEAMON_OUT_MSG */
+		msgpack_pack_array(&pk, 3);
+		msgpack_pack_int(&pk, 2);  /* OUT_PTY_DATA */
+		msgpack_pack_int(&pk, 0);  /* window 0 */
+		msgpack_pack_bin(&pk, vt_len);
+		msgpack_pack_bin_body(&pk, vt_data, vt_len);
+
+		sse_send_data(bev, (unsigned char *)sbuf.data, sbuf.size);
+
+		msgpack_sbuffer_destroy(&sbuf);
+	}
+
+	evbuffer_free(vt);
+
+	tmate_info("screen_dump: %zu vt100 bytes, grid %ux%u, cursor %u,%u",
+		   vt_len, sx, sy, screen->cx, screen->cy);
 }
 
 /* --- HTTP request parsing (minimal: just wait for headers) --- */
@@ -116,7 +367,7 @@ static void do_snapshot(unsigned int max_history_lines,
 	unsigned int max_lines;
 	size_t str_len;
 
-	screen = &pane->base;
+	screen = pane->screen;
 	grid = screen->grid;
 
 	pack(array, 4);
@@ -142,6 +393,11 @@ static void do_snapshot(unsigned int max_history_lines,
 		line = &grid->linedata[line_i];
 
 		pack(array, 2);
+
+		/*
+		 * Compute str_len, replacing control chars (< 0x20) with
+		 * space to keep cell alignment with attrs array.
+		 */
 		str_len = 0;
 		for (i = 0; i < line->cellsize; i++) {
 			grid_get_cell(grid, i, line_i, &gc);
@@ -151,7 +407,20 @@ static void do_snapshot(unsigned int max_history_lines,
 		pack(str, str_len);
 		for (i = 0; i < line->cellsize; i++) {
 			grid_get_cell(grid, i, line_i, &gc);
-			pack(str_body, gc.data.data, gc.data.size);
+			/*
+			 * Replace control characters (ESC, etc.) with space.
+			 * The grid may contain raw escape bytes from the
+			 * tmate client protocol; these must not reach the
+			 * web viewer.
+			 */
+			if (gc.data.size == 1 &&
+			    ((unsigned char)gc.data.data[0] < 0x20 ||
+			     (unsigned char)gc.data.data[0] == 0x7f)) {
+				char sp = ' ';
+				pack(str_body, &sp, 1);
+			} else {
+				pack(str_body, gc.data.data, gc.data.size);
+			}
 		}
 
 		pack(array, line->cellsize);
@@ -165,7 +434,7 @@ static void do_snapshot(unsigned int max_history_lines,
 	}
 }
 
-static void tmate_send_snapshot(void)
+static void tmate_send_snapshot_ex(unsigned int max_history)
 {
 	struct session *s;
 	struct winlink *wl;
@@ -197,8 +466,13 @@ static void tmate_send_snapshot(void)
 		if (!w)
 			continue;
 		TAILQ_FOREACH(pane, &w->panes, entry)
-			do_snapshot(TMATE_HLIMIT, pane);
+			do_snapshot(max_history, pane);
 	}
+}
+
+static void tmate_send_snapshot(void)
+{
+	tmate_send_snapshot_ex(TMATE_HLIMIT);
 }
 
 /* --- Client management --- */
@@ -229,8 +503,8 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		wc->handshake_done = true;
 		tmate_info("SSE client connected");
 
-		/* Send snapshot to new client */
-		tmate_send_snapshot();
+		/* Send current screen state from tmux grid */
+		sse_send_screen_dump(wc->bev);
 		return;
 	}
 
@@ -292,6 +566,9 @@ static void on_websocket_encoder_write(void *userdata, struct evbuffer *buffer)
 		return;
 
 	data = evbuffer_pullup(buffer, len);
+
+	/* Store in replay buffer for new clients */
+	pty_replay_append(data, len);
 
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
 		if (wc->handshake_done)
@@ -355,6 +632,34 @@ static void tmate_dispatch_websocket_message(struct tmate_session *session,
 	dispatch(TMATE_CTL_RESIZE,		ctl_resize);
 	default: tmate_info("Bad websocket message type: %d", cmd);
 	}
+}
+
+/* --- Periodic snapshot timer --- */
+
+#define SSE_SNAPSHOT_INTERVAL_MS 50
+
+static bool ws_has_clients(struct tmate_session *session)
+{
+	struct ws_client *wc;
+	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+		if (wc->handshake_done)
+			return true;
+	}
+	return false;
+}
+
+static void on_snapshot_timer(__unused evutil_socket_t fd,
+			      __unused short what, void *arg)
+{
+	struct tmate_session *session = arg;
+
+	if (!ws_has_clients(session))
+		return;
+
+	/* Snapshots disabled — the tmate server grid contains raw
+	 * escape sequences (not parsed characters).  SSE clients
+	 * receive PTY data directly and xterm.js handles parsing. */
+	(void)session;
 }
 
 /* --- Public API --- */
@@ -454,6 +759,8 @@ void tmate_init_websocket(struct tmate_session *session)
 
 	tmate_encoder_init(&session->websocket_encoder,
 			   on_websocket_encoder_write, session);
+
+	pty_replay_init();
 }
 
 void tmate_bind_websocket_socket(struct tmate_session *session)
@@ -520,4 +827,14 @@ void tmate_start_websocket_listener(struct tmate_session *session)
 	}
 
 	tmate_info("SSE listener registered on fd=%d", session->ws_listen_fd);
+
+	/* Periodic snapshot timer for live updates */
+	{
+		struct timeval tv = { 0, SSE_SNAPSHOT_INTERVAL_MS * 1000 };
+		session->ev_ws_snapshot = event_new(session->ev_base, -1,
+						    EV_PERSIST, on_snapshot_timer,
+						    session);
+		event_add(session->ev_ws_snapshot, &tv);
+		tmate_info("SSE snapshot timer started (%dms)", SSE_SNAPSHOT_INTERVAL_MS);
+	}
 }
