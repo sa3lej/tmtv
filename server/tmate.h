@@ -214,6 +214,7 @@ struct tmate_settings {
 	int ssh_port_advertized;
 	const char *websocket_hostname;
 	int websocket_port;
+	int web_port;
 	const char *tmate_host;
 	const char *bind_addr;
 	int log_level;

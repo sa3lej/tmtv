@@ -66,11 +66,8 @@ static void tmate_header(struct tmate_session *session,
 	tmate_info("tmate version=%s, protocol=%d",
 		   session->client_version, session->client_protocol_version);
 
-	if (tmate_has_websocket()) {
-		/* If we have a websocket server, it takes care of all the following notificatons */
+	if (tmate_has_websocket())
 		tmate_send_websocket_header(session);
-		return;
-	}
 
 	ssh_conn_str = get_ssh_conn_string(session->session_token_ro);
 	tmate_notify("Note: clear your terminal before sharing readonly access");
@@ -82,6 +79,24 @@ static void tmate_header(struct tmate_session *session,
 	tmate_notify("ssh session: %s", ssh_conn_str);
 	tmate_set_env("tmate_ssh", ssh_conn_str);
 	free(ssh_conn_str);
+
+	if (tmate_has_websocket()) {
+		char *web_url;
+		int port = tmate_settings->web_port > 0 ?
+			   tmate_settings->web_port :
+			   tmate_settings->websocket_port;
+		if (port == 80)
+			xasprintf(&web_url, "http://%s/s/%s",
+				  tmate_settings->tmate_host,
+				  session->session_token);
+		else
+			xasprintf(&web_url, "http://%s:%d/s/%s",
+				  tmate_settings->tmate_host,
+				  port, session->session_token);
+		tmate_notify("web session: %s", web_url);
+		tmate_set_env("tmate_web", web_url);
+		free(web_url);
+	}
 
 	tmate_send_client_ready();
 }
