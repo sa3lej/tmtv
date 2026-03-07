@@ -67,7 +67,14 @@ enum msgtype {
 	MSG_WRITE,
 	MSG_WRITE_READY,
 	MSG_WRITE_CLOSE,
-	MSG_READ_CANCEL
+	MSG_READ_CANCEL,
+
+#ifdef TMATE
+	/* tmate auth messages for pre-authentication against session socket */
+	MSG_IDENTIFY_TMATE_AUTH_PUBKEY = 900,
+	MSG_IDENTIFY_TMATE_AUTH_NONE,
+	MSG_TMATE_AUTH_STATUS,
+#endif
 };
 
 /*
