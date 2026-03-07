@@ -97,6 +97,12 @@ void tmate_sync_layout(void)
 		if (active_window_idx == -1)
 			active_window_idx = wl->idx;
 
+		/* Track synced name for change detection */
+		free(w->tmate_last_sync_name);
+		w->tmate_last_sync_name = xstrdup(w->name);
+		w->tmate_last_sync_sx = w->sx;
+		w->tmate_last_sync_sy = w->sy;
+
 		pack(array, 4);
 		pack(int, wl->idx);
 		pack(string, w->name);

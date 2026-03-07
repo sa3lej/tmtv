@@ -172,6 +172,21 @@ void tmate_encoder_init(struct tmate_encoder *encoder,
 	encoder->ev_active = false;
 }
 
+void tmate_encoder_rebind(struct tmate_encoder *encoder,
+			  struct event_base *base)
+{
+	if (encoder->ev_buffer) {
+		event_free(encoder->ev_buffer);
+		encoder->ev_buffer = event_new(base, -1,
+					       EV_READ | EV_PERSIST,
+					       on_encoder_buffer_ready, encoder);
+		if (!encoder->ev_buffer)
+			tmate_fatal("Can't re-create encoder event");
+		event_add(encoder->ev_buffer, NULL);
+		encoder->ev_active = false;
+	}
+}
+
 void tmate_decoder_error(void)
 {
 	tmate_print_stack_trace();

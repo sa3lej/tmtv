@@ -51,6 +51,8 @@ struct tmate_encoder {
 extern void tmate_encoder_init(struct tmate_encoder *encoder,
 			       tmate_encoder_write_cb *callback,
 			       void *userdata);
+extern void tmate_encoder_rebind(struct tmate_encoder *encoder,
+				 struct event_base *base);
 
 /* These functions deal with dual v4/v5 support through mpac_version */
 extern void msgpack_pack_string(msgpack_packer *pk, const char *str);

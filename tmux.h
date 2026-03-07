@@ -1305,8 +1305,11 @@ struct window {
 	u_int			 references;
 	TAILQ_HEAD(, winlink)	 winlinks;
 
-	/* tmate: track last synced active pane */
+	/* tmate: track last synced state for change detection */
 	struct window_pane	*tmate_last_sync_active_pane;
+	char			*tmate_last_sync_name;
+	u_int			 tmate_last_sync_sx;
+	u_int			 tmate_last_sync_sy;
 
 	RB_ENTRY(window)	 entry;
 };

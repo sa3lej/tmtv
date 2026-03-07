@@ -386,9 +386,12 @@
         if (inner.length >= 3) {
           var sx = inner[1];
           var sy = inner[2];
+          console.log('SYNC_LAYOUT: ' + sx + 'x' + sy + ' (inner len=' + inner.length + ')');
           if (sx > 0 && sy > 0) {
             serverCols = sx;
             serverRows = sy;
+            window.serverCols = sx;
+            window.serverRows = sy;
             sizeToServer();
           }
           /* Parse window names: inner[3] = [[idx, name, panes...], ...] */
