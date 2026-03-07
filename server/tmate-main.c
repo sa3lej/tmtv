@@ -177,6 +177,28 @@ int main(int argc, char **argv, char **envp)
 	tmate_catch_sigsegv();
 	tmate_init_rand();
 
+	/*
+	 * Initialize tmux global options (normally done in tmux.c main(),
+	 * which is excluded from the server build).
+	 */
+	{
+		const struct options_table_entry *oe;
+		global_environ = environ_create();
+		for (char **var = envp; *var != NULL; var++)
+			environ_put(global_environ, *var, 0);
+		global_options = options_create(NULL);
+		global_s_options = options_create(NULL);
+		global_w_options = options_create(NULL);
+		for (oe = options_table; oe->name != NULL; oe++) {
+			if (oe->scope & OPTIONS_TABLE_SERVER)
+				options_default(global_options, oe);
+			if (oe->scope & OPTIONS_TABLE_SESSION)
+				options_default(global_s_options, oe);
+			if (oe->scope & OPTIONS_TABLE_WINDOW)
+				options_default(global_w_options, oe);
+		}
+	}
+
 	if ((mkdir(TMATE_WORKDIR, 0700)             < 0 && errno != EEXIST) ||
 	    (mkdir(TMATE_WORKDIR "/sessions", 0700) < 0 && errno != EEXIST) ||
 	    (mkdir(TMATE_WORKDIR "/jail", 0700)     < 0 && errno != EEXIST))

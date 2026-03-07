@@ -142,6 +142,8 @@ static void create_session_ro_symlink(struct tmate_session *session)
 	free(session_ro_path);
 }
 
+extern int server_fd;
+
 void tmate_spawn_daemon(struct tmate_session *session)
 {
 	struct tmate_ssh_client *client = &session->ssh_client;
@@ -173,6 +175,7 @@ void tmate_spawn_daemon(struct tmate_session *session)
 			tmate_fatal("Cannot create tmux socket");
 	}
 	session->tmux_socket_fd = fd;
+	server_fd = fd;
 
 	create_session_ro_symlink(session);
 
@@ -189,16 +192,17 @@ void tmate_spawn_daemon(struct tmate_session *session)
 				 session->websocket_fd}, 3);
 
 	get_in_jail();
+
 	event_reinit(session->ev_base);
 
 	signal(SIGTERM, handle_sigterm);
 
 	/*
 	 * tmux 3.6a: server_start(proc, flags, base, lockfd, lockfile)
-	 * We pass NULL for proc (standalone server), 0 flags,
+	 * We pass NULL for proc (standalone server), CLIENT_NOFORK flags,
 	 * the session's event base, -1 for no lock fd, NULL for no lock file.
 	 */
-	server_start(NULL, 0, session->ev_base, -1, NULL);
+	server_start(NULL, CLIENT_NOFORK, session->ev_base, -1, NULL);
 	/* never reached */
 }
 

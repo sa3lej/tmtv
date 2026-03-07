@@ -43,7 +43,11 @@
 struct clients		 clients;
 
 struct tmuxproc		*server_proc;
+#ifdef TMATE_SERVER_BUILD
+int			 server_fd = -1;
+#else
 static int		 server_fd = -1;
+#endif
 static uint64_t		 server_client_flags;
 static int		 server_exit;
 static struct event	 server_ev_accept;
@@ -192,11 +196,15 @@ server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
 			return (fd);
 		}
 	}
-	proc_clear_signals(client, 0);
+	if (client != NULL)
+		proc_clear_signals(client, 0);
 	server_client_flags = flags;
 
+#ifndef TMATE_SERVER_BUILD
+	/* Skip for server: already called in tmate_spawn_daemon, no fork here. */
 	if (event_reinit(base) != 0)
 		fatalx("event_reinit failed");
+#endif
 	server_proc = proc_start("server");
 
 	proc_set_signals(server_proc, server_signal);
@@ -223,11 +231,17 @@ server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
 	TAILQ_INIT(&message_log);
 	gettimeofday(&start_time, NULL);
 
-#ifdef HAVE_SYSTEMD
-	server_fd = systemd_create_socket(flags, &cause);
-#else
-	server_fd = server_create_socket(flags, &cause);
+#ifdef TMATE_SERVER_BUILD
+	/* Socket already created by tmate_spawn_daemon before jail. */
+	if (server_fd == -1)
 #endif
+	{
+#ifdef HAVE_SYSTEMD
+		server_fd = systemd_create_socket(flags, &cause);
+#else
+		server_fd = server_create_socket(flags, &cause);
+#endif
+	}
 	if (server_fd != -1)
 		server_update_socket();
 	if (~flags & CLIENT_NOFORK)
