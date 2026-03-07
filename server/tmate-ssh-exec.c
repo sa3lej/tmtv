@@ -43,8 +43,7 @@ void tmate_spawn_exec(struct tmate_session *session)
 	tmate_info("Spawning exec client ip=%s", client->ip_address);
 
 	close_fds_except((int[]){ssh_get_fd(session->ssh_client.session),
-				 log_file ? fileno(log_file) : -1,
-				 session->websocket_fd}, 3);
+				 session->websocket_fd}, 2);
 	get_in_jail();
 	event_reinit(session->ev_base);
 

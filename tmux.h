@@ -2021,6 +2021,9 @@ struct client {
 #define CLIENT_ASSUMEPASTING 0x2000000000ULL
 #define CLIENT_REDRAWSCROLLBARS 0x4000000000ULL
 #define CLIENT_NO_DETACH_ON_DESTROY 0x8000000000ULL
+#ifdef TMATE
+#define CLIENT_TMATE_NOTIFIED_JOIN 0x10000000000ULL
+#endif
 #define CLIENT_ALLREDRAWFLAGS		\
 	(CLIENT_REDRAWWINDOW|		\
 	 CLIENT_REDRAWSTATUS|		\
@@ -2112,6 +2115,12 @@ struct client {
 	u_int			 clipboard_npanes;
 
 	TAILQ_ENTRY(client)	 entry;
+
+#ifdef TMATE
+	char			 ip_address[64];
+	char			*pubkey;
+	int			 readonly;
+#endif
 };
 TAILQ_HEAD(clients, client);
 

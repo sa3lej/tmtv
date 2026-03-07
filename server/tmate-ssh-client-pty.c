@@ -46,7 +46,11 @@ static int on_ssh_message_callback(__unused ssh_session _session,
 		ws.ws_row = ssh_message_channel_request_pty_height(msg);
 
 		ioctl(session->pty, TIOCSWINSZ, &ws);
-		client_signal(SIGWINCH);
+		/*
+		 * tmux 3.6a: client_signal() doesn't exist as a public function.
+		 * Send SIGWINCH directly to the process group.
+		 */
+		kill(0, SIGWINCH);
 
 		return 1;
 	}
@@ -106,9 +110,12 @@ static void tmate_client_pty_init(struct tmate_session *session)
 				 on_ssh_message_callback, session);
 
 	setblocking(session->pty, 0);
-	event_set(&session->ev_pty, session->pty,
-		  EV_READ | EV_PERSIST, __on_pty_event, session);
-	event_add(&session->ev_pty, NULL);
+	/*
+	 * tmux 3.6a / libevent2: ev_pty is a pointer (struct event *)
+	 */
+	session->ev_pty = event_new(session->ev_base, session->pty,
+				    EV_READ | EV_PERSIST, __on_pty_event, session);
+	event_add(session->ev_pty, NULL);
 }
 
 static void random_sleep(void)
@@ -178,8 +185,31 @@ void tmate_spawn_pty_client(struct tmate_session *session)
 
 	tmate_info("Spawning pty client ip=%s", client->ip_address);
 
-	session->tmux_socket_fd = client_connect(session->ev_base, socket_path, 0);
-	if (session->tmux_socket_fd < 0) {
+	/*
+	 * tmux 3.6a: client_connect() doesn't exist as a public function.
+	 * Connect to the tmux socket directly.
+	 */
+	{
+		struct sockaddr_un sa;
+		int sock_fd;
+
+		memset(&sa, 0, sizeof(sa));
+		sa.sun_family = AF_UNIX;
+		strlcpy(sa.sun_path, socket_path, sizeof(sa.sun_path));
+
+		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (sock_fd < 0)
+			goto connect_failed;
+
+		if (connect(sock_fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+			close(sock_fd);
+			goto connect_failed;
+		}
+
+		session->tmux_socket_fd = sock_fd;
+		goto connect_ok;
+
+connect_failed:
 		if (tmate_has_websocket()) {
 			/* Turn the response into an exec to show a better error */
 			client->exec_command = xstrdup("explain-session-not-found");
@@ -191,6 +221,7 @@ void tmate_spawn_pty_client(struct tmate_session *session)
 		ssh_echo(client, EXPIRED_TOKEN_ERROR_STR);
 		tmate_fatal("Expired token");
 	}
+connect_ok:
 
 	/*
 	 * If we are connecting through a symlink, it means that we are a
@@ -223,12 +254,16 @@ void tmate_spawn_pty_client(struct tmate_session *session)
 	close_fds_except((int[]){STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO,
 				 session->tmux_socket_fd,
 				 ssh_get_fd(session->ssh_client.session),
-				 session->pty, log_file ? fileno(log_file) : -1}, 7);
+				 session->pty}, 6);
 	get_in_jail();
 	event_reinit(session->ev_base);
 
+	/*
+	 * tmux 3.6a: client_main(base, argc, argv, flags, feat)
+	 * Added features parameter (0 = none).
+	 */
 	ret = client_main(session->ev_base, argc, argv,
-			  CLIENT_UTF8 | CLIENT_256COLOURS, NULL);
+			  CLIENT_UTF8, 0);
 	tmate_flush_pty(session);
 	exit(ret);
 }
