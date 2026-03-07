@@ -188,7 +188,8 @@ void tmate_spawn_daemon(struct tmate_session *session)
 	tmate_daemon_init(session);
 
 	close_fds_except((int[]){session->tmux_socket_fd,
-				 ssh_get_fd(session->ssh_client.session)}, 2);
+				 ssh_get_fd(session->ssh_client.session),
+				 STDERR_FILENO}, 3);
 
 	get_in_jail();
 
