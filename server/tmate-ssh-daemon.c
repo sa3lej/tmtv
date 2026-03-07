@@ -7,6 +7,18 @@ struct tmate_session _tmate_session, *tmate_session = &_tmate_session;
 static void on_daemon_decoder_read(void *userdata, struct tmate_unpacker *uk)
 {
 	struct tmate_session *session = userdata;
+	int cmd = -1;
+	int num_ws = 0;
+	struct ws_client *wc;
+
+	if (uk->argc > 0 && uk->argv[0].type == MSGPACK_OBJECT_POSITIVE_INTEGER)
+		cmd = uk->argv[0].via.i64;
+
+	TAILQ_FOREACH(wc, &session->ws_clients, entry)
+		num_ws++;
+
+	if (cmd == 1 || cmd == 5) /* SYNC_LAYOUT or STATUS */
+		tmate_info("decoder_read: cmd=%d argc=%d ws_clients=%d", cmd, uk->argc, num_ws);
 
 	tmate_dispatch_daemon_message(session, uk);
 	tmate_send_websocket_daemon_msg(session, uk);
@@ -204,6 +216,11 @@ void tmate_spawn_daemon(struct tmate_session *session)
 	get_in_jail();
 
 	event_reinit(session->ev_base);
+
+	/* Re-create websocket encoder event on the new base (old one
+	 * was orphaned by fork + event_reinit) */
+	if (tmate_has_websocket())
+		tmate_encoder_rebind(&session->websocket_encoder, session->ev_base);
 
 	/* Start WebSocket listener after event_reinit (correct base) */
 	tmate_start_websocket_listener(session);

@@ -787,17 +787,37 @@ void tmate_notify_client_left(__unused struct tmate_session *session,
 void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 				     struct tmate_unpacker *uk)
 {
+	struct ws_client *wc;
+	msgpack_sbuffer sbuf;
+	msgpack_packer pk;
 	int i;
 
 	if (!tmate_has_websocket())
 		return;
 
-	pack(array, 2);
-	pack(int, TMATE_CTL_DEAMON_OUT_MSG);
+	/* Pack the message into a temporary buffer and send directly
+	 * to all SSE clients, bypassing the encoder event mechanism
+	 * which can be broken by fork/event_reinit. */
+	msgpack_sbuffer_init(&sbuf);
+	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
 
-	pack(array, uk->argc);
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+
+	msgpack_pack_array(&pk, uk->argc);
 	for (i = 0; i < uk->argc; i++)
-		pack(object, uk->argv[i]);
+		_msgpack_pack_object(&pk, uk->argv[i]);
+
+	/* Store in replay buffer */
+	pty_replay_append((unsigned char *)sbuf.data, sbuf.size);
+
+	/* Broadcast to all connected SSE clients */
+	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+		if (wc->handshake_done)
+			sse_send_data(wc->bev, (unsigned char *)sbuf.data, sbuf.size);
+	}
+
+	msgpack_sbuffer_destroy(&sbuf);
 }
 
 void tmate_send_websocket_header(struct tmate_session *session)

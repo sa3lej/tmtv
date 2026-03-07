@@ -331,6 +331,9 @@ window_create(u_int sx, u_int sy, u_int xpixel, u_int ypixel)
 
 #ifdef TMATE
 	w->tmate_last_sync_active_pane = NULL;
+	w->tmate_last_sync_name = NULL;
+	w->tmate_last_sync_sx = 0;
+	w->tmate_last_sync_sy = 0;
 #endif
 
 	w->id = next_window_id++;

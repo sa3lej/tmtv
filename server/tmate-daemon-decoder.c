@@ -213,6 +213,8 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 			if (!wl)
 				tmate_fatal("can't create window idx=%d", idx);
 			window_set_name(w, name);
+			/* Disable automatic rename so client-sent names stick */
+			options_set_number(w->options, "automatic-rename", 0);
 		}
 
 		if (seen_count < 512)

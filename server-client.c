@@ -2686,6 +2686,9 @@ server_client_loop(void)
 		int tmate_should_sync_layout = 0;
 		if (w->tmate_last_sync_active_pane != w->active)
 			tmate_should_sync_layout = 1;
+		if (w->sx != w->tmate_last_sync_sx ||
+		    w->sy != w->tmate_last_sync_sy)
+			tmate_should_sync_layout = 1;
 #endif
 		TAILQ_FOREACH(wp, &w->panes, entry) {
 			if (wp->fd != -1) {
@@ -2696,6 +2699,9 @@ server_client_loop(void)
 		}
 		check_window_name(w);
 #ifdef TMATE
+		if (w->tmate_last_sync_name == NULL ||
+		    strcmp(w->name, w->tmate_last_sync_name) != 0)
+			tmate_should_sync_layout = 1;
 		if (tmate_should_sync_layout)
 			tmate_sync_layout();
 #endif
