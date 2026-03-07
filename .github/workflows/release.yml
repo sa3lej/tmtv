@@ -70,12 +70,38 @@ jobs:
             bison \
             utf8proc
 
-      - name: Build
+      - name: Build with static deps
         run: |
           export PATH="$(brew --prefix bison)/bin:$PATH"
+          BREW="$(brew --prefix)"
+
+          # Collect .a paths for all non-system deps
+          STATIC_LIBS=""
+          for pkg in libevent libssh msgpack-c utf8proc; do
+            prefix=$(brew --prefix "$pkg")
+            for a in "$prefix"/lib/*.a; do
+              [ -f "$a" ] && STATIC_LIBS="$STATIC_LIBS $a"
+            done
+          done
+
           sh autogen.sh
-          ./configure --enable-utf8proc
-          make -j$(sysctl -n hw.ncpu)
+          # Configure finds headers via pkg-config, but we override
+          # LIBS at make time to use static archives instead of -l flags
+          ./configure --enable-utf8proc \
+            CPPFLAGS="-I${BREW}/include" \
+            LDFLAGS="-L${BREW}/lib"
+          make -j$(sysctl -n hw.ncpu) \
+            LIBS="$STATIC_LIBS -lncurses -lz -lresolv -framework Security -framework CoreFoundation"
+
+      - name: Verify no Homebrew dylib deps
+        run: |
+          echo "=== otool -L tmtv ==="
+          otool -L tmtv
+          if otool -L tmtv | grep -q '/opt/homebrew\|/usr/local/Cellar'; then
+            echo "ERROR: Binary still links to Homebrew shared libraries"
+            exit 1
+          fi
+          echo "Binary is portable."
 
       - name: Package binary
         run: |
