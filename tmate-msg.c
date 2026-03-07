@@ -8,7 +8,7 @@ static void tmate_status_message_client(struct client *c, const char *message)
 	delay = options_get_number(c->session ? c->session->options :
 	    global_s_options, "tmate-display-time");
 
-	status_message_set(c, delay, 0, 0, 0, "[tmate] %s", message);
+	status_message_set(c, delay, 0, 0, 0, "[tmtv] %s", message);
 }
 
 static void tmate_status_message_session(const char *message)

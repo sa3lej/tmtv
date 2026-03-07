@@ -1035,7 +1035,7 @@ const struct options_table_entry options_table[] = {
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .minimum = 1,
 	  .maximum = 65535,
-	  .default_num = 22,
+	  .default_num = 2222,
 	  .text = "tmtv server SSH port."
 	},
 
