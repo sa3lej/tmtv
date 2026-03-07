@@ -1,3 +1,6 @@
+#ifdef HAVE_LIBBSD
+#include <bsd/libutil.h>
+#endif
 #include <event2/dns.h>
 #include <event2/util.h>
 #include <event2/event.h>
@@ -17,6 +20,7 @@
 #define TMATE_RECONNECT_RETRY_TIMEOUT 2
 
 struct tmate_session tmate_session;
+int tmate_foreground;
 
 static void lookup_and_connect(void);
 

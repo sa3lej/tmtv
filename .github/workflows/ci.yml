@@ -25,6 +25,7 @@ jobs:
             libncurses-dev \
             libssh-dev \
             libmsgpack-dev \
+            libbsd-dev \
             bison \
             libutf8proc-dev
 
@@ -60,7 +61,7 @@ jobs:
         run: |
           export PATH="$(brew --prefix bison)/bin:$PATH"
           sh autogen.sh
-          ./configure
+          ./configure --enable-utf8proc
           make -j$(sysctl -n hw.ncpu)
 
       - name: Verify binary

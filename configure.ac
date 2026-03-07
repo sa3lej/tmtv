@@ -270,6 +270,19 @@ if test "x$found_libevent" = xno; then
 	AC_MSG_ERROR("libevent not found")
 fi
 
+# tmate needs libevent_extra for DNS (evdns).
+PKG_CHECK_MODULES(
+	LIBEVENT_EXTRA,
+	[libevent_extra >= 2],
+	[
+		LIBS="$LIBEVENT_EXTRA_LIBS $LIBS"
+	],
+	[
+		AC_SEARCH_LIBS(evdns_base_new, [event_extra event], [],
+			AC_MSG_ERROR("libevent_extra not found (required for tmate DNS)"))
+	]
+)
+
 # Look for libssh (for tmate).
 PKG_CHECK_MODULES(
 	LIBSSH,
@@ -313,6 +326,22 @@ PKG_CHECK_MODULES(
 if test "x$found_msgpack" = xno; then
 	AC_MSG_ERROR("msgpack not found (required for tmate)")
 fi
+
+# Look for libbsd (for fparseln on Linux).
+PKG_CHECK_MODULES(
+	LIBBSD,
+	[libbsd >= 0.7],
+	[
+		AM_CPPFLAGS="$LIBBSD_CFLAGS $AM_CPPFLAGS"
+		CPPFLAGS="$LIBBSD_CFLAGS $SAVED_CPPFLAGS"
+		LIBS="$LIBBSD_LIBS $LIBS"
+		AC_DEFINE(HAVE_LIBBSD)
+	],
+	[
+		AC_SEARCH_LIBS(fparseln, [util bsd], [],
+			AC_MSG_WARN("fparseln not found, some features may be limited"))
+	]
+)
 
 # Look for yacc.
 AC_CHECK_PROG(found_yacc, $YACC, yes, no)
