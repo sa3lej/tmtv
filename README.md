@@ -98,7 +98,7 @@ tmtv-server -k /path/to/keys -p 2222 -z 4002 -w 8080 -h your.host.com -v
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-k` | Path to SSH host keys directory | `keys` |
-| `-p` | SSH listen port for client and viewer connections | `22` |
+| `-p` | SSH listen port for client and viewer connections | `2222` |
 | `-h` | Hostname advertised in connection strings | system hostname |
 | `-z` | SSE (Server-Sent Events) port for web viewer streaming | disabled |
 | `-w` | Web port shown in the URL notification (typically your reverse proxy port) | disabled |
