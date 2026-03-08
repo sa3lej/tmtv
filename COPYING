@@ -1,5 +1,9 @@
 THIS IS FOR INFORMATION ONLY, CODE IS UNDER THE LICENCE AT THE TOP OF ITS FILE.
 
+tmtv is a fork of tmate by Remi Dumont, which is a fork of tmux by Nicholas
+Marriott. tmtv-specific code (server-sent events streaming, web viewer, build
+system, and server modifications) is copyright Lars-Erik Jonsson.
+
 The README, CHANGES, FAQ and TODO files are licensed under the ISC license. All
 other files have a license and copyright notice at their start, typically:
 
