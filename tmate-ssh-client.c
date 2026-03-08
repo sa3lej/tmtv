@@ -9,6 +9,35 @@
 
 #include "tmate.h"
 
+/*
+ * SSH algorithm policy — modern algorithms only.
+ * Reviewed 2026-03-08 against libssh 0.10.x capabilities.
+ */
+#define TMTV_SSH_CIPHERS \
+	"chacha20-poly1305@openssh.com," \
+	"aes256-gcm@openssh.com," \
+	"aes128-gcm@openssh.com," \
+	"aes256-ctr," \
+	"aes192-ctr," \
+	"aes128-ctr"
+
+#define TMTV_SSH_KEX \
+	"curve25519-sha256," \
+	"curve25519-sha256@libssh.org," \
+	"ecdh-sha2-nistp256," \
+	"ecdh-sha2-nistp384," \
+	"ecdh-sha2-nistp521," \
+	"diffie-hellman-group18-sha512," \
+	"diffie-hellman-group16-sha512"
+
+#define TMTV_SSH_HOSTKEYS \
+	"ssh-ed25519," \
+	"ecdsa-sha2-nistp256," \
+	"ecdsa-sha2-nistp384," \
+	"ecdsa-sha2-nistp521," \
+	"rsa-sha2-512," \
+	"rsa-sha2-256"
+
 static void on_ssh_client_event(struct tmate_ssh_client *client);
 static void __on_ssh_client_event(evutil_socket_t fd, short what, void *arg);
 
@@ -256,6 +285,10 @@ static void on_ssh_client_event(struct tmate_ssh_client *client)
 		ssh_options_set(session, SSH_OPTIONS_PORT, &port);
 		ssh_options_set(session, SSH_OPTIONS_USER, "tmtv");
 		ssh_options_set(session, SSH_OPTIONS_COMPRESSION, "yes");
+		ssh_options_set(session, SSH_OPTIONS_CIPHERS_C_S, TMTV_SSH_CIPHERS);
+		ssh_options_set(session, SSH_OPTIONS_CIPHERS_S_C, TMTV_SSH_CIPHERS);
+		ssh_options_set(session, SSH_OPTIONS_KEY_EXCHANGE, TMTV_SSH_KEX);
+		ssh_options_set(session, SSH_OPTIONS_HOSTKEYS, TMTV_SSH_HOSTKEYS);
 
 		char *identity;
 		if ((identity = get_identity())) {
@@ -301,13 +334,8 @@ static void on_ssh_client_event(struct tmate_ssh_client *client)
 		const char *server_hash_str;
 		int match;
 
-#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 9, 0)
 		if (ssh_get_server_publickey(session, &pubkey) < 0)
 			tmate_fatal("ssh_get_server_publickey");
-#else
-		if (ssh_get_publickey(session, &pubkey) < 0)
-			tmate_fatal("ssh_get_publickey");
-#endif
 
 		if (ssh_get_publickey_hash(pubkey, SSH_PUBLICKEY_HASH_SHA256,
 					   &hash, &hash_len) < 0) {
@@ -328,11 +356,9 @@ static void on_ssh_client_event(struct tmate_ssh_client *client)
 						"tmtv-server-rsa-fingerprint");
 			break;
 		case SSH_KEYTYPE_ECDSA:
-#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 9, 0)
 		case SSH_KEYTYPE_ECDSA_P256:
 		case SSH_KEYTYPE_ECDSA_P384:
 		case SSH_KEYTYPE_ECDSA_P521:
-#endif
 			server_hash_str = options_get_string(global_options,
 						"tmtv-server-ecdsa-fingerprint");
 			break;

@@ -15,6 +15,35 @@
 
 #include "tmate.h"
 
+/*
+ * SSH algorithm policy — modern algorithms only.
+ * Reviewed 2026-03-08 against libssh 0.10.x capabilities.
+ */
+#define TMTV_SSH_CIPHERS \
+	"chacha20-poly1305@openssh.com," \
+	"aes256-gcm@openssh.com," \
+	"aes128-gcm@openssh.com," \
+	"aes256-ctr," \
+	"aes192-ctr," \
+	"aes128-ctr"
+
+#define TMTV_SSH_KEX \
+	"curve25519-sha256," \
+	"curve25519-sha256@libssh.org," \
+	"ecdh-sha2-nistp256," \
+	"ecdh-sha2-nistp384," \
+	"ecdh-sha2-nistp521," \
+	"diffie-hellman-group18-sha512," \
+	"diffie-hellman-group16-sha512"
+
+#define TMTV_SSH_HOSTKEYS \
+	"ssh-ed25519," \
+	"ecdsa-sha2-nistp256," \
+	"ecdsa-sha2-nistp384," \
+	"ecdsa-sha2-nistp521," \
+	"rsa-sha2-512," \
+	"rsa-sha2-256"
+
 char *get_ssh_conn_string(const char *session_token)
 {
 	char port_arg[16] = {0};
@@ -241,6 +270,10 @@ static void client_bootstrap(struct tmate_session *_session)
 
 	ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &grace_period);
 	ssh_options_set(session, SSH_OPTIONS_COMPRESSION, "yes");
+	ssh_options_set(session, SSH_OPTIONS_CIPHERS_C_S, TMTV_SSH_CIPHERS);
+	ssh_options_set(session, SSH_OPTIONS_CIPHERS_S_C, TMTV_SSH_CIPHERS);
+	ssh_options_set(session, SSH_OPTIONS_KEY_EXCHANGE, TMTV_SSH_KEX);
+	ssh_options_set(session, SSH_OPTIONS_HOSTKEYS, TMTV_SSH_HOSTKEYS);
 
 	ssh_set_auth_methods(client->session, SSH_AUTH_METHOD_NONE |
 					      SSH_AUTH_METHOD_PUBLICKEY);
@@ -405,17 +438,18 @@ static ssh_bind prepare_ssh(const char *keys_dir, const char *bind_addr, int por
 	if (!bind)
 		tmate_fatal("Cannot initialize ssh");
 
-#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0,9,0)
 	/* Explicitly parse configuration to avoid automatic configuration file
 	 * loading which could override options */
 	ssh_bind_options_parse_config(bind, NULL);
-#endif
 
 	if (bind_addr)
 		ssh_bind_options_set(bind, SSH_BIND_OPTIONS_BINDADDR, bind_addr);
 	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_BINDPORT, &port);
 	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_BANNER, TMATE_SSH_BANNER);
 	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_LOG_VERBOSITY, &ssh_log_level);
+	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_CIPHERS_C_S, TMTV_SSH_CIPHERS);
+	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_CIPHERS_S_C, TMTV_SSH_CIPHERS);
+	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_KEY_EXCHANGE, TMTV_SSH_KEX);
 
 	ssh_import_key(bind, keys_dir, "ssh_host_rsa_key");
 	ssh_import_key(bind, keys_dir, "ssh_host_ed25519_key");

@@ -289,7 +289,7 @@ PKG_CHECK_MODULES(
 # Look for libssh (for tmate).
 PKG_CHECK_MODULES(
 	LIBSSH,
-	[libssh >= 0.8.4],
+	[libssh >= 0.9.5],
 	[
 		AM_CPPFLAGS="$LIBSSH_CFLAGS $AM_CPPFLAGS"
 		CPPFLAGS="$LIBSSH_CFLAGS $SAVED_CPPFLAGS"
@@ -299,7 +299,7 @@ PKG_CHECK_MODULES(
 	found_libssh=no
 )
 if test "x$found_libssh" = xno; then
-	AC_MSG_ERROR("libssh >= 0.8.4 not found (required for tmate)")
+	AC_MSG_ERROR("libssh >= 0.9.5 not found (required for tmate)")
 fi
 
 # Look for msgpack (for tmate).
