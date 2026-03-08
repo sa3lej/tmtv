@@ -371,3 +371,49 @@ jobs:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           files: artifacts/*
+
+      - name: Update Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA_ARM64=$(sha256sum artifacts/tmtv-macos-arm64 | awk '{print $1}')
+          SHA_AMD64=$(sha256sum artifacts/tmtv-macos-amd64 | awk '{print $1}')
+
+          cat > Formula/tmtv.rb << FORMULA
+          class Tmtv < Formula
+            desc "Terminal sharing built on tmux — share your terminal over SSH and the web"
+            homepage "https://tmtv.se"
+            version "${VERSION}"
+            license "ISC"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/sa3lej/tmtv/releases/download/v${VERSION}/tmtv-macos-arm64"
+                sha256 "${SHA_ARM64}"
+              elsif Hardware::CPU.intel?
+                url "https://github.com/sa3lej/tmtv/releases/download/v${VERSION}/tmtv-macos-amd64"
+                sha256 "${SHA_AMD64}"
+              end
+            end
+
+            def install
+              binary = Dir["tmtv-*"].first
+              bin.install binary => "tmtv"
+            end
+
+            test do
+              assert_match "tmtv", shell_output("#{bin}/tmtv -V")
+            end
+          end
+          FORMULA
+          sed -i 's/^          //' Formula/tmtv.rb
+
+          git clone https://x-access-token:${TAP_TOKEN}@github.com/sa3lej/homebrew-tap.git tap
+          cp Formula/tmtv.rb tap/Formula/tmtv.rb
+          cd tap
+          git config user.name "tmtv-bot"
+          git config user.email "bot@tmtv.se"
+          git add Formula/tmtv.rb
+          git commit -m "Update tmtv to ${VERSION}"
+          git push
