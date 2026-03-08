@@ -15,17 +15,20 @@
 .\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
 .Dd $Mdocdate$
-.Dt TMUX 1
+.Dt TMTV 1
 .Os
 .Sh NAME
-.Nm tmux
-.Nd terminal multiplexer
+.Nm tmtv
+.Nd terminal sharing built on tmux
 .Sh SYNOPSIS
-.Nm tmux
+.Nm tmtv
 .Bk -words
-.Op Fl 2CDhlNuVv
+.Op Fl 2CDFhlNuVv
 .Op Fl c Ar shell-command
 .Op Fl f Ar file
+.Op Fl H Ar server-host
+.Op Fl P Ar server-port
+.Op Fl k Ar api-key
 .Op Fl L Ar socket-name
 .Op Fl S Ar socket-path
 .Op Fl T Ar features
@@ -33,7 +36,15 @@
 .Ek
 .Sh DESCRIPTION
 .Nm
-is a terminal multiplexer:
+is a terminal sharing tool built on tmux 3.6a.
+It enables instant terminal sharing over SSH and the web.
+When started,
+.Nm
+connects to a relay server (tmtv.se by default) and prints
+session tokens for SSH and web access.
+.Pp
+.Nm
+is also a full terminal multiplexer:
 it enables a number of terminals to be created, accessed, and
 controlled from a single screen.
 .Nm
@@ -51,6 +62,21 @@ and displays it on screen.
 A status line at the bottom of the screen
 shows information on the current session
 and is used to enter interactive commands.
+.Pp
+The following additional options are specific to
+.Nm :
+.Bl -tag -width "XXXXXXXXX"
+.It Fl F
+Foreground mode.
+Connect to the relay server for remote access only, without creating
+a local terminal session.
+.It Fl H Ar server-host
+Server hostname to connect to (default: tmtv.se).
+.It Fl P Ar server-port
+Server SSH port (default: 22).
+.It Fl k Ar api-key
+API key for named sessions.
+.El
 .Pp
 A session is a single collection of
 .Em pseudo terminals
