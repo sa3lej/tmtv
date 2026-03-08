@@ -76,20 +76,22 @@ static void tmate_header(struct tmate_session *session,
 	if (session->client_protocol_version >= 3) {
 		session->client_version = unpack_string(uk);
 	} else {
-		session->client_version = xstrdup("1.8.5");
-	}
-
-	if (session->client_protocol_version < 6) {
-		/* older clients don't send a ready message */
-		tmate_ready(session, NULL);
-	}
-
-	if (session->client_protocol_version < 5) {
-		session->daemon_encoder.mpac_version = 4;
+		session->client_version = xstrdup("unknown");
 	}
 
 	tmate_info("tmate version=%s, protocol=%d",
 		   session->client_version, session->client_protocol_version);
+
+	if (session->client_protocol_version < TMATE_PROTOCOL_VERSION) {
+		tmate_notify("Client too old (protocol %d, need %d). "
+			     "Please update: curl -fsSL https://tmtv.se/install.sh | sh",
+			     session->client_protocol_version,
+			     TMATE_PROTOCOL_VERSION);
+		tmate_fatal("Rejecting client with protocol version %d (minimum %d)",
+			    session->client_protocol_version,
+			    TMATE_PROTOCOL_VERSION);
+		return;
+	}
 
 	if (tmate_has_websocket())
 		tmate_send_websocket_header(session);
