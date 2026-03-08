@@ -273,8 +273,8 @@
 
   var ssePort = params.get('port');
   var sseUrl = ssePort
-    ? 'http://' + (location.hostname || 'localhost') + ':' + ssePort
-    : '/ws';
+    ? 'http://' + (location.hostname || 'localhost') + ':' + ssePort + '/' + (sessionToken || '')
+    : '/ws/' + (sessionToken || '');
 
   var sessionStart = null;
   var paneCount = 0;
