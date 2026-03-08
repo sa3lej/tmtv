@@ -18,16 +18,23 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    height: 100vh;
+    min-height: 100vh;
     font-family: "Inter", -apple-system, sans-serif;
     color: #e0e0e0;
-    overflow: hidden;
+    padding: 0 20px;
+  }
+
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 80vh;
   }
 
   .logo {
     font-family: "JetBrains Mono", monospace;
-    font-size: 48px;
+    font-size: 56px;
     font-weight: 700;
     letter-spacing: -1px;
     margin-bottom: 8px;
@@ -39,7 +46,7 @@
 
   .tagline {
     color: #666;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 300;
     letter-spacing: 0.5px;
     margin-bottom: 48px;
@@ -50,7 +57,7 @@
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 16px;
     padding: 40px;
-    width: 420px;
+    width: 440px;
     max-width: 90vw;
     backdrop-filter: blur(12px);
     box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
@@ -113,30 +120,162 @@
     font-size: 11px;
   }
 
+  /* How it works */
+  .how-it-works {
+    width: 680px;
+    max-width: 90vw;
+    padding-bottom: 80px;
+  }
+
+  .how-it-works h3 {
+    font-size: 14px;
+    font-weight: 500;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    text-align: center;
+    margin-bottom: 32px;
+  }
+
+  .steps {
+    display: flex;
+    gap: 20px;
+  }
+
+  .step {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 12px;
+    padding: 24px 20px;
+    text-align: center;
+  }
+
+  .step-icon {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #6c9efc, #c084fc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .step h4 {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ccc;
+    margin-bottom: 8px;
+  }
+
+  .step p {
+    font-size: 12px;
+    color: #555;
+    line-height: 1.5;
+  }
+
+  .step code {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    background: rgba(108, 158, 252, 0.08);
+    color: #6c9efc;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .features {
+    display: flex;
+    gap: 16px;
+    margin-top: 24px;
+  }
+
+  .feature {
+    flex: 1;
+    text-align: center;
+    padding: 16px 12px;
+  }
+
+  .feature-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: #555;
+    letter-spacing: 0.3px;
+  }
+
+  .feature-value {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: #3ddc84;
+    margin-top: 4px;
+  }
+
   .footer {
-    position: fixed;
-    bottom: 20px;
+    padding: 32px 0 24px;
     font-size: 11px;
     color: #333;
     letter-spacing: 0.3px;
   }
   .footer a { color: #555; text-decoration: none; }
   .footer a:hover { color: #888; }
+
+  @media (max-width: 600px) {
+    .steps { flex-direction: column; }
+    .features { flex-direction: column; gap: 8px; }
+    .logo { font-size: 40px; }
+  }
 </style>
 </head>
 <body>
-  <div class="logo">tmtv</div>
-  <div class="tagline">share your terminal, keep your tmux</div>
+  <div class="hero">
+    <div class="logo">tmtv</div>
+    <div class="tagline">share your terminal, keep your tmux</div>
 
-  <div class="card">
-    <h2>View a session</h2>
-    <form class="input-group" onsubmit="go(event)">
-      <input type="text" id="token" placeholder="session token" autofocus autocomplete="off" spellcheck="false">
-      <button type="submit">Watch</button>
-    </form>
-    <div class="hint">
-      Paste the session token shown in your tmtv status bar.<br>
-      Or open a direct link: <code>/s/TOKEN</code>
+    <div class="card">
+      <h2>View a session</h2>
+      <form class="input-group" onsubmit="go(event)">
+        <input type="text" id="token" placeholder="session token" autofocus autocomplete="off" spellcheck="false">
+        <button type="submit">Watch</button>
+      </form>
+      <div class="hint">
+        Paste the session token from the session owner.<br>
+        Or open a direct link: <code>/s/TOKEN</code>
+      </div>
+    </div>
+  </div>
+
+  <div class="how-it-works">
+    <h3>How it works</h3>
+    <div class="steps">
+      <div class="step">
+        <div class="step-icon">1</div>
+        <h4>Share</h4>
+        <p>Run <code>tmtv</code> to start a session. Enable web sharing to get a viewer URL.</p>
+      </div>
+      <div class="step">
+        <div class="step-icon">2</div>
+        <h4>Connect</h4>
+        <p>Viewers open the URL or paste the token above. No install needed for browser access.</p>
+      </div>
+      <div class="step">
+        <div class="step-icon">3</div>
+        <h4>Watch</h4>
+        <p>See the terminal in real time. Full tmux rendering with xterm.js and WebGL.</p>
+      </div>
+    </div>
+    <div class="features">
+      <div class="feature">
+        <div class="feature-label">SSH access</div>
+        <div class="feature-value">read-write + read-only</div>
+      </div>
+      <div class="feature">
+        <div class="feature-label">Web viewer</div>
+        <div class="feature-value">view-only, zero install</div>
+      </div>
+      <div class="feature">
+        <div class="feature-label">Based on</div>
+        <div class="feature-value">tmux 3.6a</div>
+      </div>
     </div>
   </div>
 
