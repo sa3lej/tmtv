@@ -84,6 +84,14 @@ else
     fail "tmtv-identity option exists" "option not found: $OUTPUT"
 fi
 
+# Test 7b: tmtv-session-name option
+OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g tmtv-session-name 2>/dev/null || echo "MISSING")
+if echo "$OUTPUT" | grep -q "tmtv-session-name"; then
+    pass "tmtv-session-name option exists"
+else
+    fail "tmtv-session-name option exists" "option not found: $OUTPUT"
+fi
+
 # Test 8: Core tmux still works with hooks (regression)
 "$TMTV" -S "$SOCKET" new-window -t hooktest 2>/dev/null
 OUTPUT=$("$TMTV" -S "$SOCKET" list-windows -t hooktest 2>/dev/null)

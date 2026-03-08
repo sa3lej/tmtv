@@ -77,11 +77,16 @@ static void append_authorized_key(const char *keystr)
 extern void tmate_send_web_url(struct tmate_session *session);
 extern void tmate_disconnect_ws_clients(struct tmate_session *session);
 
+extern void tmate_register_session_name(struct tmate_session *session,
+					const char *name);
+
 static void tmate_set(char *key, char *value)
 {
 	if (!strcmp(key, "authorized_keys"))
 		append_authorized_key(value);
-	else if (!strcmp(key, "web_sharing")) {
+	else if (!strcmp(key, "session_name")) {
+		tmate_register_session_name(tmate_session, value);
+	} else if (!strcmp(key, "web_sharing")) {
 		bool enabled = !strcmp(value, "true") || !strcmp(value, "1") || !strcmp(value, "on");
 		tmate_session->web_sharing_enabled = enabled;
 		if (enabled) {

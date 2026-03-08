@@ -241,6 +241,8 @@ struct tmate_session {
 
 	const char *session_token;
 	const char *session_token_ro;
+	const char *session_token_named; /* user-chosen name, or NULL */
+	int sessions_dir_fd; /* fd to sessions dir, kept open for post-jail symlinks */
 	const char *obfuscated_session_token; /* for logging purposes */
 
 	struct tmate_encoder daemon_encoder;

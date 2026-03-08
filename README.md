@@ -190,6 +190,21 @@ ssh-keygen -l -E SHA256 -f /path/to/keys/ssh_host_rsa_key.pub
 ssh-keygen -l -E SHA256 -f /path/to/keys/ssh_host_ed25519_key.pub
 ```
 
+### Named sessions
+
+By default, sessions get a random token. You can choose a human-readable name for predictable URLs:
+
+```
+# In ~/.tmtv.conf
+set -g tmtv-session-name demo
+```
+
+This makes the session available at:
+- `ssh demo@your.host.com -p 2222` (SSH)
+- `http://your.host.com:8080/s/demo` (web)
+
+Names must be 3-32 characters, alphanumeric and hyphens only. If the name is taken, the server falls back to the random token.
+
 ### Web sharing toggle
 
 Web sharing (SSE streaming to browsers) is off by default. Toggle it per session:
@@ -221,6 +236,7 @@ Session URLs are available as tmux format variables for scripting and status bar
 | `#{tmtv_ssh}` | SSH connection string (read-write) |
 | `#{tmtv_ssh_ro}` | SSH connection string (read-only) |
 | `#{tmtv_web}` | Web viewer URL (set after enabling web sharing) |
+| `#{tmtv_session_name}` | Named session name (if set) |
 
 Example: display the web URL in a copyable form:
 
