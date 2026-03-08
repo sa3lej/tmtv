@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Lars-Erik Jonsson <l@jonsson.es>
+# ISC license — see COPYING for details.
+
 ARG PLATFORM=amd64
 FROM ${PLATFORM}/alpine:3.20 AS build
 
