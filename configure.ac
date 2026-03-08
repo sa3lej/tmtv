@@ -1,6 +1,6 @@
 # configure.ac
 
-AC_INIT([tmtv], 0.1.0)
+AC_INIT([tmtv], 1.0.0)
 AC_PREREQ([2.60])
 
 AC_CONFIG_AUX_DIR(etc)
@@ -55,7 +55,7 @@ AC_PROG_YACC
 PKG_PROG_PKG_CONFIG
 AC_USE_SYSTEM_EXTENSIONS
 
-# Default tmux.conf goes in /etc not ${prefix}/etc.
+# Default tmtv.conf goes in /etc not ${prefix}/etc.
 test "$sysconfdir" = '${prefix}/etc' && sysconfdir=/etc
 
 # Is this --enable-debug?
@@ -289,7 +289,7 @@ PKG_CHECK_MODULES(
 # Look for libssh (for tmate).
 PKG_CHECK_MODULES(
 	LIBSSH,
-	[libssh >= 0.8.4],
+	[libssh >= 0.9.5],
 	[
 		AM_CPPFLAGS="$LIBSSH_CFLAGS $AM_CPPFLAGS"
 		CPPFLAGS="$LIBSSH_CFLAGS $SAVED_CPPFLAGS"
@@ -299,7 +299,7 @@ PKG_CHECK_MODULES(
 	found_libssh=no
 )
 if test "x$found_libssh" = xno; then
-	AC_MSG_ERROR("libssh >= 0.8.4 not found (required for tmate)")
+	AC_MSG_ERROR("libssh >= 0.9.5 not found (required for tmate)")
 fi
 
 # Look for msgpack (for tmate).

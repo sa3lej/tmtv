@@ -178,7 +178,7 @@ static void handle_ready(struct tmate_session *session,
 	{
 		struct session *s = RB_MIN(sessions, &sessions);
 		if (s != NULL)
-			notify_session("tmate-ready", s);
+			notify_session("tmtv-ready", s);
 	}
 }
 
