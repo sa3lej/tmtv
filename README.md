@@ -173,13 +173,13 @@ web session: http://your.host.com:8080/s/TOKEN
 
 Share any of these with your viewers.
 
-The `-F` flag sets the server hostname. You can also set it in `~/.tmux.conf`:
+The `-F` flag sets the server hostname. You can also set it in `~/.tmtv.conf`:
 
 ```
-set -g tmate-server-host your.host.com
-set -g tmate-server-port 2222
-set -g tmate-server-rsa-fingerprint SHA256:...
-set -g tmate-server-ed25519-fingerprint SHA256:...
+set -g tmtv-server-host your.host.com
+set -g tmtv-server-port 2222
+set -g tmtv-server-rsa-fingerprint SHA256:...
+set -g tmtv-server-ed25519-fingerprint SHA256:...
 ```
 
 Get the fingerprints from your server keys:

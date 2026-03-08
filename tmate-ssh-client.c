@@ -95,7 +95,7 @@ static char *get_identity(void)
 	const char *opt;
 	char *identity;
 
-	opt = options_get_string(global_options, "tmate-identity");
+	opt = options_get_string(global_options, "tmtv-identity");
 	if (!strlen(opt))
 		return NULL;
 
@@ -248,13 +248,13 @@ static void on_ssh_client_event(struct tmate_ssh_client *client)
 		ssh_set_callbacks(session, &client->ssh_callbacks);
 
 		int verbosity = SSH_LOG_NOLOG + log_get_level();
-		int port = options_get_number(global_options, "tmate-server-port");
+		int port = options_get_number(global_options, "tmtv-server-port");
 
 		ssh_set_blocking(session, 0);
 		ssh_options_set(session, SSH_OPTIONS_HOST, client->server_ip);
 		ssh_options_set(session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
 		ssh_options_set(session, SSH_OPTIONS_PORT, &port);
-		ssh_options_set(session, SSH_OPTIONS_USER, "tmate");
+		ssh_options_set(session, SSH_OPTIONS_USER, "tmtv");
 		ssh_options_set(session, SSH_OPTIONS_COMPRESSION, "yes");
 
 		char *identity;
@@ -325,7 +325,7 @@ static void on_ssh_client_event(struct tmate_ssh_client *client)
 		switch (key_type) {
 		case SSH_KEYTYPE_RSA:
 			server_hash_str = options_get_string(global_options,
-						"tmate-server-rsa-fingerprint");
+						"tmtv-server-rsa-fingerprint");
 			break;
 		case SSH_KEYTYPE_ECDSA:
 #if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 9, 0)
@@ -334,11 +334,11 @@ static void on_ssh_client_event(struct tmate_ssh_client *client)
 		case SSH_KEYTYPE_ECDSA_P521:
 #endif
 			server_hash_str = options_get_string(global_options,
-						"tmate-server-ecdsa-fingerprint");
+						"tmtv-server-ecdsa-fingerprint");
 			break;
 		case SSH_KEYTYPE_ED25519:
 			server_hash_str = options_get_string(global_options,
-						"tmate-server-ed25519-fingerprint");
+						"tmtv-server-ed25519-fingerprint");
 			break;
 		default:
 			server_hash_str = "";

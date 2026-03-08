@@ -149,7 +149,7 @@ extern int tmate_validate_session_token(const char *token);
 
 /* tmate-ssh-server.c */
 
-#define TMATE_SSH_BANNER "tmate"
+#define TMATE_SSH_BANNER "tmtv"
 #define TMATE_SSH_KEEPALIVE_SEC 300
 
 #define TMATE_ROLE_DAEMON	1
@@ -205,7 +205,7 @@ extern void tmate_ssh_server_main(struct tmate_session *session,
 #define TMATE_DEFAULT_WEBSOCKET_PORT 4002
 
 #define TMATE_TOKEN_LEN 25
-#define TMATE_WORKDIR "/tmp/tmate"
+#define TMATE_WORKDIR "/tmp/tmtv"
 #define TMATE_JAIL_USER "nobody"
 
 struct tmate_settings {

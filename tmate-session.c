@@ -97,9 +97,9 @@ static void lookup_and_connect(void)
 	const char *tmate_server_host;
 
 	tmate_server_host = options_get_string(global_options,
-					       "tmate-server-host");
+					       "tmtv-server-host");
 	if (!strlen(tmate_server_host)) {
-		tmate_debug("No tmate-server-host configured, running in local-only mode");
+		tmate_debug("No tmtv-server-host configured, running in local-only mode");
 		return;
 	}
 
@@ -152,7 +152,7 @@ static void send_authorized_keys(void)
 	const char *opt_path;
 	char *path;
 
-	opt_path = options_get_string(global_options, "tmate-authorized-keys");
+	opt_path = options_get_string(global_options, "tmtv-authorized-keys");
 	if (strlen(opt_path) == 0)
 		return;
 

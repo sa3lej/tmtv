@@ -75,7 +75,7 @@ source tree with:
 nroff -mdoc tmux.1|less
 ~~~
 
-A small example configuration is in `example_tmux.conf`.
+A small example configuration is in `example_tmtv.conf`.
 
 And a bash(1) completion file at:
 

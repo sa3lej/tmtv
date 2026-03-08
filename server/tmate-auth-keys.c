@@ -82,9 +82,9 @@ static void tmate_set(char *key, char *value)
 
 void tmate_hook_set_option_auth(const char *name, const char *val)
 {
-	if (!strcmp(name, "tmate-authorized-keys")) {
+	if (!strcmp(name, "tmtv-authorized-keys")) {
 		reset_and_enable_authorized_keys();
-	} else if (!strcmp(name, "tmate-set")) {
+	} else if (!strcmp(name, "tmtv-set")) {
 		char *key_value = xstrdup(val);
 		char *s = key_value;
 
