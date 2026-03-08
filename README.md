@@ -189,6 +189,22 @@ ssh-keygen -l -E SHA256 -f /path/to/keys/ssh_host_rsa_key.pub
 ssh-keygen -l -E SHA256 -f /path/to/keys/ssh_host_ed25519_key.pub
 ```
 
+### Web sharing toggle
+
+Web sharing (SSE streaming to browsers) is off by default. Toggle it per session:
+
+```sh
+# Enable web sharing -- server replies with the viewer URL
+tmtv set -g tmtv-web-sharing on
+# [tmtv] Web sharing enabled: http://your.host.com:8080/s/TOKEN
+
+# Disable web sharing -- drops all browser viewers
+tmtv set -g tmtv-web-sharing off
+# [tmtv] Web sharing disabled
+```
+
+SSH sharing (read-write and read-only tokens) is always available regardless of this setting.
+
 ### Using tmtv as tmux
 
 tmtv is a full tmux replacement. All tmux commands work:
