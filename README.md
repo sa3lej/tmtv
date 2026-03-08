@@ -180,6 +180,7 @@ set -g tmtv-server-host your.host.com
 set -g tmtv-server-port 2222
 set -g tmtv-server-rsa-fingerprint SHA256:...
 set -g tmtv-server-ed25519-fingerprint SHA256:...
+set -g tmtv-web-sharing on   # auto-enable web sharing on connect
 ```
 
 Get the fingerprints from your server keys:
@@ -204,6 +205,12 @@ tmtv set -g tmtv-web-sharing off
 ```
 
 SSH sharing (read-write and read-only tokens) is always available regardless of this setting.
+
+To auto-enable web sharing on every session, add to `~/.tmtv.conf`:
+
+```
+set -g tmtv-web-sharing on
+```
 
 ### Using tmtv as tmux
 
