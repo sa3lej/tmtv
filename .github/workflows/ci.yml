@@ -56,8 +56,8 @@ jobs:
             tmtv
             tmtv-server
 
-  build-macos:
-    name: Build (macOS)
+  build-macos-arm64:
+    name: Build (macOS arm64)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,5 +93,48 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tmtv-macos-arm64
+          path: |
+            tmtv
+
+  build-macos-amd64:
+    name: Build (macOS amd64)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x86_64 Homebrew and dependencies
+        run: |
+          # Install x86_64 Homebrew under Rosetta
+          arch -x86_64 /bin/bash -c '
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          '
+          arch -x86_64 /usr/local/bin/brew install \
+            autoconf automake pkg-config libevent libssh msgpack-c bison utf8proc
+
+      - name: Build
+        run: |
+          arch -x86_64 /bin/bash -c '
+            export PATH="/usr/local/opt/bison/bin:/usr/local/bin:$PATH"
+            export HOMEBREW_PREFIX=/usr/local
+            sh autogen.sh
+            ./configure --enable-utf8proc \
+              CPPFLAGS="-I/usr/local/include" \
+              LDFLAGS="-L/usr/local/lib"
+            make -j$(sysctl -n hw.ncpu)
+          '
+
+      - name: Verify binary
+        run: |
+          file tmtv
+          arch -x86_64 ./tmtv -V
+
+      - name: Run tests
+        run: |
+          arch -x86_64 /bin/bash -c 'cd tests && make all'
+
+      - name: Upload macOS binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmtv-macos-amd64
           path: |
             tmtv
