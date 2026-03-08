@@ -29,3 +29,6 @@ tests/test-*
 !tests/test-*.h
 !tests/test-*.sh
 tests/test-server-header
+site/node_modules/
+site/dist/
+site/.astro/

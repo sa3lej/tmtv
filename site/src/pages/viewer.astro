@@ -1,0 +1,246 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base title="tmtv" description="Live terminal session viewer">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+
+  <div id="status" class="status">Connecting...</div>
+
+  <div id="error-overlay" class="error-overlay hidden">
+    <div class="error-card">
+      <div class="error-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/><line x1="12" x2="12" y1="15" y2="17"/></svg>
+      </div>
+      <h2 class="error-title">Session unavailable</h2>
+      <p class="error-msg" id="error-msg">This session may have ended or the token is invalid.</p>
+      <a href="/" class="error-link">Back to tmtv</a>
+    </div>
+  </div>
+
+  <div id="terminal-wrap" class="terminal-wrap">
+    <div class="tv-antenna-mount"></div>
+    <div class="tv-antenna-l"></div>
+    <div class="tv-antenna-r"></div>
+
+    <div id="titlebar" class="titlebar">
+      <div class="dot red"></div>
+      <div class="dot yellow"></div>
+      <div class="dot green"></div>
+      <span id="titlebar-text" class="titlebar-text">
+        <span id="titlebar-label">tmtv</span>
+        <span id="titlebar-meta"></span>
+      </span>
+    </div>
+
+    <div id="terminal-container" class="terminal-container"></div>
+
+    <div class="tv-controls">
+      <div class="tv-speaker"></div>
+      <div class="tv-dial-label">vhf</div>
+      <div class="tv-dial" style="transform: rotate(30deg);"></div>
+      <div class="tv-dial-label">uhf</div>
+      <div class="tv-dial" style="transform: rotate(-15deg);"></div>
+      <div class="tv-knobs">
+        <div><div class="tv-knob"></div><div class="tv-knob-label">vol</div></div>
+        <div><div class="tv-knob"></div><div class="tv-knob-label">tone</div></div>
+        <div><div class="tv-knob"></div><div class="tv-knob-label">brt</div></div>
+      </div>
+    </div>
+
+    <div id="tmux-status" class="tmux-status">
+      <span id="tmux-status-left"></span>
+      <span id="tmux-status-right"></span>
+    </div>
+
+    <div class="tv-legs">
+      <div class="tv-leg"></div>
+      <div class="tv-leg"></div>
+      <div class="tv-leg"></div>
+      <div class="tv-leg"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" is:inline></script>
+  <script src="https://cdn.jsdelivr.net/npm/@msgpack/msgpack@3.0.0-beta2/dist.es5+umd/msgpack.min.js" is:inline></script>
+  <script is:inline src="/viewer.js"></script>
+</Base>
+
+<style is:global>
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    overflow: hidden;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(40, 20, 80, 0.3) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 50%, rgba(20, 40, 80, 0.2) 0%, transparent 60%);
+  }
+
+  .status {
+    color: #555; font-family: "JetBrains Mono", monospace; font-size: 11px;
+    letter-spacing: 0.5px; text-transform: uppercase; padding: 6px 12px;
+    position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 10;
+    background: rgba(12, 12, 22, 0.8); border-radius: 12px;
+    backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.05);
+    transition: opacity 0.8s ease, color 0.4s ease, border-color 0.4s ease;
+  }
+  .status.connected { color: #3ddc84; border-color: rgba(61, 220, 132, 0.15); }
+  .status.connected.fade { opacity: 0; pointer-events: none; }
+  .status.error { color: #ff6b6b; border-color: rgba(255, 107, 107, 0.2); }
+
+  .terminal-wrap {
+    border-radius: 10px; overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 8px 40px rgba(0,0,0,0.6), 0 2px 12px rgba(0,0,0,0.3);
+    display: flex; flex-direction: column;
+    max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);
+  }
+
+  .titlebar {
+    background: linear-gradient(180deg, #333346 0%, #2a2a3d 100%);
+    height: 38px; min-height: 38px; display: flex; align-items: center;
+    padding: 0 14px; position: relative; border-bottom: 1px solid rgba(0,0,0,0.4);
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
+  .dot.red { background: #ff5f57; box-shadow: 0 0 4px #ff5f57; }
+  .dot.yellow { background: #febc2e; box-shadow: 0 0 4px #febc2e; }
+  .dot.green { background: #28c840; box-shadow: 0 0 4px #28c840; }
+  .titlebar-text {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    color: #888; font-family: "JetBrains Mono", monospace;
+    font-size: 12px; font-weight: 500; letter-spacing: 0.3px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  #titlebar-meta { color: #666; font-size: 10px; font-weight: 400; }
+
+  .terminal-container {
+    background: #0d0d1a; position: relative; flex: 0 0 auto; overflow: hidden;
+  }
+  .pane-border { position: absolute; background: #333346; z-index: 2; }
+
+  .tmux-status {
+    background: #005f00; color: #e0e0e0;
+    font-family: "JetBrains Mono", monospace; font-size: 14px; line-height: 20px;
+    padding: 1px 4px; display: flex; justify-content: space-between;
+    min-height: 20px; white-space: nowrap; overflow: hidden;
+  }
+  #tmux-status-left { color: #ffffff; font-weight: bold; }
+  #tmux-status-right { color: #d0d0d0; }
+
+  .terminal-container::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.02) 2px, rgba(0,0,0,0.02) 4px);
+    z-index: 3;
+  }
+  .xterm-viewport::-webkit-scrollbar { display: none; }
+  .xterm-viewport { scrollbar-width: none; }
+
+  /* === TV Theme === */
+  body.theme-tv {
+    background: #1c1914;
+    background-image:
+      radial-gradient(ellipse at 50% 95%, rgba(80, 55, 20, 0.4) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 50%, rgba(30, 25, 15, 0.6) 0%, transparent 80%);
+  }
+  .theme-tv .titlebar { display: none; }
+  .theme-tv .tmux-status { display: none; }
+  .theme-tv .terminal-wrap {
+    border-radius: 40px 40px 34px 34px; overflow: visible;
+    box-shadow: 0 6px 40px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
+    flex-direction: row; max-width: none; max-height: none;
+    background: linear-gradient(175deg, #6b4c2a 0%, #5a3f22 8%, #4d3520 25%, #3e2b18 50%, #352414 75%, #2d1e10 100%);
+    border: 3px solid #241a0e; position: relative;
+  }
+  .theme-tv .terminal-wrap::before {
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    background: repeating-linear-gradient(92deg, transparent, transparent 8px, rgba(0,0,0,0.03) 8px, rgba(0,0,0,0.03) 9px),
+      repeating-linear-gradient(88deg, transparent, transparent 14px, rgba(255,200,100,0.015) 14px, rgba(255,200,100,0.015) 15px);
+    pointer-events: none; z-index: 0;
+  }
+  .theme-tv .terminal-container {
+    background: #060a06; border-radius: 28px; margin: 18px 8px 18px 18px;
+    flex: 0 0 auto; width: 68%; align-self: stretch; z-index: 1;
+    border: 4px solid #c8c0b0; outline: 3px solid #8a8070;
+    box-shadow: 0 0 0 7px #5a5040, 0 0 0 9px #3a3028, inset 0 0 30px rgba(0,0,0,0.6), inset 0 0 80px rgba(0,0,0,0.3);
+  }
+  .theme-tv .terminal-container::before {
+    content: ''; position: absolute; top: 4%; left: 6%; width: 40%; height: 35%;
+    background: radial-gradient(ellipse at 40% 40%, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.02) 40%, transparent 70%);
+    border-radius: 50%; pointer-events: none; z-index: 5;
+  }
+  .theme-tv .terminal-container::after {
+    content: ''; position: absolute; inset: 0; border-radius: 24px;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.35) 100%),
+      repeating-linear-gradient(0deg, transparent, transparent 1px, rgba(0,0,0,0.06) 1px, rgba(0,0,0,0.06) 2px);
+    pointer-events: none; z-index: 4;
+  }
+
+  .tv-controls { display: none; flex-direction: column; flex: 0 0 28%; padding: 18px 16px 18px 8px; align-items: center; gap: 10px; z-index: 1; }
+  .theme-tv .tv-controls { display: flex; }
+  .tv-speaker { display: none; width: 88%; aspect-ratio: 1.15; border-radius: 14px; background: linear-gradient(145deg, #c8922e, #a87418, #8b5e10); position: relative; overflow: hidden; border: 2px solid #6a4e0e; box-shadow: inset 0 2px 6px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.05); }
+  .theme-tv .tv-speaker { display: block; }
+  .tv-speaker::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 30%, rgba(0,0,0,0.1) 100%); pointer-events: none; }
+  .tv-speaker::after { content: ''; position: absolute; inset: 5px; background: radial-gradient(circle, rgba(60, 40, 10, 0.9) 1.2px, transparent 1.2px); background-size: 5px 5px; }
+  .tv-dial { display: none; width: 62px; height: 62px; border-radius: 50%; background: conic-gradient(from 0deg, #d8d0c0, #a8a090, #c8c0b0, #989080, #d8d0c0), radial-gradient(circle at 35% 35%, #e8e0d0, #888070); border: 3px solid #4a4238; box-shadow: 0 3px 8px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3), inset 0 1px 3px rgba(255,255,255,0.2); position: relative; }
+  .theme-tv .tv-dial { display: flex; }
+  .tv-dial::before { content: ''; position: absolute; inset: 8px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #c0b8a8, #706860); border: 1px solid #585048; }
+  .tv-dial::after { content: ''; position: absolute; top: 5px; left: 50%; transform: translateX(-50%); width: 3px; height: 16px; background: linear-gradient(180deg, #333, #555); border-radius: 2px; }
+  .tv-dial-label { display: none; font-family: "JetBrains Mono", monospace; font-size: 8px; color: #b0a890; text-transform: uppercase; letter-spacing: 1px; margin-top: -2px; font-weight: 500; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+  .theme-tv .tv-dial-label { display: block; }
+  .tv-knobs { display: none; gap: 10px; margin-top: auto; padding-top: 10px; }
+  .theme-tv .tv-knobs { display: flex; }
+  .tv-knob { width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #e0d8c8, #908878 70%, #686058); border: 2px solid #4a4238; box-shadow: 0 2px 4px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.15); }
+  .tv-knob-label { font-family: "JetBrains Mono", monospace; font-size: 6px; color: #a09880; text-transform: uppercase; text-align: center; margin-top: 3px; letter-spacing: 0.5px; text-shadow: 0 1px 1px rgba(0,0,0,0.4); }
+  .tv-antenna-mount, .tv-antenna-l, .tv-antenna-r { display: none; }
+  .theme-tv .tv-antenna-mount, .theme-tv .tv-antenna-l, .theme-tv .tv-antenna-r { display: block; }
+  .tv-antenna-mount { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); width: 24px; height: 14px; background: radial-gradient(ellipse at 50% 60%, #666, #444 60%, #333); border-radius: 50% 50% 40% 40%; z-index: 6; border: 1px solid #222; box-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+  .tv-antenna-l, .tv-antenna-r { position: absolute; bottom: 100%; width: 2.5px; background: linear-gradient(to top, #777, #aaa 30%, #ccc 70%, #e0e0e0 90%, #ddd); z-index: 5; border-radius: 1px; }
+  .tv-antenna-l { left: 50%; margin-left: -20px; height: 90px; transform: rotate(-28deg); transform-origin: bottom center; }
+  .tv-antenna-r { left: 50%; margin-left: 18px; height: 90px; transform: rotate(28deg); transform-origin: bottom center; }
+  .tv-antenna-l::after, .tv-antenna-r::after { content: ''; position: absolute; top: -5px; left: -3px; width: 8px; height: 8px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #f0f0f0, #bbb 50%, #888); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+  .tv-legs { display: none; position: absolute; bottom: -56px; left: 0; right: 0; height: 56px; pointer-events: none; }
+  .theme-tv .tv-legs { display: block; }
+  .tv-leg { display: none; position: absolute; width: 8px; height: 56px; background: linear-gradient(90deg, #6a4c2a, #8a6438 30%, #a07848 50%, #8a6438 70%, #6a4c2a); border-radius: 2px 2px 4px 4px; clip-path: polygon(0% 0%, 100% 0%, 80% 100%, 20% 100%); }
+  .theme-tv .tv-leg { display: block; }
+  .tv-leg::after { content: ''; position: absolute; bottom: 0; left: -1px; width: 10px; height: 8px; background: linear-gradient(180deg, #c8a860, #a08840, #887030); border-radius: 0 0 4px 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+  .tv-leg:nth-child(1) { left: 10%; transform: rotate(-10deg); }
+  .tv-leg:nth-child(2) { right: 10%; transform: rotate(10deg); }
+  .tv-leg:nth-child(3) { left: 15%; transform: rotate(-4deg); z-index: -1; opacity: 0.65; }
+  .tv-leg:nth-child(4) { right: 15%; transform: rotate(4deg); z-index: -1; opacity: 0.65; }
+
+  /* Error overlay */
+  .error-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(12, 12, 22, 0.95); backdrop-filter: blur(12px);
+  }
+  .error-overlay.hidden { display: none; }
+  .error-card {
+    text-align: center; max-width: 380px; padding: 40px;
+  }
+  .error-icon {
+    color: #555; margin-bottom: 20px;
+    display: flex; justify-content: center;
+  }
+  .error-title {
+    font-family: "JetBrains Mono", monospace; font-size: 18px;
+    font-weight: 600; color: #ccc; margin-bottom: 10px;
+  }
+  .error-msg {
+    font-family: "JetBrains Mono", monospace; font-size: 12px;
+    color: #666; line-height: 1.6; margin-bottom: 24px;
+  }
+  .error-link {
+    display: inline-block; font-family: "JetBrains Mono", monospace;
+    font-size: 12px; color: #6c9efc; text-decoration: none;
+    padding: 8px 20px; border: 1px solid rgba(108, 158, 252, 0.2);
+    border-radius: 8px; transition: all 0.2s ease;
+  }
+  .error-link:hover {
+    background: rgba(108, 158, 252, 0.1);
+    border-color: rgba(108, 158, 252, 0.4);
+  }
+</style>
