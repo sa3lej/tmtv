@@ -306,16 +306,18 @@ jobs:
           DEPLOY_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
           DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
         run: |
+          ls -la site/dist/
           SSH_OPTS="-i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new -p ${DEPLOY_PORT}"
 
-          scp $SSH_OPTS site/dist/index.html "${DEPLOY_TARGET}:staging/"
-          scp $SSH_OPTS site/dist/viewer.js "${DEPLOY_TARGET}:staging/"
-          scp $SSH_OPTS site/dist/viewer/index.html "${DEPLOY_TARGET}:staging/viewer.html"
-          scp $SSH_OPTS site/dist/install.sh "${DEPLOY_TARGET}:staging/"
-          scp $SSH_OPTS site/dist/*.png site/dist/*.gif "${DEPLOY_TARGET}:staging/" 2>/dev/null || true
-          scp $SSH_OPTS site/dist/favicon.* "${DEPLOY_TARGET}:staging/" 2>/dev/null || true
+          scp ${SSH_OPTS} site/dist/index.html "${DEPLOY_TARGET}:staging/"
+          scp ${SSH_OPTS} site/dist/viewer.js "${DEPLOY_TARGET}:staging/"
+          scp ${SSH_OPTS} site/dist/viewer/index.html "${DEPLOY_TARGET}:staging/viewer.html"
+          scp ${SSH_OPTS} site/dist/install.sh "${DEPLOY_TARGET}:staging/"
+          for f in site/dist/*.png site/dist/*.gif site/dist/favicon.*; do
+            [ -f "$f" ] && scp ${SSH_OPTS} "$f" "${DEPLOY_TARGET}:staging/" || true
+          done
 
-          ssh $SSH_OPTS "${DEPLOY_TARGET}" 'sudo /usr/local/bin/tmtv-deploy-web'
+          ssh ${SSH_OPTS} "${DEPLOY_TARGET}" 'sudo /usr/local/bin/tmtv-deploy-web'
 
   deploy-server:
     name: Deploy server binary
