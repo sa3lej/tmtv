@@ -51,6 +51,8 @@ struct tmate_encoder {
 extern void tmate_encoder_init(struct tmate_encoder *encoder,
 			       tmate_encoder_write_cb *callback,
 			       void *userdata);
+extern void tmate_encoder_rebind(struct tmate_encoder *encoder,
+				 struct event_base *base);
 
 /* These functions deal with dual v4/v5 support through mpac_version */
 extern void msgpack_pack_string(msgpack_packer *pk, const char *str);
@@ -147,7 +149,7 @@ extern int tmate_validate_session_token(const char *token);
 
 /* tmate-ssh-server.c */
 
-#define TMATE_SSH_BANNER "tmate"
+#define TMATE_SSH_BANNER "tmtv"
 #define TMATE_SSH_KEEPALIVE_SEC 300
 
 #define TMATE_ROLE_DAEMON	1
@@ -193,7 +195,7 @@ extern void tmate_ssh_server_main(struct tmate_session *session,
 #ifdef DEVENV
 #define TMATE_SSH_DEFAULT_PORT 2200
 #else
-#define TMATE_SSH_DEFAULT_PORT 22
+#define TMATE_SSH_DEFAULT_PORT 2222
 #endif
 
 #define TMATE_SSH_GRACE_PERIOD 20
@@ -203,7 +205,7 @@ extern void tmate_ssh_server_main(struct tmate_session *session,
 #define TMATE_DEFAULT_WEBSOCKET_PORT 4002
 
 #define TMATE_TOKEN_LEN 25
-#define TMATE_WORKDIR "/tmp/tmate"
+#define TMATE_WORKDIR "/tmp/tmtv"
 #define TMATE_JAIL_USER "nobody"
 
 struct tmate_settings {
@@ -214,6 +216,7 @@ struct tmate_settings {
 	int ssh_port_advertized;
 	const char *websocket_hostname;
 	int websocket_port;
+	int web_port;
 	const char *tmate_host;
 	const char *bind_addr;
 	int log_level;
@@ -238,6 +241,8 @@ struct tmate_session {
 
 	const char *session_token;
 	const char *session_token_ro;
+	const char *session_token_named; /* user-chosen name, or NULL */
+	int sessions_dir_fd; /* fd to sessions dir, kept open for post-jail symlinks */
 	const char *obfuscated_session_token; /* for logging purposes */
 
 	struct tmate_encoder daemon_encoder;
@@ -252,6 +257,9 @@ struct tmate_session {
 	u_int websocket_sx, websocket_sy;
 	TAILQ_HEAD(, ws_client) ws_clients;
 	struct evconnlistener *ws_listener;
+	int ws_listen_fd; /* pre-bound socket, created before jail */
+	struct event *ev_ws_snapshot; /* periodic snapshot timer */
+	bool web_sharing_enabled; /* client-controlled web sharing toggle */
 
 	/* only for role client-pty */
 	int pty;
@@ -297,6 +305,7 @@ extern void tmate_send_websocket_daemon_msg(struct tmate_session *session,
 					struct tmate_unpacker *uk);
 extern void tmate_send_websocket_header(struct tmate_session *session);
 extern void tmate_init_websocket(struct tmate_session *session);
+extern void tmate_bind_websocket_socket(struct tmate_session *session);
 extern void tmate_start_websocket_listener(struct tmate_session *session);
 
 static inline bool tmate_has_websocket(void)

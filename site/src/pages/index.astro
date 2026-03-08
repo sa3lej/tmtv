@@ -1,0 +1,215 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base title="tmtv — terminal sharing">
+  <!-- Background gradients -->
+  <div class="fixed inset-0 -z-10">
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_50%,rgba(40,20,80,0.3)_0%,transparent_60%)]"></div>
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_80%_50%,rgba(20,40,80,0.2)_0%,transparent_60%)]"></div>
+  </div>
+
+  <!-- Hero -->
+  <div class="flex flex-col items-center justify-center min-h-[80vh] px-5">
+    <h1 class="font-mono text-5xl sm:text-6xl font-bold tracking-tight mb-2 bg-gradient-to-br from-tmtv-blue via-tmtv-purple to-tmtv-green bg-clip-text text-transparent">
+      tmtv
+    </h1>
+    <p class="text-gray-500 text-sm tracking-wide font-light mb-12">
+      share your terminal, keep your tmux
+    </p>
+
+    <!-- Session card -->
+    <div class="bg-tmtv-surface border border-tmtv-border rounded-2xl p-10 w-[440px] max-w-[90vw] backdrop-blur-xl shadow-2xl">
+      <h2 class="text-base font-medium text-gray-400 mb-5">View a session</h2>
+      <form id="session-form" class="flex gap-2.5">
+        <input
+          type="text"
+          id="token"
+          placeholder="session token"
+          autocomplete="off"
+          spellcheck="false"
+          autofocus
+          class="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 font-mono text-sm text-gray-200 placeholder:text-gray-700 outline-none focus:border-tmtv-blue/40 transition-colors"
+        />
+        <button
+          type="submit"
+          class="bg-gradient-to-br from-tmtv-blue to-purple-500 rounded-xl px-6 py-3.5 text-sm font-semibold text-white hover:opacity-90 active:scale-[0.97] transition-all whitespace-nowrap"
+        >
+          Watch
+        </button>
+      </form>
+      <p class="mt-4 text-xs text-gray-700 leading-relaxed">
+        Paste the session token from the session owner.<br>
+        Or open a direct link: <code class="font-mono bg-white/5 px-1.5 py-0.5 rounded text-[11px]">/s/TOKEN</code>
+      </p>
+    </div>
+  </div>
+
+  <!-- Demo GIF -->
+  <div class="max-w-2xl mx-auto px-5 pb-16">
+    <div class="rounded-xl overflow-hidden border border-white/[0.06] shadow-2xl">
+      <img src="/tmtv-demo.gif" alt="tmtv web viewer — live terminal session" class="w-full" />
+    </div>
+  </div>
+
+  <!-- Install -->
+  <div class="max-w-2xl mx-auto px-5 pb-16">
+    <div class="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-8">
+      <h3 class="text-xs font-medium text-gray-600 uppercase tracking-[0.15em] mb-4">Install</h3>
+      <div class="bg-black/40 rounded-xl p-4 font-mono text-sm flex items-center justify-between gap-4">
+        <code class="text-tmtv-green whitespace-nowrap overflow-x-auto">curl -fsSL https://tmtv.se/install.sh | sh</code>
+        <button id="copy-btn" class="text-gray-600 hover:text-gray-400 transition-colors shrink-0" title="Copy">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+        </button>
+      </div>
+      <p class="mt-3 text-xs text-gray-700">
+        Linux and macOS. Or build from <a href="https://github.com/sa3lej/tmtv" class="text-gray-500 hover:text-gray-400 transition-colors underline underline-offset-2">source</a>.
+      </p>
+    </div>
+  </div>
+
+  <!-- How it works -->
+  <div class="max-w-2xl mx-auto px-5 pb-20">
+    <h3 class="text-xs font-medium text-gray-600 uppercase tracking-[0.15em] text-center mb-8">
+      How it works
+    </h3>
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 text-center">
+        <div class="font-mono text-2xl font-bold mb-3 bg-gradient-to-br from-tmtv-blue to-tmtv-purple bg-clip-text text-transparent">1</div>
+        <h4 class="text-sm font-semibold text-gray-300 mb-2">Share</h4>
+        <p class="text-xs text-gray-600 leading-relaxed">
+          Run <code class="font-mono text-[11px] bg-tmtv-blue/10 text-tmtv-blue px-1.5 py-0.5 rounded">tmtv</code>
+          to start a session. Enable web sharing to get a viewer URL.
+        </p>
+      </div>
+      <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 text-center">
+        <div class="font-mono text-2xl font-bold mb-3 bg-gradient-to-br from-tmtv-blue to-tmtv-purple bg-clip-text text-transparent">2</div>
+        <h4 class="text-sm font-semibold text-gray-300 mb-2">Connect</h4>
+        <p class="text-xs text-gray-600 leading-relaxed">
+          Viewers open the URL or paste the token above. No install needed for browser access.
+        </p>
+      </div>
+      <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 text-center">
+        <div class="font-mono text-2xl font-bold mb-3 bg-gradient-to-br from-tmtv-blue to-tmtv-purple bg-clip-text text-transparent">3</div>
+        <h4 class="text-sm font-semibold text-gray-300 mb-2">Watch</h4>
+        <p class="text-xs text-gray-600 leading-relaxed">
+          See the terminal in real time. Full tmux rendering with xterm.js.
+        </p>
+      </div>
+    </div>
+
+    <!-- Feature badges -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+      <div class="text-center py-4">
+        <div class="text-[11px] font-medium text-gray-600 tracking-wide">SSH access</div>
+        <div class="font-mono text-xs text-tmtv-green mt-1">read-write + read-only</div>
+      </div>
+      <div class="text-center py-4">
+        <div class="text-[11px] font-medium text-gray-600 tracking-wide">Web viewer</div>
+        <div class="font-mono text-xs text-tmtv-green mt-1">view-only, zero install</div>
+      </div>
+      <div class="text-center py-4">
+        <div class="text-[11px] font-medium text-gray-600 tracking-wide">Based on</div>
+        <div class="font-mono text-xs text-tmtv-green mt-1">tmux 3.6a</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Why tmtv? -->
+  <div class="max-w-2xl mx-auto px-5 pb-16">
+    <h3 class="text-xs font-medium text-gray-600 uppercase tracking-[0.15em] text-center mb-6">
+      Why tmtv?
+    </h3>
+    <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-8 text-sm text-gray-400 leading-relaxed space-y-3">
+      <p>
+        I loved <a href="https://github.com/tmate-io/tmate" class="text-tmtv-blue hover:underline">tmate</a> but it was stuck on tmux 2.4 from 2017. Nine years of tmux improvements — popup menus, extended keys, sixel graphics — all missing.
+      </p>
+      <p>
+        So I rebased it on <strong class="text-gray-300">tmux 3.6a</strong>, added web sharing, and here we are. Same SSH-based sharing you know, now with a modern tmux and a browser viewer for anyone who just wants to watch. And there's more coming.
+      </p>
+    </div>
+  </div>
+
+  <!-- Screenshots -->
+  <div class="max-w-2xl mx-auto px-5 pb-16">
+    <h3 class="text-xs font-medium text-gray-600 uppercase tracking-[0.15em] text-center mb-6">
+      What it looks like
+    </h3>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="rounded-xl overflow-hidden border border-white/[0.06]">
+        <img src="/screenshot-default.png" alt="tmtv default theme" class="w-full" loading="lazy" />
+        <div class="text-center text-[10px] text-gray-700 py-2">Default theme</div>
+      </div>
+      <div class="rounded-xl overflow-hidden border border-white/[0.06]">
+        <img src="/screenshot-tmux.png" alt="tmtv viewer showing a normal tmux session" class="w-full" loading="lazy" />
+        <div class="text-center text-[10px] text-gray-700 py-2">Normal session</div>
+      </div>
+      <div class="rounded-xl overflow-hidden border border-white/[0.06]">
+        <img src="/screenshot-tv.png" alt="tmtv TV theme" class="w-full" loading="lazy" />
+        <div class="text-center text-[10px] text-gray-700 py-2">TV theme</div>
+      </div>
+    </div>
+    <p class="text-center text-[11px] text-gray-700 mt-3">
+      Try it: add <code class="font-mono bg-white/5 px-1.5 py-0.5 rounded">?theme=tv</code> to any viewer URL
+    </p>
+  </div>
+
+  <!-- About -->
+  <div class="max-w-2xl mx-auto px-5 pb-16">
+    <div class="text-center space-y-3">
+      <p class="text-sm text-gray-500">
+        Built by <strong class="text-gray-400">Lars-Erik Jonsson</strong> (<a href="https://github.com/sa3lej" class="text-tmtv-blue hover:underline">SA3LEJ</a>) with <a href="https://claude.ai/code" class="text-tmtv-purple hover:underline">Claude Code</a>.
+      </p>
+      <div class="flex items-center justify-center gap-4">
+        <a href="https://github.com/sa3lej/tmtv" class="inline-flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-400 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          GitHub
+        </a>
+        <a href="https://buymeacoffee.com/lejo" class="inline-flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-400 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" x2="6" y1="2" y2="4"/><line x1="10" x2="10" y1="2" y2="4"/><line x1="14" x2="14" y1="2" y2="4"/></svg>
+          Buy me a coffee
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="py-8 text-center text-[11px] text-gray-700 tracking-wide">
+    powered by <a href="https://github.com/sa3lej/tmtv" class="text-gray-500 hover:text-gray-400 transition-colors">tmtv</a>
+    &mdash; terminal sharing for IT professionals
+  </footer>
+
+  <script>
+    document.getElementById('session-form')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const token = (document.getElementById('token') as HTMLInputElement).value.trim();
+      if (token) window.location.href = '/s/' + encodeURIComponent(token);
+    });
+    document.getElementById('copy-btn')?.addEventListener('click', () => {
+      const text = 'curl -fsSL https://tmtv.se/install.sh | sh';
+      const done = () => {
+        const btn = document.getElementById('copy-btn')!;
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+        setTimeout(() => {
+          btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+        }, 1500);
+      };
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(done).catch(() => { fallbackCopy(text); done(); });
+      } else {
+        fallbackCopy(text); done();
+      }
+    });
+    function fallbackCopy(text: string) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  </script>
+</Base>

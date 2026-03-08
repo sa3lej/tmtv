@@ -5808,6 +5808,15 @@ format_defaults(struct format_tree *ft, struct client *c, struct session *s,
 	pb = paste_get_top(NULL);
 	if (pb != NULL)
 		format_defaults_paste_buffer(ft, pb);
+
+#ifdef TMATE
+#ifndef TMATE_SERVER_BUILD
+	{
+		extern void tmate_format(struct format_tree *);
+		tmate_format(ft);
+	}
+#endif
+#endif
 }
 
 /* Set default format keys for a session. */

@@ -74,17 +74,35 @@ static void append_authorized_key(const char *keystr)
 	keys[count] = NULL;
 }
 
+extern void tmate_send_web_url(struct tmate_session *session);
+extern void tmate_disconnect_ws_clients(struct tmate_session *session);
+
+extern void tmate_register_session_name(struct tmate_session *session,
+					const char *name);
+
 static void tmate_set(char *key, char *value)
 {
 	if (!strcmp(key, "authorized_keys"))
 		append_authorized_key(value);
+	else if (!strcmp(key, "session_name")) {
+		tmate_register_session_name(tmate_session, value);
+	} else if (!strcmp(key, "web_sharing")) {
+		bool enabled = !strcmp(value, "true") || !strcmp(value, "1") || !strcmp(value, "on");
+		tmate_session->web_sharing_enabled = enabled;
+		if (enabled) {
+			tmate_send_web_url(tmate_session);
+		} else {
+			tmate_notify("Web sharing disabled");
+			tmate_disconnect_ws_clients(tmate_session);
+		}
+	}
 }
 
 void tmate_hook_set_option_auth(const char *name, const char *val)
 {
-	if (!strcmp(name, "tmate-authorized-keys")) {
+	if (!strcmp(name, "tmtv-authorized-keys")) {
 		reset_and_enable_authorized_keys();
-	} else if (!strcmp(name, "tmate-set")) {
+	} else if (!strcmp(name, "tmtv-set")) {
 		char *key_value = xstrdup(val);
 		char *s = key_value;
 

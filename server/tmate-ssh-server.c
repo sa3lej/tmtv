@@ -2,9 +2,12 @@
 #include <libssh/server.h>
 #include <libssh/callbacks.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
 #include <netinet/tcp.h>
 #include <sys/wait.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <signal.h>
 #include <event2/event.h>
@@ -14,6 +17,35 @@
 #endif
 
 #include "tmate.h"
+
+/*
+ * SSH algorithm policy — modern algorithms only.
+ * Reviewed 2026-03-08 against libssh 0.10.x capabilities.
+ */
+#define TMTV_SSH_CIPHERS \
+	"chacha20-poly1305@openssh.com," \
+	"aes256-gcm@openssh.com," \
+	"aes128-gcm@openssh.com," \
+	"aes256-ctr," \
+	"aes192-ctr," \
+	"aes128-ctr"
+
+#define TMTV_SSH_KEX \
+	"curve25519-sha256," \
+	"curve25519-sha256@libssh.org," \
+	"ecdh-sha2-nistp256," \
+	"ecdh-sha2-nistp384," \
+	"ecdh-sha2-nistp521," \
+	"diffie-hellman-group18-sha512," \
+	"diffie-hellman-group16-sha512"
+
+#define TMTV_SSH_HOSTKEYS \
+	"ssh-ed25519," \
+	"ecdsa-sha2-nistp256," \
+	"ecdsa-sha2-nistp384," \
+	"ecdsa-sha2-nistp521," \
+	"rsa-sha2-512," \
+	"rsa-sha2-256"
 
 char *get_ssh_conn_string(const char *session_token)
 {
@@ -241,20 +273,25 @@ static void client_bootstrap(struct tmate_session *_session)
 
 	ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &grace_period);
 	ssh_options_set(session, SSH_OPTIONS_COMPRESSION, "yes");
+	ssh_options_set(session, SSH_OPTIONS_CIPHERS_C_S, TMTV_SSH_CIPHERS);
+	ssh_options_set(session, SSH_OPTIONS_CIPHERS_S_C, TMTV_SSH_CIPHERS);
+	ssh_options_set(session, SSH_OPTIONS_KEY_EXCHANGE, TMTV_SSH_KEX);
+	ssh_options_set(session, SSH_OPTIONS_HOSTKEYS, TMTV_SSH_HOSTKEYS);
 
 	ssh_set_auth_methods(client->session, SSH_AUTH_METHOD_NONE |
 					      SSH_AUTH_METHOD_PUBLICKEY);
 
-	tmate_debug("Exchanging DH keys");
+	tmate_info("Exchanging DH keys ip=%s", client->ip_address);
 	if (ssh_handle_key_exchange(session) < 0)
-		tmate_fatal_quiet("Error doing the key exchange: %s", ssh_get_error(session));
+		tmate_fatal("Error doing the key exchange: %s", ssh_get_error(session));
+	tmate_info("Key exchange done ip=%s", client->ip_address);
 
 	mainloop = ssh_event_new();
 	ssh_event_add_session(mainloop, session);
 
 	while (!client->role) {
 		if (ssh_event_dopoll(mainloop, -1) == SSH_ERROR)
-			tmate_fatal_quiet("Error polling ssh socket: %s", ssh_get_error(session));
+			tmate_fatal("Error polling ssh socket: %s", ssh_get_error(session));
 	}
 
 	alarm(0);
@@ -404,17 +441,18 @@ static ssh_bind prepare_ssh(const char *keys_dir, const char *bind_addr, int por
 	if (!bind)
 		tmate_fatal("Cannot initialize ssh");
 
-#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0,9,0)
 	/* Explicitly parse configuration to avoid automatic configuration file
 	 * loading which could override options */
 	ssh_bind_options_parse_config(bind, NULL);
-#endif
 
 	if (bind_addr)
 		ssh_bind_options_set(bind, SSH_BIND_OPTIONS_BINDADDR, bind_addr);
 	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_BINDPORT, &port);
 	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_BANNER, TMATE_SSH_BANNER);
 	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_LOG_VERBOSITY, &ssh_log_level);
+	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_CIPHERS_C_S, TMTV_SSH_CIPHERS);
+	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_CIPHERS_S_C, TMTV_SSH_CIPHERS);
+	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_KEY_EXCHANGE, TMTV_SSH_KEX);
 
 	ssh_import_key(bind, keys_dir, "ssh_host_rsa_key");
 	ssh_import_key(bind, keys_dir, "ssh_host_ed25519_key");
@@ -427,6 +465,8 @@ static ssh_bind prepare_ssh(const char *keys_dir, const char *bind_addr, int por
 	return bind;
 }
 
+static volatile sig_atomic_t pending_gc = 0;
+
 static void handle_sigchld(__unused int sig)
 {
 	int status;
@@ -438,6 +478,92 @@ static void handle_sigchld(__unused int sig)
 		 * of potential deadlocks with other malloc() calls.
 		 */
 	}
+
+	/* Schedule GC for next iteration of accept loop */
+	pending_gc = 1;
+}
+
+/*
+ * Garbage-collect stale session entries.
+ *
+ * For sockets: try connect(); if ECONNREFUSED or ENOENT, the session
+ * is dead — remove it.  For symlinks: stat() to check if the target
+ * (the socket) still exists; if dangling, remove.
+ *
+ * Safety: connect() to a live UNIX socket + immediate close is harmless.
+ * tmux just sees a client connect and disconnect — this happens routinely
+ * (e.g. `tmux list-sessions`).
+ */
+static void gc_stale_sessions(void)
+{
+	DIR *dir;
+	struct dirent *ent;
+	char path[PATH_MAX];
+	struct stat st;
+	int removed = 0;
+
+	dir = opendir(TMATE_WORKDIR "/sessions");
+	if (!dir)
+		return;
+
+	while ((ent = readdir(dir)) != NULL) {
+		if (ent->d_name[0] == '.')
+			continue;
+
+		snprintf(path, sizeof(path), TMATE_WORKDIR "/sessions/%s",
+			 ent->d_name);
+
+		if (lstat(path, &st) < 0) {
+			unlink(path);
+			removed++;
+			continue;
+		}
+
+		if (S_ISLNK(st.st_mode)) {
+			/* Symlink (ro-TOKEN or named session) — check target */
+			if (stat(path, &st) < 0) {
+				/* Dangling symlink: target gone */
+				unlink(path);
+				removed++;
+			}
+			continue;
+		}
+
+		if (S_ISSOCK(st.st_mode)) {
+			/* Socket — try connect to check liveness */
+			struct sockaddr_un addr;
+			int sock;
+
+			sock = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+			if (sock < 0)
+				continue;
+
+			memset(&addr, 0, sizeof(addr));
+			addr.sun_family = AF_UNIX;
+			strlcpy(addr.sun_path, path, sizeof(addr.sun_path));
+
+			if (connect(sock, (struct sockaddr *)&addr,
+				    sizeof(addr)) < 0 &&
+			    errno != EINPROGRESS && errno != EAGAIN) {
+				/* ECONNREFUSED / ENOENT = dead */
+				close(sock);
+				unlink(path);
+				removed++;
+			} else {
+				close(sock);
+			}
+			continue;
+		}
+
+		/* Unknown file type — remove */
+		unlink(path);
+		removed++;
+	}
+
+	closedir(dir);
+
+	if (removed)
+		tmate_info("Session GC: removed %d stale entries", removed);
 }
 
 void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
@@ -449,7 +575,17 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 	int fd;
 
 	tmate_catch_sigsegv();
-	signal(SIGCHLD, handle_sigchld);
+
+	/* Use sigaction without SA_RESTART so accept() returns EINTR
+	 * on SIGCHLD, giving us a chance to run GC. */
+	{
+		struct sigaction sa;
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = handle_sigchld;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = 0; /* no SA_RESTART */
+		sigaction(SIGCHLD, &sa, NULL);
+	}
 
 	bind = prepare_ssh(keys_dir, bind_addr, port);
 
@@ -463,9 +599,17 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 		tmate_fatal("Cannot initialize session");
 
 	for (;;) {
+		if (pending_gc) {
+			pending_gc = 0;
+			gc_stale_sessions();
+		}
+
 		fd = accept(ssh_bind_get_fd(bind), NULL, NULL);
-		if (fd < 0)
+		if (fd < 0) {
+			if (errno == EINTR)
+				continue;
 			tmate_fatal("Error accepting connection");
+		}
 
 		if ((pid = fork()) < 0)
 			tmate_fatal("Can't fork");

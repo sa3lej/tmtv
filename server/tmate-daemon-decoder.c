@@ -6,6 +6,31 @@
 
 char *tmate_left_status, *tmate_right_status;
 
+void tmate_send_web_url(struct tmate_session *session)
+{
+	if (!tmate_has_websocket())
+		return;
+
+	const char *url_token = session->session_token_named ?
+				session->session_token_named :
+				session->session_token;
+	char *web_url;
+	int port = tmate_settings->web_port > 0 ?
+		   tmate_settings->web_port :
+		   tmate_settings->websocket_port;
+	if (port == 80)
+		xasprintf(&web_url, "http://%s/s/%s",
+			  tmate_settings->tmate_host,
+			  url_token);
+	else
+		xasprintf(&web_url, "http://%s:%d/s/%s",
+			  tmate_settings->tmate_host,
+			  port, url_token);
+	tmate_notify("Web sharing enabled: %s", web_url);
+	tmate_set_env("tmtv_web", web_url);
+	free(web_url);
+}
+
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_1 "Server requires authorized_keys but none are given."
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_2 "Use '-a FILENAME' to specify an authorized_keys file."
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_3 "Press <Ctrl-c><Ctrl-d> to exit."
@@ -51,37 +76,40 @@ static void tmate_header(struct tmate_session *session,
 	if (session->client_protocol_version >= 3) {
 		session->client_version = unpack_string(uk);
 	} else {
-		session->client_version = xstrdup("1.8.5");
-	}
-
-	if (session->client_protocol_version < 6) {
-		/* older clients don't send a ready message */
-		tmate_ready(session, NULL);
-	}
-
-	if (session->client_protocol_version < 5) {
-		session->daemon_encoder.mpac_version = 4;
+		session->client_version = xstrdup("unknown");
 	}
 
 	tmate_info("tmate version=%s, protocol=%d",
 		   session->client_version, session->client_protocol_version);
 
-	if (tmate_has_websocket()) {
-		/* If we have a websocket server, it takes care of all the following notificatons */
-		tmate_send_websocket_header(session);
+	if (session->client_protocol_version < TMATE_PROTOCOL_VERSION) {
+		tmate_notify("Client too old (protocol %d, need %d). "
+			     "Please update: curl -fsSL https://tmtv.se/install.sh | sh",
+			     session->client_protocol_version,
+			     TMATE_PROTOCOL_VERSION);
+		tmate_fatal("Rejecting client with protocol version %d (minimum %d)",
+			    session->client_protocol_version,
+			    TMATE_PROTOCOL_VERSION);
 		return;
 	}
+
+	if (tmate_has_websocket())
+		tmate_send_websocket_header(session);
 
 	ssh_conn_str = get_ssh_conn_string(session->session_token_ro);
 	tmate_notify("Note: clear your terminal before sharing readonly access");
 	tmate_notify("ssh session read only: %s", ssh_conn_str);
-	tmate_set_env("tmate_ssh_ro", ssh_conn_str);
+	tmate_set_env("tmtv_ssh_ro", ssh_conn_str);
 	free(ssh_conn_str);
 
 	ssh_conn_str = get_ssh_conn_string(session->session_token);
 	tmate_notify("ssh session: %s", ssh_conn_str);
-	tmate_set_env("tmate_ssh", ssh_conn_str);
+	tmate_set_env("tmtv_ssh", ssh_conn_str);
 	free(ssh_conn_str);
+
+	/* Web URL is only sent when client enables web sharing */
+	if (tmate_has_websocket() && session->web_sharing_enabled)
+		tmate_send_web_url(session);
 
 	tmate_send_client_ready();
 }
@@ -142,7 +170,7 @@ static void tmate_sync_window_panes(struct window *w,
 			seen_ids[seen_count++] = id;
 
 		if (wp->xoff != xoff || wp->yoff != yoff ||
-		    wp->sx != sx || wp->sx != sy) {
+		    wp->sx != sx || wp->sy != sy) {
 			wp->xoff = xoff;
 			wp->yoff = yoff;
 			window_pane_resize(wp, sx, sy);
@@ -198,11 +226,20 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 			if (!wl)
 				tmate_fatal("can't create window idx=%d", idx);
 			window_set_name(w, name);
+			/* Disable automatic rename so client-sent names stick */
+			options_set_number(w->options, "automatic-rename", 0);
 		}
 
 		if (seen_count < 512)
 			seen_idxs[seen_count++] = idx;
 		w = wl->window;
+
+		/* Resize window to match client dimensions */
+		if (w->sx != (u_int)sx || w->sy != (u_int)sy) {
+			tmate_info("sync_windows: resizing window idx=%d from %ux%u to %dx%d",
+				   idx, w->sx, w->sy, sx, sy);
+			window_resize(w, sx, sy, -1, -1);
+		}
 
 		window_set_name(w, name);
 		free(name);
@@ -240,6 +277,8 @@ static void tmate_sync_layout(__unused struct tmate_session *session,
 	int sx = unpack_int(uk);
 	int sy = unpack_int(uk);
 
+	tmate_info("sync_layout: sx=%d sy=%d", sx, sy);
+
 	s = RB_MIN(sessions, &sessions);
 	if (!s) {
 		/*
@@ -273,10 +312,6 @@ static void tmate_pty_data(__unused struct tmate_session *session,
 	if (!wp)
 		tmate_fatal("can't find pane id=%d (pty_data)", id);
 
-	/*
-	 * tmux 3.6a: no event_input evbuffer. Feed data directly
-	 * to the input parser via input_parse_buffer().
-	 */
 	input_parse_buffer(wp, (u_char *)buf, len);
 
 	wp->window->flags |= WINDOW_SILENCE;
@@ -530,15 +565,13 @@ static void restore_snapshot_pane(struct tmate_unpacker *uk)
 }
 
 static void tmate_snapshot(__unused struct tmate_session *session,
-			   struct tmate_unpacker *uk)
+			   __unused struct tmate_unpacker *uk)
 {
-	struct tmate_unpacker panes_uk, pane_uk;
-
-	unpack_array(uk, &panes_uk);
-	while (panes_uk.argc > 0) {
-		unpack_array(&panes_uk, &pane_uk);
-		restore_snapshot_pane(&pane_uk);
-	}
+	/*
+	 * Snapshot restore is not needed — the server builds its own
+	 * grid from PTY data, and SSE clients get screen dumps directly.
+	 * Skip to avoid format mismatches between client/server.
+	 */
 }
 
 void tmate_dispatch_daemon_message(struct tmate_session *session,

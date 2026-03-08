@@ -1,0 +1,1060 @@
+<!--
+  Copyright (c) 2026 Lars-Erik Jonsson <l@jonsson.es>
+
+  Permission to use, copy, modify, and distribute this software for any
+  purpose with or without fee is hereby granted, provided that the above
+  copyright notice and this permission notice appear in all copies.
+
+  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+  WHATSOEVER RESULTING FROM LOSS OF MIND, USE, DATA OR PROFITS, WHETHER IN
+  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+  OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tmtv</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0c0c16;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(40, 20, 80, 0.3) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 50%, rgba(20, 40, 80, 0.2) 0%, transparent 60%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: "JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace;
+    overflow: hidden;
+  }
+
+  #status {
+    color: #555;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    position: fixed;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    background: rgba(12, 12, 22, 0.8);
+    border-radius: 12px;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.05);
+    transition: opacity 0.8s ease, color 0.4s ease, border-color 0.4s ease;
+    opacity: 1;
+  }
+  #status.connected {
+    color: #3ddc84;
+    border-color: rgba(61, 220, 132, 0.15);
+  }
+  #status.connected.fade { opacity: 0; pointer-events: none; }
+  #status.error {
+    color: #ff6b6b;
+    border-color: rgba(255, 107, 107, 0.2);
+  }
+
+  #terminal-wrap {
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.06),
+      0 8px 40px rgba(0,0,0,0.6),
+      0 2px 12px rgba(0,0,0,0.3);
+    display: flex;
+    flex-direction: column;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+  }
+
+  #titlebar {
+    background: linear-gradient(180deg, #333346 0%, #2a2a3d 100%);
+    height: 38px;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    position: relative;
+    border-bottom: 1px solid rgba(0,0,0,0.4);
+  }
+  .dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+  }
+  .dot.red { background: #ff5f57; box-shadow: 0 0 4px #ff5f57; }
+  .dot.yellow { background: #febc2e; box-shadow: 0 0 4px #febc2e; }
+  .dot.green { background: #28c840; box-shadow: 0 0 4px #28c840; }
+  #titlebar-text {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #888;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #titlebar-meta {
+    color: #666;
+    font-size: 10px;
+    font-weight: 400;
+  }
+
+  /* ============================================
+   * TV Theme v3 — Rounded 1960s tabletop TV
+   * Inspired by Philco/Zenith/Admiral designs
+   * ============================================ */
+  body.theme-tv {
+    background: #1c1914;
+    background-image:
+      radial-gradient(ellipse at 50% 95%, rgba(80, 55, 20, 0.4) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 50%, rgba(30, 25, 15, 0.6) 0%, transparent 80%);
+  }
+
+  /* Hide default chrome */
+  .theme-tv #titlebar { display: none; }
+  .theme-tv #tmux-status { display: none; }
+
+  /* === TV Cabinet — heavily rounded wooden body === */
+  .theme-tv #terminal-wrap {
+    border-radius: 40px 40px 34px 34px;
+    overflow: visible;
+    box-shadow:
+      0 6px 40px rgba(0,0,0,0.7),
+      0 2px 8px rgba(0,0,0,0.4),
+      inset 0 1px 0 rgba(255,255,255,0.04);
+    flex-direction: row;
+    max-width: none;
+    max-height: none;
+    background:
+      linear-gradient(175deg,
+        #6b4c2a 0%,
+        #5a3f22 8%,
+        #4d3520 25%,
+        #3e2b18 50%,
+        #352414 75%,
+        #2d1e10 100%);
+    border: 3px solid #241a0e;
+    position: relative;
+    margin-bottom: 0;
+  }
+
+  /* Wood grain texture overlay */
+  .theme-tv #terminal-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      repeating-linear-gradient(
+        92deg,
+        transparent,
+        transparent 8px,
+        rgba(0,0,0,0.03) 8px,
+        rgba(0,0,0,0.03) 9px
+      ),
+      repeating-linear-gradient(
+        88deg,
+        transparent,
+        transparent 14px,
+        rgba(255,200,100,0.015) 14px,
+        rgba(255,200,100,0.015) 15px
+      );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* === CRT Screen — barrel-shaped with chrome bezel === */
+  .theme-tv #terminal-container {
+    background: #060a06;
+    /* Barrel CRT shape: heavily rounded */
+    border-radius: 28px;
+    margin: 18px 8px 18px 18px;
+    flex: 0 0 auto;
+    width: 68%;
+    position: relative;
+    align-self: stretch;
+    z-index: 1;
+    /* Chrome bezel */
+    border: 4px solid #c8c0b0;
+    outline: 3px solid #8a8070;
+    outline-offset: 0px;
+    box-shadow:
+      0 0 0 7px #5a5040,
+      0 0 0 9px #3a3028,
+      inset 0 0 30px rgba(0,0,0,0.6),
+      inset 0 0 80px rgba(0,0,0,0.3);
+  }
+
+  /* CRT glass highlight — soft oval reflection */
+  .theme-tv #terminal-container::before {
+    content: '';
+    position: absolute;
+    top: 4%;
+    left: 6%;
+    width: 40%;
+    height: 35%;
+    background: radial-gradient(ellipse at 40% 40%,
+      rgba(255,255,255,0.07) 0%,
+      rgba(255,255,255,0.02) 40%,
+      transparent 70%);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  /* CRT scanlines + curvature vignette combined */
+  .theme-tv #terminal-container::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 24px;
+    background:
+      radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.35) 100%),
+      repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 1px,
+        rgba(0,0,0,0.06) 1px,
+        rgba(0,0,0,0.06) 2px
+      );
+    pointer-events: none;
+    z-index: 4;
+  }
+
+  /* === Right Control Panel === */
+  .theme-tv .tv-controls {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 28%;
+    padding: 18px 16px 18px 8px;
+    align-items: center;
+    gap: 10px;
+    z-index: 1;
+  }
+
+  /* Speaker grille — rounded with perforated dot grid */
+  .theme-tv .tv-speaker {
+    width: 88%;
+    aspect-ratio: 1.15;
+    border-radius: 14px;
+    background:
+      linear-gradient(145deg, #c8922e, #a87418, #8b5e10);
+    position: relative;
+    overflow: hidden;
+    border: 2px solid #6a4e0e;
+    box-shadow:
+      inset 0 2px 6px rgba(0,0,0,0.4),
+      0 1px 0 rgba(255,255,255,0.05);
+  }
+  .theme-tv .tv-speaker::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 30%, rgba(0,0,0,0.1) 100%);
+    pointer-events: none;
+  }
+  .theme-tv .tv-speaker::after {
+    content: '';
+    position: absolute;
+    inset: 5px;
+    background:
+      radial-gradient(circle, rgba(60, 40, 10, 0.9) 1.2px, transparent 1.2px);
+    background-size: 5px 5px;
+  }
+
+  /* Channel dials — larger, more detailed */
+  .theme-tv .tv-dial {
+    width: 62px;
+    height: 62px;
+    border-radius: 50%;
+    background:
+      conic-gradient(from 0deg, #d8d0c0, #a8a090, #c8c0b0, #989080, #d8d0c0),
+      radial-gradient(circle at 35% 35%, #e8e0d0, #888070);
+    border: 3px solid #4a4238;
+    box-shadow:
+      0 3px 8px rgba(0,0,0,0.5),
+      0 1px 2px rgba(0,0,0,0.3),
+      inset 0 1px 3px rgba(255,255,255,0.2);
+    position: relative;
+    cursor: default;
+  }
+  .theme-tv .tv-dial::before {
+    content: '';
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #c0b8a8, #706860);
+    border: 1px solid #585048;
+  }
+  .theme-tv .tv-dial::after {
+    content: '';
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 3px;
+    height: 16px;
+    background: linear-gradient(180deg, #333, #555);
+    border-radius: 2px;
+  }
+  .theme-tv .tv-dial-label {
+    font-size: 8px;
+    color: #b0a890;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: -2px;
+    font-weight: 500;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  }
+
+  /* Small knobs row at bottom */
+  .theme-tv .tv-knobs {
+    display: flex;
+    gap: 10px;
+    margin-top: auto;
+    padding-top: 10px;
+  }
+  .theme-tv .tv-knob {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 35% 30%, #e0d8c8, #908878 70%, #686058);
+    border: 2px solid #4a4238;
+    box-shadow:
+      0 2px 4px rgba(0,0,0,0.4),
+      inset 0 1px 1px rgba(255,255,255,0.15);
+  }
+  .theme-tv .tv-knob-label {
+    font-size: 6px;
+    color: #a09880;
+    text-transform: uppercase;
+    text-align: center;
+    margin-top: 3px;
+    letter-spacing: 0.5px;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.4);
+  }
+
+  /* === Antennas — V-shaped from central base === */
+  .theme-tv .tv-antenna-mount {
+    position: absolute;
+    top: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 14px;
+    background:
+      radial-gradient(ellipse at 50% 60%, #666, #444 60%, #333);
+    border-radius: 50% 50% 40% 40%;
+    z-index: 6;
+    border: 1px solid #222;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+  }
+  .theme-tv .tv-antenna-l,
+  .theme-tv .tv-antenna-r {
+    position: absolute;
+    bottom: 100%;
+    width: 2.5px;
+    background:
+      linear-gradient(to top, #777, #aaa 30%, #ccc 70%, #e0e0e0 90%, #ddd);
+    z-index: 5;
+    border-radius: 1px;
+  }
+  .theme-tv .tv-antenna-l {
+    left: 50%;
+    margin-left: -20px;
+    height: 90px;
+    transform: rotate(-28deg);
+    transform-origin: bottom center;
+  }
+  .theme-tv .tv-antenna-r {
+    left: 50%;
+    margin-left: 18px;
+    height: 90px;
+    transform: rotate(28deg);
+    transform-origin: bottom center;
+  }
+  /* Bulbous antenna tips */
+  .theme-tv .tv-antenna-l::after,
+  .theme-tv .tv-antenna-r::after {
+    content: '';
+    position: absolute;
+    top: -5px;
+    left: -3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #f0f0f0, #bbb 50%, #888);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+
+  /* === Four tapered wooden legs === */
+  .theme-tv .tv-legs {
+    position: absolute;
+    bottom: -56px;
+    left: 0;
+    right: 0;
+    height: 56px;
+    pointer-events: none;
+  }
+  .theme-tv .tv-leg {
+    position: absolute;
+    width: 8px;
+    height: 56px;
+    background:
+      linear-gradient(90deg, #6a4c2a, #8a6438 30%, #a07848 50%, #8a6438 70%, #6a4c2a);
+    border-radius: 2px 2px 4px 4px;
+    /* Tapered: wider at top, thinner at bottom */
+    clip-path: polygon(0% 0%, 100% 0%, 80% 100%, 20% 100%);
+  }
+  /* Brass foot caps */
+  .theme-tv .tv-leg::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: -1px;
+    width: 10px;
+    height: 8px;
+    background: linear-gradient(180deg, #c8a860, #a08840, #887030);
+    border-radius: 0 0 4px 4px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  }
+  .theme-tv .tv-leg:nth-child(1) { left: 10%;  transform: rotate(-10deg); }
+  .theme-tv .tv-leg:nth-child(2) { right: 10%; transform: rotate(10deg); }
+  .theme-tv .tv-leg:nth-child(3) { left: 15%;  transform: rotate(-4deg); z-index: -1; opacity: 0.65; }
+  .theme-tv .tv-leg:nth-child(4) { right: 15%; transform: rotate(4deg); z-index: -1; opacity: 0.65; }
+
+
+  /* === Visibility: hide TV elements in default theme === */
+  .tv-controls, .tv-speaker,
+  .tv-dial, .tv-dial-label, .tv-knobs, .tv-knob, .tv-knob-label,
+  .tv-antenna-mount, .tv-antenna-l, .tv-antenna-r, .tv-legs, .tv-leg { display: none; }
+  .theme-tv .tv-controls { display: flex; }
+  .theme-tv .tv-speaker { display: block; }
+  .theme-tv .tv-dial { display: flex; }
+  .theme-tv .tv-dial-label { display: block; }
+  .theme-tv .tv-knobs { display: flex; }
+  .theme-tv .tv-knob { display: block; }
+  .theme-tv .tv-knob-label { display: block; }
+  .theme-tv .tv-antenna-mount,
+  .theme-tv .tv-antenna-l,
+  .theme-tv .tv-antenna-r { display: block; }
+  .theme-tv .tv-legs { display: block; }
+  .theme-tv .tv-leg { display: block; }
+
+  #terminal-container {
+    background: #0d0d1a;
+    position: relative;
+    flex: 0 0 auto;
+    overflow: hidden;
+  }
+
+  /* Pane border lines (drawn between panes) */
+  .pane-border {
+    position: absolute;
+    background: #333346;
+    z-index: 2;
+  }
+
+  #tmux-status {
+    background: #005f00;
+    color: #e0e0e0;
+    font-family: "JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace;
+    font-size: 14px;
+    line-height: 20px;
+    padding: 1px 4px;
+    display: flex;
+    justify-content: space-between;
+    min-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  #tmux-status-left { color: #ffffff; font-weight: bold; }
+  #tmux-status-right { color: #d0d0d0; }
+
+  /* Subtle scanline effect */
+  #terminal-container::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.02) 2px,
+      rgba(0,0,0,0.02) 4px
+    );
+    z-index: 3;
+  }
+
+  .xterm-viewport::-webkit-scrollbar { display: none; }
+  .xterm-viewport { scrollbar-width: none; }
+</style>
+</head>
+<body>
+<div id="status">Connecting...</div>
+<div id="terminal-wrap">
+  <!-- TV antennas (visible only in TV theme) -->
+  <div class="tv-antenna-mount"></div>
+  <div class="tv-antenna-l"></div>
+  <div class="tv-antenna-r"></div>
+
+  <!-- Default theme: titlebar -->
+  <div id="titlebar">
+    <div class="dot red"></div>
+    <div class="dot yellow"></div>
+    <div class="dot green"></div>
+    <span id="titlebar-text">
+      <span id="titlebar-label">tmtv</span>
+      <span id="titlebar-meta"></span>
+    </span>
+  </div>
+
+  <!-- Terminal (always visible, reparented visually by CSS) -->
+  <div id="terminal-container"></div>
+
+  <!-- TV theme: right-side control panel -->
+  <div class="tv-controls">
+    <div class="tv-speaker"></div>
+    <div class="tv-dial-label">vhf</div>
+    <div class="tv-dial" style="transform: rotate(30deg);"></div>
+    <div class="tv-dial-label">uhf</div>
+    <div class="tv-dial" style="transform: rotate(-15deg);"></div>
+    <div class="tv-knobs">
+      <div>
+        <div class="tv-knob"></div>
+        <div class="tv-knob-label">vol</div>
+      </div>
+      <div>
+        <div class="tv-knob"></div>
+        <div class="tv-knob-label">tone</div>
+      </div>
+      <div>
+        <div class="tv-knob"></div>
+        <div class="tv-knob-label">brt</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Default theme: tmux status bar (hidden in TV mode) -->
+  <div id="tmux-status">
+    <span id="tmux-status-left"></span>
+    <span id="tmux-status-right"></span>
+  </div>
+
+  <!-- TV legs -->
+  <div class="tv-legs">
+    <div class="tv-leg"></div>
+    <div class="tv-leg"></div>
+    <div class="tv-leg"></div>
+    <div class="tv-leg"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@msgpack/msgpack@3.0.0-beta2/dist.es5+umd/msgpack.min.js"></script>
+<script>
+(function() {
+  'use strict';
+
+  /* --- Helpers --- */
+  var _dec = new TextDecoder();
+  function toStr(v) {
+    if (v instanceof Uint8Array) return _dec.decode(v);
+    if (v && v.buffer instanceof ArrayBuffer) return _dec.decode(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+    if (Array.isArray(v)) return String.fromCharCode.apply(null, v);
+    return String(v);
+  }
+
+  /* --- Protocol constants --- */
+  var CTL_HEADER         = 0;
+  var CTL_DEAMON_OUT_MSG = 1;
+
+  var OUT_HEADER      = 0;
+  var OUT_SYNC_LAYOUT = 1;
+  var OUT_PTY_DATA    = 2;
+  var OUT_STATUS      = 5;
+  var OUT_FIN         = 8;
+
+  /* --- Shared terminal config --- */
+  var FONT = '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace';
+  var THEME = {
+    background: '#0d0d1a',
+    foreground: '#e0e0e0',
+    cursor: '#528bff',
+    cursorAccent: '#0d0d1a',
+    selectionBackground: 'rgba(82, 139, 255, 0.3)',
+    black: '#1a1a2e',
+    red: '#ff6b6b',
+    green: '#3ddc84',
+    yellow: '#ffd93d',
+    blue: '#6c9efc',
+    magenta: '#c084fc',
+    cyan: '#67e8f9',
+    white: '#e0e0e0',
+    brightBlack: '#4a4a5e',
+    brightRed: '#ff8a8a',
+    brightGreen: '#6ee7a0',
+    brightYellow: '#ffe066',
+    brightBlue: '#93b8fc',
+    brightMagenta: '#d4a5fc',
+    brightCyan: '#8ef0fc',
+    brightWhite: '#ffffff'
+  };
+
+  /* --- Multi-pane state --- */
+  var serverCols = window.serverCols = 80;
+  var serverRows = window.serverRows = 24;
+  var contentRows = 24; /* actual pane content rows (serverRows - status line) */
+  var panes = {};       // pane_id -> { term, el, sx, sy }
+  var pendingData = {}; // pane_id -> [data chunks] buffered before pane created
+  var cellW = 0, cellH = 0;
+  var fontSize = 14;
+  var cellRatioW = 0, cellRatioH = 0; // cell size per font point
+  var container = document.getElementById('terminal-container');
+
+  /* Measure cell-to-font ratio using a temporary terminal */
+  function measureCellRatio() {
+    if (cellRatioW > 0) return;
+    var tmp = document.createElement('div');
+    tmp.style.position = 'absolute';
+    tmp.style.visibility = 'hidden';
+    tmp.style.left = '-9999px';
+    document.body.appendChild(tmp);
+    var t = new Terminal({
+      fontFamily: FONT, fontSize: 14, lineHeight: 1.15,
+      cols: 10, rows: 2, allowProposedApi: true
+    });
+    t.open(tmp);
+    try {
+      var dims = t._core._renderService.dimensions;
+      if (dims && dims.css && dims.css.cell) {
+        cellRatioW = dims.css.cell.width / 14;
+        cellRatioH = dims.css.cell.height / 14;
+      }
+    } catch (e) {}
+    t.dispose();
+    document.body.removeChild(tmp);
+    if (!cellRatioW || !cellRatioH) { cellRatioW = 0.6; cellRatioH = 1.15; }
+  }
+
+  /* Compute optimal font size to fill the viewport */
+  function computeFontSize() {
+    measureCellRatio();
+    var availW, availH;
+    if (currentTheme === 'tv') {
+      /* TV: screen is 72% of cabinet width, with padding+bezel ~48px, antenna+legs ~140px */
+      availW = (window.innerWidth - 80) * 0.72 - 48;
+      availH = window.innerHeight - 140 - 48;
+    } else {
+      availW = window.innerWidth - 32;
+      availH = window.innerHeight - 32 - 38 - 20; /* margins, titlebar, status */
+    }
+    var maxFromW = availW / (serverCols * cellRatioW);
+    var maxFromH = availH / (contentRows * cellRatioH);
+    fontSize = Math.max(6, Math.min(Math.floor(Math.min(maxFromW, maxFromH)), 22));
+    cellW = fontSize * cellRatioW;
+    cellH = fontSize * cellRatioH;
+  }
+
+  function createPaneTerminal(sx, sy) {
+    var t = new Terminal({
+      fontFamily: FONT,
+      fontSize: fontSize,
+      lineHeight: 1.15,
+      theme: THEME,
+      cols: sx,
+      rows: sy,
+      scrollback: 0,
+      cursorBlink: false,
+      cursorStyle: 'block',
+      disableStdin: true,
+      allowProposedApi: true
+    });
+    return t;
+  }
+
+  /* Rebuild pane layout from SYNC_LAYOUT windows array.
+   * windows: [[idx, name, [[pane_id, sx, sy, xoff, yoff], ...], active_pane_id], ...]
+   * activeWinIdx: currently active window index */
+  function updatePaneLayout(windows, activeWinIdx) {
+    if (!Array.isArray(windows)) return;
+
+    /* Find the active window's pane list */
+    var paneList = null;
+    var activePaneId = -1;
+    for (var i = 0; i < windows.length; i++) {
+      var win = windows[i];
+      if (!Array.isArray(win)) continue;
+      if (win[0] === activeWinIdx) {
+        paneList = win[2];
+        activePaneId = win[3];
+        break;
+      }
+    }
+    if (!paneList || !Array.isArray(paneList)) return;
+
+    /* Compute content height from pane layout */
+    var maxRow = 0;
+    for (var i = 0; i < paneList.length; i++) {
+      var p = paneList[i];
+      if (Array.isArray(p) && p.length >= 5) {
+        var bottom = p[4] + p[2]; /* yoff + sy */
+        if (bottom > maxRow) maxRow = bottom;
+      }
+    }
+    if (maxRow > 0) contentRows = maxRow;
+
+    computeFontSize();
+
+    var seen = {};
+
+    /* Remove old border lines */
+    var oldBorders = container.querySelectorAll('.pane-border');
+    for (var i = 0; i < oldBorders.length; i++)
+      oldBorders[i].remove();
+
+    for (var i = 0; i < paneList.length; i++) {
+      var p = paneList[i];
+      if (!Array.isArray(p) || p.length < 5) continue;
+      var id = p[0], sx = p[1], sy = p[2], xoff = p[3], yoff = p[4];
+      seen[id] = true;
+
+      var left = Math.round(xoff * cellW);
+      var top = Math.round(yoff * cellH);
+      var width = Math.round(sx * cellW);
+      var height = Math.round(sy * cellH);
+
+      if (panes[id]) {
+        /* Update existing pane */
+        var pane = panes[id];
+        pane.el.style.left = left + 'px';
+        pane.el.style.top = top + 'px';
+        pane.el.style.width = width + 'px';
+        pane.el.style.height = height + 'px';
+        if (pane.term.options.fontSize !== fontSize) {
+          pane.term.options.fontSize = fontSize;
+        }
+        if (pane.term.cols !== sx || pane.term.rows !== sy) {
+          pane.term.resize(sx, sy);
+        }
+        pane.sx = sx;
+        pane.sy = sy;
+      } else {
+        /* Create new pane */
+        var el = document.createElement('div');
+        el.style.position = 'absolute';
+        el.style.left = left + 'px';
+        el.style.top = top + 'px';
+        el.style.width = width + 'px';
+        el.style.height = height + 'px';
+        el.style.overflow = 'hidden';
+        container.appendChild(el);
+
+        var t = createPaneTerminal(sx, sy);
+        t.open(el);
+
+        panes[id] = { term: t, el: el, sx: sx, sy: sy };
+
+        /* Flush any buffered data for this pane */
+        if (pendingData[id]) {
+          for (var j = 0; j < pendingData[id].length; j++) {
+            var d = pendingData[id][j];
+            t.write(d instanceof Uint8Array ? d : String(d));
+          }
+          delete pendingData[id];
+        }
+      }
+
+      /* Set cursor blink only on active pane */
+      panes[id].term.options.cursorBlink = (id === activePaneId);
+
+      /* Draw borders: if xoff > 0, draw a vertical line to the left */
+      if (xoff > 0) {
+        var border = document.createElement('div');
+        border.className = 'pane-border';
+        border.style.left = (left - 1) + 'px';
+        border.style.top = top + 'px';
+        border.style.width = '1px';
+        border.style.height = height + 'px';
+        container.appendChild(border);
+      }
+      /* If yoff > 0, draw a horizontal line above */
+      if (yoff > 0) {
+        var border = document.createElement('div');
+        border.className = 'pane-border';
+        border.style.left = left + 'px';
+        border.style.top = (top - 1) + 'px';
+        border.style.width = width + 'px';
+        border.style.height = '1px';
+        container.appendChild(border);
+      }
+    }
+
+    /* Remove panes no longer in layout */
+    for (var id in panes) {
+      if (!seen[id]) {
+        panes[id].term.dispose();
+        panes[id].el.remove();
+        delete panes[id];
+      }
+    }
+
+    /* Update pane count metadata */
+    paneCount = Object.keys(panes).length;
+    updateMeta();
+  }
+
+  /* Resize the terminal-wrap to fit the server's terminal dimensions */
+  function sizeToServer() {
+    computeFontSize();
+    var contentW = Math.ceil(serverCols * cellW);
+    var contentH = Math.ceil(contentRows * cellH);
+
+    var wrap = document.getElementById('terminal-wrap');
+
+    if (currentTheme === 'tv') {
+      /* TV: cabinet width = screen / 0.72, no titlebar/status */
+      var cabinetW = Math.ceil(contentW / 0.72) + 48;
+      var cabinetH = contentH + 48; /* padding + bezel borders */
+      var maxW = window.innerWidth - 48;
+      var maxH = window.innerHeight - 140; /* room for antennas + legs */
+
+      wrap.style.width = Math.min(cabinetW, maxW) + 'px';
+      wrap.style.height = Math.min(cabinetH, maxH) + 'px';
+      container.style.height = contentH + 'px';
+    } else {
+      var totalH = 38 + contentH + 20;
+      var maxW = window.innerWidth - 32;
+      var maxH = window.innerHeight - 32;
+
+      wrap.style.width = Math.min(contentW, maxW) + 'px';
+      wrap.style.height = Math.min(totalH, maxH) + 'px';
+      container.style.height = contentH + 'px';
+    }
+  }
+
+  window.addEventListener('resize', function() { sizeToServer(); });
+
+  var statusEl = document.getElementById('status');
+  var fadeTimer = null;
+
+  function setStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = cls || '';
+    if (fadeTimer) clearTimeout(fadeTimer);
+    if (cls === 'connected') {
+      fadeTimer = setTimeout(function() {
+        statusEl.classList.add('fade');
+      }, 2000);
+    }
+  }
+
+  /* --- Build tmux-style status from sync_layout windows --- */
+  function updateWindowList(windows, activeIdx) {
+    if (!Array.isArray(windows)) return;
+
+    var parts = [];
+    for (var i = 0; i < windows.length; i++) {
+      var win = windows[i];
+      if (!Array.isArray(win) || win.length < 2) continue;
+      var idx = win[0];
+      var name = toStr(win[1]);
+      var marker = (idx === activeIdx) ? '*' : '-';
+      parts.push(idx + ':' + name + marker);
+    }
+
+    var leftEl = document.getElementById('tmux-status-left');
+    if (leftEl && parts.length > 0) {
+      leftEl.textContent = '[0] ' + parts.join(' ');
+    }
+  }
+
+  /* --- SSE connection --- */
+
+  var pathMatch = location.pathname.match(/^\/s\/([^\/]+)/);
+  var sessionToken = pathMatch ? pathMatch[1] : null;
+
+  /* --- Theme support (URL param only: ?theme=tv) --- */
+  var params = new URLSearchParams(location.search);
+  var currentTheme = params.get('theme') || '';
+  if (currentTheme) document.body.className = 'theme-' + currentTheme;
+
+  var ssePort = params.get('port');
+  var sseUrl = ssePort
+    ? 'http://' + (location.hostname || 'localhost') + ':' + ssePort
+    : '/ws';
+
+  /* --- Session metadata --- */
+  var sessionStart = null;
+  var paneCount = 0;
+  var durationTimer = null;
+
+  if (sessionToken) {
+    document.getElementById('titlebar-label').textContent = 'tmtv — ' + sessionToken.substring(0, 8);
+  }
+
+  function updateMeta() {
+    var parts = [];
+    if (paneCount > 0) parts.push(paneCount + (paneCount === 1 ? ' pane' : ' panes'));
+    if (sessionStart) {
+      var elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+      var m = Math.floor(elapsed / 60);
+      var s = elapsed % 60;
+      parts.push((m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s);
+    }
+    var metaEl = document.getElementById('titlebar-meta');
+    if (metaEl) metaEl.textContent = parts.length ? parts.join(' · ') : '';
+  }
+
+  var reconnectAttempts = 0;
+  var maxReconnect = 5;
+  var sessionEnded = false;
+
+  function connect() {
+    setStatus('Connecting...');
+
+    var es = new EventSource(sseUrl);
+
+    es.onopen = function() {
+      setStatus('Connected', 'connected');
+      reconnectAttempts = 0;
+      if (!sessionStart) {
+        sessionStart = Date.now();
+        durationTimer = setInterval(updateMeta, 1000);
+      }
+    };
+
+    es.onmessage = function(evt) {
+      var binary = atob(evt.data);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++)
+        bytes[i] = binary.charCodeAt(i);
+      try {
+        var iter = MessagePack.decodeMulti(bytes);
+        var result = iter.next();
+        while (!result.done) {
+          handleMessage(result.value);
+          result = iter.next();
+        }
+      } catch (e) {}
+    };
+
+    es.onerror = function() {
+      es.close();
+      if (sessionEnded) {
+        setStatus('Session ended', 'error');
+        if (durationTimer) clearInterval(durationTimer);
+        return;
+      }
+      if (reconnectAttempts < maxReconnect) {
+        reconnectAttempts++;
+        var delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 8000);
+        setStatus('Reconnecting (' + reconnectAttempts + '/' + maxReconnect + ')...', 'error');
+        setTimeout(connect, delay);
+      } else {
+        setStatus('Connection lost', 'error');
+        if (durationTimer) clearInterval(durationTimer);
+      }
+    };
+  }
+
+  function handleMessage(msg) {
+    if (!Array.isArray(msg) || msg.length < 2) return;
+
+    var type = msg[0];
+
+    switch (type) {
+      case CTL_DEAMON_OUT_MSG:
+        handleDaemonMsg(msg[1]);
+        break;
+
+      case CTL_HEADER:
+        break;
+    }
+  }
+
+  function handleDaemonMsg(inner) {
+    if (!Array.isArray(inner) || inner.length < 1) return;
+
+    var type = inner[0];
+
+    switch (type) {
+      case OUT_PTY_DATA:
+        if (inner.length >= 3) {
+          var paneId = inner[1];
+          var ptyData = inner[2];
+          var pane = panes[paneId];
+          if (pane) {
+            pane.term.write(ptyData instanceof Uint8Array ? ptyData : String(ptyData));
+          } else {
+            if (!pendingData[paneId]) pendingData[paneId] = [];
+            pendingData[paneId].push(ptyData);
+          }
+        }
+        break;
+
+      case OUT_SYNC_LAYOUT:
+        if (inner.length >= 3) {
+          var sx = inner[1];
+          var sy = inner[2];
+          if (sx > 0 && sy > 0) {
+            serverCols = sx;
+            serverRows = sy;
+            window.serverCols = sx;
+            window.serverRows = sy;
+          }
+          if (inner.length >= 5) {
+            updateWindowList(inner[3], inner[4]);
+            updatePaneLayout(inner[3], inner[4]);
+          }
+          sizeToServer();
+        }
+        break;
+
+      case OUT_HEADER:
+        break;
+
+      case OUT_STATUS:
+        if (inner.length >= 3) {
+          var leftEl = document.getElementById('tmux-status-left');
+          var rightEl = document.getElementById('tmux-status-right');
+          if (leftEl && inner[1]) leftEl.textContent = toStr(inner[1]);
+          if (rightEl && inner[2]) rightEl.textContent = toStr(inner[2]);
+        }
+        break;
+
+      case OUT_FIN:
+        sessionEnded = true;
+        setStatus('Session ended', 'error');
+        if (durationTimer) clearInterval(durationTimer);
+        break;
+    }
+  }
+
+  /* --- Start --- */
+  connect();
+
+})();
+</script>
+</body>
+</html>

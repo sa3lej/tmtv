@@ -1023,58 +1023,58 @@ const struct options_table_entry options_table[] = {
 	},
 
 	/* tmtv options (session scope, stored in global_options). */
-	{ .name = "tmate-server-host",
+	{ .name = "tmtv-server-host",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
-	  .default_str = "",
+	  .default_str = "tmtv.se",
 	  .text = "tmtv server hostname. Empty to run in local-only mode."
 	},
 
-	{ .name = "tmate-server-port",
+	{ .name = "tmtv-server-port",
 	  .type = OPTIONS_TABLE_NUMBER,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .minimum = 1,
 	  .maximum = 65535,
-	  .default_num = 2222,
+	  .default_num = 22,
 	  .text = "tmtv server SSH port."
 	},
 
-	{ .name = "tmate-server-rsa-fingerprint",
+	{ .name = "tmtv-server-rsa-fingerprint",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
-	  .default_str = "",
+	  .default_str = "SHA256:p9fAu349dhOFx7fBbzEGKPq4yonPWMX0VQ48DwfRfEA",
 	  .text = "tmtv server RSA host key fingerprint."
 	},
 
-	{ .name = "tmate-server-ecdsa-fingerprint",
+	{ .name = "tmtv-server-ecdsa-fingerprint",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
 	  .text = "tmtv server ECDSA host key fingerprint."
 	},
 
-	{ .name = "tmate-server-ed25519-fingerprint",
+	{ .name = "tmtv-server-ed25519-fingerprint",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
-	  .default_str = "",
+	  .default_str = "SHA256:8EeNAyFHdQUfp3escz3xfas8v+tHS/34HRIQHpP6Gzg",
 	  .text = "tmtv server Ed25519 host key fingerprint."
 	},
 
-	{ .name = "tmate-identity",
+	{ .name = "tmtv-identity",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
 	  .text = "SSH identity file for tmtv."
 	},
 
-	{ .name = "tmate-authorized-keys",
+	{ .name = "tmtv-authorized-keys",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
 	  .text = "Path to authorized_keys for tmtv access control."
 	},
 
-	{ .name = "tmate-display-time",
+	{ .name = "tmtv-display-time",
 	  .type = OPTIONS_TABLE_NUMBER,
 	  .scope = OPTIONS_TABLE_SESSION,
 	  .minimum = 0,
@@ -1083,35 +1083,43 @@ const struct options_table_entry options_table[] = {
 	  .text = "Duration of tmtv status messages in milliseconds."
 	},
 
-	{ .name = "tmate-foreground-restart",
+	{ .name = "tmtv-foreground-restart",
 	  .type = OPTIONS_TABLE_FLAG,
 	  .scope = OPTIONS_TABLE_SESSION,
 	  .default_num = 0,
 	  .text = "Restart session shell in foreground mode."
 	},
 
-	{ .name = "tmate-set",
+	{ .name = "tmtv-web-sharing",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_num = 0,
+	  .text = "Enable web-based terminal sharing via SSE. "
+		  "When on, viewers can watch the session in a browser."
+	},
+
+	{ .name = "tmtv-set",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
 	  .text = "Internal tmtv key=value transport."
 	},
 
-	{ .name = "tmate-api-key",
+	{ .name = "tmtv-api-key",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
 	  .text = "API key for named tmtv sessions."
 	},
 
-	{ .name = "tmate-session-name",
+	{ .name = "tmtv-session-name",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
 	  .text = "Named session token for tmtv."
 	},
 
-	{ .name = "tmate-session-name-ro",
+	{ .name = "tmtv-session-name-ro",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",

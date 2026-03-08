@@ -81,7 +81,7 @@ struct winlink;
 
 /* Default configuration files and socket paths. */
 #ifndef TMUX_CONF
-#define TMUX_CONF "/etc/tmux.conf:~/.tmux.conf"
+#define TMUX_CONF "/etc/tmtv.conf:~/.tmtv.conf"
 #endif
 #ifndef TMUX_SOCK
 #define TMUX_SOCK "$TMUX_TMPDIR:" _PATH_TMP
@@ -1245,9 +1245,6 @@ struct window_pane {
 
 	struct style	 scrollbar_style;
 
-	/* tmate: PTY data replication offset */
-	size_t		 tmate_off;
-
 	TAILQ_ENTRY(window_pane) entry;  /* link in list of all panes */
 	TAILQ_ENTRY(window_pane) sentry; /* link in list of last visited */
 	RB_ENTRY(window_pane) tree_entry;
@@ -1308,8 +1305,12 @@ struct window {
 	u_int			 references;
 	TAILQ_HEAD(, winlink)	 winlinks;
 
-	/* tmate: track last synced active pane */
+	/* tmate: track last synced state for change detection */
 	struct window_pane	*tmate_last_sync_active_pane;
+	char			*tmate_last_sync_name;
+	u_int			 tmate_last_sync_sx;
+	u_int			 tmate_last_sync_sy;
+	u_int			 tmate_last_layout_hash;
 
 	RB_ENTRY(window)	 entry;
 };

@@ -21,9 +21,9 @@ UNIT_TESTS = test-msgpack
 SERVER_TESTS = test-server-header
 TMTV ?= ../tmtv
 
-.PHONY: all unit server-unit functional hooks clean
+.PHONY: all unit server-unit functional hooks session-cleanup clean
 
-all: unit server-unit functional hooks
+all: unit server-unit functional hooks session-cleanup
 
 unit: $(UNIT_TESTS)
 	@echo ""
@@ -55,6 +55,11 @@ hooks:
 	@echo ""
 	@echo "Running tmate hook integration tests..."
 	@TMTV=$(TMTV) sh test-tmate-hooks.sh
+
+session-cleanup:
+	@echo ""
+	@echo "Running session cleanup tests..."
+	@sh test-session-cleanup.sh
 
 wiring:
 	@echo ""

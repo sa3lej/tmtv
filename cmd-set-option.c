@@ -225,6 +225,26 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 
 	options_push_changes(name);
 
+#ifdef TMATE
+#ifndef TMATE_SERVER_BUILD
+	/* Client side: replicate web sharing toggle to server */
+	if (strcmp(name, "tmtv-web-sharing") == 0) {
+		extern void tmate_set_val(const char *, const char *);
+		if (args_has(args, 'u'))
+			tmate_set_val("web_sharing", "off");
+		else
+			tmate_set_val("web_sharing", value ? value : "off");
+	}
+#else
+	/* Server side: process option hooks */
+	{
+		extern void tmate_hook_set_option(const char *name,
+						  const char *val);
+		tmate_hook_set_option(name, value);
+	}
+#endif
+#endif
+
 out:
 	free(argument);
 	free(expanded);

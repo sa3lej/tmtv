@@ -28,7 +28,6 @@ TEST(session_struct_fields)
 	s.daemon_decoder.reader = NULL;
 
 	/* Websocket */
-	s.websocket_fd = -1;
 	s.websocket_sx = 80;
 	s.websocket_sy = 24;
 
@@ -43,7 +42,6 @@ TEST(session_struct_fields)
 	s.client_protocol_version = TMATE_PROTOCOL_VERSION;
 	s.fin_received = false;
 
-	ASSERT(s.websocket_fd == -1);
 	ASSERT(s.ssh_client.role == TMATE_ROLE_DAEMON);
 	ASSERT(s.client_protocol_version == TMATE_PROTOCOL_VERSION);
 }
