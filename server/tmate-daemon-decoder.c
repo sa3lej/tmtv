@@ -24,7 +24,7 @@ void tmate_send_web_url(struct tmate_session *session)
 			  tmate_settings->tmate_host,
 			  port, session->session_token);
 	tmate_notify("Web sharing enabled: %s", web_url);
-	tmate_set_env("tmate_web", web_url);
+	tmate_set_env("tmtv_web", web_url);
 	free(web_url);
 }
 
@@ -94,12 +94,12 @@ static void tmate_header(struct tmate_session *session,
 	ssh_conn_str = get_ssh_conn_string(session->session_token_ro);
 	tmate_notify("Note: clear your terminal before sharing readonly access");
 	tmate_notify("ssh session read only: %s", ssh_conn_str);
-	tmate_set_env("tmate_ssh_ro", ssh_conn_str);
+	tmate_set_env("tmtv_ssh_ro", ssh_conn_str);
 	free(ssh_conn_str);
 
 	ssh_conn_str = get_ssh_conn_string(session->session_token);
 	tmate_notify("ssh session: %s", ssh_conn_str);
-	tmate_set_env("tmate_ssh", ssh_conn_str);
+	tmate_set_env("tmtv_ssh", ssh_conn_str);
 	free(ssh_conn_str);
 
 	/* Web URL is only sent when client enables web sharing */
