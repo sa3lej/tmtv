@@ -293,25 +293,29 @@ jobs:
           npm run build
 
       - name: Set up SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p ${{ secrets.DEPLOY_SSH_PORT }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Upload web assets
+        env:
+          DEPLOY_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
         run: |
-          SSH_OPTS="-i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_SSH_PORT }}"
-          HOST="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
+          SSH_OPTS="-i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new -p ${DEPLOY_PORT}"
 
-          scp $SSH_OPTS site/dist/index.html ${HOST}:staging/
-          scp $SSH_OPTS site/dist/viewer.js ${HOST}:staging/
-          scp $SSH_OPTS site/dist/viewer/index.html ${HOST}:staging/viewer.html
-          scp $SSH_OPTS site/dist/install.sh ${HOST}:staging/
-          scp $SSH_OPTS site/dist/*.png site/dist/*.gif ${HOST}:staging/ 2>/dev/null || true
-          scp $SSH_OPTS site/dist/favicon.* ${HOST}:staging/ 2>/dev/null || true
+          scp $SSH_OPTS site/dist/index.html "${DEPLOY_TARGET}:staging/"
+          scp $SSH_OPTS site/dist/viewer.js "${DEPLOY_TARGET}:staging/"
+          scp $SSH_OPTS site/dist/viewer/index.html "${DEPLOY_TARGET}:staging/viewer.html"
+          scp $SSH_OPTS site/dist/install.sh "${DEPLOY_TARGET}:staging/"
+          scp $SSH_OPTS site/dist/*.png site/dist/*.gif "${DEPLOY_TARGET}:staging/" 2>/dev/null || true
+          scp $SSH_OPTS site/dist/favicon.* "${DEPLOY_TARGET}:staging/" 2>/dev/null || true
 
-          ssh $SSH_OPTS ${HOST} 'sudo /usr/local/bin/tmtv-deploy-web'
+          ssh $SSH_OPTS "${DEPLOY_TARGET}" 'sudo /usr/local/bin/tmtv-deploy-web'
 
   deploy-server:
     name: Deploy server binary
@@ -325,21 +329,25 @@ jobs:
           path: dist
 
       - name: Set up SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p ${{ secrets.DEPLOY_SSH_PORT }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Upload and deploy binaries
+        env:
+          DEPLOY_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
         run: |
-          SSH_OPTS="-i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_SSH_PORT }}"
-          HOST="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
+          SSH_OPTS="-i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new -p ${DEPLOY_PORT}"
 
-          scp $SSH_OPTS dist/tmtv-server-linux-amd64 ${HOST}:staging/tmtv-server
-          scp $SSH_OPTS dist/tmtv-linux-amd64 ${HOST}:staging/tmtv
+          scp $SSH_OPTS dist/tmtv-server-linux-amd64 "${DEPLOY_TARGET}:staging/tmtv-server"
+          scp $SSH_OPTS dist/tmtv-linux-amd64 "${DEPLOY_TARGET}:staging/tmtv"
 
-          ssh $SSH_OPTS ${HOST} 'sudo /usr/local/bin/tmtv-deploy-server'
+          ssh $SSH_OPTS "${DEPLOY_TARGET}" 'sudo /usr/local/bin/tmtv-deploy-server'
 
   release:
     name: Create Release
