@@ -571,6 +571,14 @@ static void ws_client_free(struct ws_client *wc)
 	free(wc);
 }
 
+void tmate_disconnect_ws_clients(struct tmate_session *session)
+{
+	struct ws_client *wc, *tmp;
+	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp)
+		ws_client_free(wc);
+	tmate_debug("All SSE clients disconnected (web sharing disabled)");
+}
+
 static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 {
 	struct ws_client *wc = arg;
@@ -617,6 +625,12 @@ static void on_ws_accept(__unused struct evconnlistener *listener,
 	struct tmate_session *session = arg;
 	struct ws_client *wc;
 	int flag = 1;
+
+	if (!session->web_sharing_enabled) {
+		close(fd);
+		tmate_debug("SSE connection rejected: web sharing is disabled");
+		return;
+	}
 
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 

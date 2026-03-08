@@ -240,9 +240,27 @@ static void handle_session_name_options(const char *name, __unused const char *v
 	}
 }
 
+extern void tmate_send_web_url(struct tmate_session *session);
+extern void tmate_disconnect_ws_clients(struct tmate_session *session);
+
+static void handle_web_sharing_option(const char *name, const char *val)
+{
+	if (strcmp(name, "tmtv-web-sharing") != 0)
+		return;
+
+	bool enabled = val && (!strcmp(val, "on") || !strcmp(val, "1"));
+	tmate_session->web_sharing_enabled = enabled;
+	if (enabled) {
+		tmate_send_web_url(tmate_session);
+	} else {
+		tmate_notify("Web sharing disabled");
+		tmate_disconnect_ws_clients(tmate_session);
+	}
+}
+
 void tmate_hook_set_option(const char *name, const char *val)
 {
 	tmate_hook_set_option_auth(name, val);
 	handle_session_name_options(name, val);
-
+	handle_web_sharing_option(name, val);
 }

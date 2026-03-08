@@ -1090,6 +1090,14 @@ const struct options_table_entry options_table[] = {
 	  .text = "Restart session shell in foreground mode."
 	},
 
+	{ .name = "tmtv-web-sharing",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_num = 0,
+	  .text = "Enable web-based terminal sharing via SSE. "
+		  "When on, viewers can watch the session in a browser."
+	},
+
 	{ .name = "tmtv-set",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
