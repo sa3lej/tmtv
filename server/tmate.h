@@ -195,7 +195,7 @@ extern void tmate_ssh_server_main(struct tmate_session *session,
 #ifdef DEVENV
 #define TMATE_SSH_DEFAULT_PORT 2200
 #else
-#define TMATE_SSH_DEFAULT_PORT 22
+#define TMATE_SSH_DEFAULT_PORT 2222
 #endif
 
 #define TMATE_SSH_GRACE_PERIOD 20
