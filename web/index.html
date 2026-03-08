@@ -880,7 +880,6 @@
   var sessionToken = pathMatch ? pathMatch[1] : null;
 
   /* --- Theme support (URL param only: ?theme=tv) --- */
-  localStorage.removeItem('tmtv-theme'); /* clean up old toggle storage */
   var params = new URLSearchParams(location.search);
   var currentTheme = params.get('theme') || '';
   if (currentTheme) document.body.className = 'theme-' + currentTheme;
