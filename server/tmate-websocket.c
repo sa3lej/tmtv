@@ -440,6 +440,53 @@ static int sse_do_handshake(struct ws_client *wc)
 	if (!header_end)
 		return 0; /* need more data */
 
+	/*
+	 * Extract token from GET path: "GET /ws/TOKEN ..." or "GET /TOKEN ..."
+	 * Validate against session tokens. Reject with 404 on mismatch.
+	 */
+	int token_ok = 0;
+	if (strncmp(data, "GET ", 4) == 0) {
+		char *path_start = data + 4;
+		char *path_end = memchr(path_start, ' ',
+					header_end - path_start);
+		if (path_end) {
+			/* Skip /ws/ prefix if present */
+			char *tok = path_start;
+			if (strncmp(tok, "/ws/", 4) == 0)
+				tok += 4;
+			else if (*tok == '/')
+				tok += 1;
+
+			size_t tok_len = path_end - tok;
+			if (tok_len > 0 && wc->session) {
+				const char *st = wc->session->session_token;
+				const char *st_ro = wc->session->session_token_ro;
+				const char *st_named = wc->session->session_token_named;
+				if ((st && strlen(st) == tok_len &&
+				     memcmp(tok, st, tok_len) == 0) ||
+				    (st_ro && strlen(st_ro) == tok_len &&
+				     memcmp(tok, st_ro, tok_len) == 0) ||
+				    (st_named && strlen(st_named) == tok_len &&
+				     memcmp(tok, st_named, tok_len) == 0))
+					token_ok = 1;
+			}
+		}
+	}
+
+	evbuffer_drain(input, (header_end - data) + 4);
+
+	if (!token_ok) {
+		static const char *resp_404 =
+			"HTTP/1.1 404 Not Found\r\n"
+			"Content-Type: text/plain\r\n"
+			"Connection: close\r\n"
+			"\r\n"
+			"session not found\n";
+		bufferevent_write(wc->bev, resp_404, strlen(resp_404));
+		tmate_info("SSE handshake rejected: invalid token");
+		return -1;
+	}
+
 	static const char *response =
 		"HTTP/1.1 200 OK\r\n"
 		"Content-Type: text/event-stream\r\n"
@@ -449,7 +496,6 @@ static int sse_do_handshake(struct ws_client *wc)
 		"X-Accel-Buffering: no\r\n"
 		"\r\n";
 
-	evbuffer_drain(input, (header_end - data) + 4);
 	bufferevent_write(wc->bev, response, strlen(response));
 
 	return 1;
