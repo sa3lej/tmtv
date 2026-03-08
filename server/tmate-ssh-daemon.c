@@ -108,6 +108,19 @@ static void cleanup_session_files(void)
 		unlinkat(dirfd, s->session_token_named, 0);
 }
 
+/*
+ * Crash handler for child (session) processes.
+ * cleanup_session_files() only calls unlinkat() which is async-signal-safe.
+ */
+static void handle_crash_cleanup(int sig)
+{
+	cleanup_session_files();
+
+	/* Re-raise with default handler to get proper exit status */
+	signal(sig, SIG_DFL);
+	raise(sig);
+}
+
 /* We skip letters that are hard to distinguish when reading */
 static char rand_tmate_token_digits[] = "abcdefghjkmnpqrstuvwxyz"
 				        "ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -227,6 +240,8 @@ void tmate_spawn_daemon(struct tmate_session *session)
 
 	get_in_jail();
 	atexit(cleanup_session_files);
+	signal(SIGSEGV, handle_crash_cleanup);
+	signal(SIGABRT, handle_crash_cleanup);
 
 	event_reinit(session->ev_base);
 

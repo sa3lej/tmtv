@@ -16,6 +16,7 @@
 #include <term.h>
 #include <time.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <sched.h>
 #include <signal.h>
 #include "tmate.h"
@@ -215,6 +216,28 @@ int main(int argc, char **argv, char **envp)
 	    check_owned_directory_mode(TMATE_WORKDIR "/jail", 0700))
 		tmate_fatal(TMATE_WORKDIR " and subdirectories has incorrect ownership/mode. "
 			    "Try deleting " TMATE_WORKDIR " and try again");
+
+	/*
+	 * Startup wipe: remove all stale session entries from a previous run.
+	 * The server just started, so every entry is orphaned by definition.
+	 */
+	{
+		DIR *dir = opendir(TMATE_WORKDIR "/sessions");
+		if (dir) {
+			struct dirent *ent;
+			int removed = 0;
+			int dfd = dirfd(dir);
+			while ((ent = readdir(dir)) != NULL) {
+				if (ent->d_name[0] == '.')
+					continue;
+				unlinkat(dfd, ent->d_name, 0);
+				removed++;
+			}
+			closedir(dir);
+			if (removed)
+				tmate_info("Startup wipe: removed %d stale session entries", removed);
+		}
+	}
 
 	tmate_ssh_server_main(tmate_session,
 			      tmate_settings->keys_dir, tmate_settings->bind_addr, tmate_settings->ssh_port);

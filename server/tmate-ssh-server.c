@@ -2,9 +2,12 @@
 #include <libssh/server.h>
 #include <libssh/callbacks.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
 #include <netinet/tcp.h>
 #include <sys/wait.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <signal.h>
 #include <event2/event.h>
@@ -462,6 +465,8 @@ static ssh_bind prepare_ssh(const char *keys_dir, const char *bind_addr, int por
 	return bind;
 }
 
+static volatile sig_atomic_t pending_gc = 0;
+
 static void handle_sigchld(__unused int sig)
 {
 	int status;
@@ -473,6 +478,92 @@ static void handle_sigchld(__unused int sig)
 		 * of potential deadlocks with other malloc() calls.
 		 */
 	}
+
+	/* Schedule GC for next iteration of accept loop */
+	pending_gc = 1;
+}
+
+/*
+ * Garbage-collect stale session entries.
+ *
+ * For sockets: try connect(); if ECONNREFUSED or ENOENT, the session
+ * is dead — remove it.  For symlinks: stat() to check if the target
+ * (the socket) still exists; if dangling, remove.
+ *
+ * Safety: connect() to a live UNIX socket + immediate close is harmless.
+ * tmux just sees a client connect and disconnect — this happens routinely
+ * (e.g. `tmux list-sessions`).
+ */
+static void gc_stale_sessions(void)
+{
+	DIR *dir;
+	struct dirent *ent;
+	char path[PATH_MAX];
+	struct stat st;
+	int removed = 0;
+
+	dir = opendir(TMATE_WORKDIR "/sessions");
+	if (!dir)
+		return;
+
+	while ((ent = readdir(dir)) != NULL) {
+		if (ent->d_name[0] == '.')
+			continue;
+
+		snprintf(path, sizeof(path), TMATE_WORKDIR "/sessions/%s",
+			 ent->d_name);
+
+		if (lstat(path, &st) < 0) {
+			unlink(path);
+			removed++;
+			continue;
+		}
+
+		if (S_ISLNK(st.st_mode)) {
+			/* Symlink (ro-TOKEN or named session) — check target */
+			if (stat(path, &st) < 0) {
+				/* Dangling symlink: target gone */
+				unlink(path);
+				removed++;
+			}
+			continue;
+		}
+
+		if (S_ISSOCK(st.st_mode)) {
+			/* Socket — try connect to check liveness */
+			struct sockaddr_un addr;
+			int sock;
+
+			sock = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+			if (sock < 0)
+				continue;
+
+			memset(&addr, 0, sizeof(addr));
+			addr.sun_family = AF_UNIX;
+			strlcpy(addr.sun_path, path, sizeof(addr.sun_path));
+
+			if (connect(sock, (struct sockaddr *)&addr,
+				    sizeof(addr)) < 0 &&
+			    errno != EINPROGRESS && errno != EAGAIN) {
+				/* ECONNREFUSED / ENOENT = dead */
+				close(sock);
+				unlink(path);
+				removed++;
+			} else {
+				close(sock);
+			}
+			continue;
+		}
+
+		/* Unknown file type — remove */
+		unlink(path);
+		removed++;
+	}
+
+	closedir(dir);
+
+	if (removed)
+		tmate_info("Session GC: removed %d stale entries", removed);
 }
 
 void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
@@ -484,7 +575,17 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 	int fd;
 
 	tmate_catch_sigsegv();
-	signal(SIGCHLD, handle_sigchld);
+
+	/* Use sigaction without SA_RESTART so accept() returns EINTR
+	 * on SIGCHLD, giving us a chance to run GC. */
+	{
+		struct sigaction sa;
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = handle_sigchld;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = 0; /* no SA_RESTART */
+		sigaction(SIGCHLD, &sa, NULL);
+	}
 
 	bind = prepare_ssh(keys_dir, bind_addr, port);
 
@@ -498,9 +599,17 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 		tmate_fatal("Cannot initialize session");
 
 	for (;;) {
+		if (pending_gc) {
+			pending_gc = 0;
+			gc_stale_sessions();
+		}
+
 		fd = accept(ssh_bind_get_fd(bind), NULL, NULL);
-		if (fd < 0)
+		if (fd < 0) {
+			if (errno == EINTR)
+				continue;
 			tmate_fatal("Error accepting connection");
+		}
 
 		if ((pid = fork()) < 0)
 			tmate_fatal("Can't fork");
