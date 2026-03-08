@@ -45,6 +45,13 @@ import Base from '../layouts/Base.astro';
     </div>
   </div>
 
+  <!-- Demo GIF -->
+  <div class="max-w-2xl mx-auto px-5 pb-16">
+    <div class="rounded-xl overflow-hidden border border-white/[0.06] shadow-2xl">
+      <img src="/tmtv-demo.gif" alt="tmtv web viewer — live terminal session" class="w-full" />
+    </div>
+  </div>
+
   <!-- Install -->
   <div class="max-w-2xl mx-auto px-5 pb-16">
     <div class="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-8">
@@ -129,12 +136,18 @@ import Base from '../layouts/Base.astro';
     <h3 class="text-xs font-medium text-gray-600 uppercase tracking-[0.15em] text-center mb-6">
       What it looks like
     </h3>
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div class="rounded-xl overflow-hidden border border-white/[0.06]">
-        <img src="/screenshot-default.png" alt="tmtv default theme — macOS-style titlebar with asciiquarium" class="w-full" loading="lazy" />
+        <img src="/screenshot-default.png" alt="tmtv default theme" class="w-full" loading="lazy" />
+        <div class="text-center text-[10px] text-gray-700 py-2">Default theme</div>
       </div>
       <div class="rounded-xl overflow-hidden border border-white/[0.06]">
-        <img src="/screenshot-tv.png" alt="tmtv TV theme — 1960s tabletop television with asciiquarium" class="w-full" loading="lazy" />
+        <img src="/screenshot-tmux.png" alt="tmtv viewer showing a normal tmux session" class="w-full" loading="lazy" />
+        <div class="text-center text-[10px] text-gray-700 py-2">Normal session</div>
+      </div>
+      <div class="rounded-xl overflow-hidden border border-white/[0.06]">
+        <img src="/screenshot-tv.png" alt="tmtv TV theme" class="w-full" loading="lazy" />
+        <div class="text-center text-[10px] text-gray-700 py-2">TV theme</div>
       </div>
     </div>
     <p class="text-center text-[11px] text-gray-700 mt-3">
