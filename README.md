@@ -212,6 +212,28 @@ To auto-enable web sharing on every session, add to `~/.tmtv.conf`:
 set -g tmtv-web-sharing on
 ```
 
+### Format variables
+
+Session URLs are available as tmux format variables for scripting and status bar integration:
+
+| Variable | Description |
+|----------|-------------|
+| `#{tmtv_ssh}` | SSH connection string (read-write) |
+| `#{tmtv_ssh_ro}` | SSH connection string (read-only) |
+| `#{tmtv_web}` | Web viewer URL (set after enabling web sharing) |
+
+Example: display the web URL in a copyable form:
+
+```sh
+tmtv display-message -p '#{tmtv_web}'
+```
+
+Or add session info to the status bar in `~/.tmtv.conf`:
+
+```
+set -g status-right '#{tmtv_ssh}'
+```
+
 ### Using tmtv as tmux
 
 tmtv is a full tmux replacement. All tmux commands work:
