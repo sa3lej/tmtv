@@ -92,6 +92,22 @@ static void handle_sigterm(__unused int sig)
 	request_server_termination();
 }
 
+static void cleanup_session_files(void)
+{
+	struct tmate_session *s = tmate_session;
+	int dirfd = s->sessions_dir_fd;
+
+	if (dirfd < 0)
+		return;
+
+	if (s->session_token)
+		unlinkat(dirfd, s->session_token, 0);
+	if (s->session_token_ro)
+		unlinkat(dirfd, s->session_token_ro, 0);
+	if (s->session_token_named)
+		unlinkat(dirfd, s->session_token_named, 0);
+}
+
 /* We skip letters that are hard to distinguish when reading */
 static char rand_tmate_token_digits[] = "abcdefghjkmnpqrstuvwxyz"
 				        "ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -210,6 +226,7 @@ void tmate_spawn_daemon(struct tmate_session *session)
 	}
 
 	get_in_jail();
+	atexit(cleanup_session_files);
 
 	event_reinit(session->ev_base);
 
