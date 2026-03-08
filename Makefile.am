@@ -3,12 +3,12 @@ bin_PROGRAMS = tmtv
 if IS_LINUX
 bin_PROGRAMS += tmtv-server
 endif
-CLEANFILES = tmux.1.mdoc tmux.1.man cmd-parse.c
+CLEANFILES = tmtv.1.mdoc tmtv.1.man cmd-parse.c
 
 # Distribution tarball options.
 EXTRA_DIST = \
 	CHANGES README README.ja LICENSE example_tmux.conf \
-	osdep-*.c mdoc2man.awk tmux.1
+	osdep-*.c mdoc2man.awk tmtv.1
 dist_EXTRA_tmtv_SOURCES = compat/*.[ch]
 
 # Preprocessor flags.
@@ -418,15 +418,15 @@ fuzz_input_fuzzer_LDFLAGS = $(FUZZING_LIBS)
 fuzz_input_fuzzer_LDADD = $(LDADD) $(tmtv_OBJECTS)
 endif
 
-# Install tmux.1 in the right format.
+# Install tmtv.1 in the right format.
 install-exec-hook:
 	if test x@MANFORMAT@ = xmdoc; then \
-		sed -e "s|@SYSCONFDIR@|$(sysconfdir)|g" $(srcdir)/tmux.1 \
-			>$(srcdir)/tmux.1.mdoc; \
+		sed -e "s|@SYSCONFDIR@|$(sysconfdir)|g" $(srcdir)/tmtv.1 \
+			>$(srcdir)/tmtv.1.mdoc; \
 	else \
-		sed -e "s|@SYSCONFDIR@|$(sysconfdir)|g" $(srcdir)/tmux.1| \
-			$(AWK) -f $(srcdir)/mdoc2man.awk >$(srcdir)/tmux.1.man; \
+		sed -e "s|@SYSCONFDIR@|$(sysconfdir)|g" $(srcdir)/tmtv.1| \
+			$(AWK) -f $(srcdir)/mdoc2man.awk >$(srcdir)/tmtv.1.man; \
 	fi
 	$(mkdir_p) $(DESTDIR)$(mandir)/man1
-	$(INSTALL_DATA) $(srcdir)/tmux.1.@MANFORMAT@ \
-		$(DESTDIR)$(mandir)/man1/tmux.1
+	$(INSTALL_DATA) $(srcdir)/tmtv.1.@MANFORMAT@ \
+		$(DESTDIR)$(mandir)/man1/tmtv.1

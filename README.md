@@ -97,6 +97,8 @@ tmtv attach -t work
 
 ## Self-hosting
 
+Run your own tmtv relay server instead of using tmtv.se.
+
 ### Building from source
 
 #### Linux (Debian/Ubuntu)
@@ -126,19 +128,118 @@ make -j$(sysctl -n hw.ncpu)
 
 ### Server setup
 
-Generate SSH host keys:
+#### 1. Generate SSH host keys
 
 ```sh
 mkdir -p /etc/tmtv/keys
-ssh-keygen -t rsa -b 3072 -f /etc/tmtv/keys/ssh_host_rsa_key -N ''
 ssh-keygen -t ed25519 -f /etc/tmtv/keys/ssh_host_ed25519_key -N ''
+ssh-keygen -t rsa -b 3072 -f /etc/tmtv/keys/ssh_host_rsa_key -N ''
 ```
 
-Start the server:
+#### 2. Install the binary
 
 ```sh
-tmtv-server -k /etc/tmtv/keys -p 22 -z 4002 -h your.host.com -v
+sudo cp tmtv-server /usr/local/bin/
 ```
+
+#### 3. Create a systemd service
+
+```ini
+# /etc/systemd/system/tmtv-server.service
+[Unit]
+Description=tmtv relay server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/tmtv-server \
+  -k /etc/tmtv/keys \
+  -p 22 \
+  -z 4002 \
+  -h your.host.com \
+  -v
+Restart=always
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now tmtv-server
+```
+
+#### 4. Reverse proxy for web viewer
+
+tmtv-server serves SSE on a local port (`-z 4002`). Put a reverse proxy in front for TLS and routing.
+
+**Caddy** (recommended — automatic TLS):
+
+```
+your.host.com {
+    handle /s/* {
+        root * /var/www/tmtv
+        try_files /viewer.html
+        file_server
+    }
+
+    handle /ws/* {
+        reverse_proxy 127.0.0.1:4002 {
+            flush_interval -1
+        }
+    }
+
+    handle {
+        root * /var/www/tmtv
+        file_server
+    }
+}
+```
+
+**nginx**:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name your.host.com;
+
+    root /var/www/tmtv;
+
+    location /s/ {
+        try_files /viewer.html =404;
+    }
+
+    location ~ ^/ws/ {
+        proxy_pass http://127.0.0.1:4002;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_set_header Connection '';
+        proxy_http_version 1.1;
+        chunked_transfer_encoding off;
+    }
+}
+```
+
+Copy the web assets (from `site/dist/` after building the site, or from the GitHub release):
+
+```sh
+sudo mkdir -p /var/www/tmtv
+sudo cp site/dist/* /var/www/tmtv/
+sudo cp site/dist/viewer/index.html /var/www/tmtv/viewer.html
+```
+
+#### 5. Firewall
+
+Open these ports:
+
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 22 | TCP | tmtv SSH (clients and viewers) |
+| 443 | TCP | HTTPS (web viewer and landing page) |
+
+Port 4002 (SSE) should NOT be exposed — the reverse proxy handles it.
 
 #### Server flags
 
@@ -152,6 +253,15 @@ tmtv-server -k /etc/tmtv/keys -p 22 -z 4002 -h your.host.com -v
 | `-b` | Bind address | all interfaces |
 | `-v` | Increase log verbosity | quiet |
 
+#### SSH security
+
+tmtv-server uses libssh (>= 0.9.5) with modern defaults:
+
+- **Key exchange**: curve25519-sha256, ecdh-sha2-nistp256/384/521
+- **Ciphers**: chacha20-poly1305, aes256-gcm, aes128-gcm, aes256-ctr, aes128-ctr
+- **Host keys**: Ed25519, ECDSA, RSA (SHA-256/SHA-512 signatures only)
+- **No weak algorithms**: no 3DES, no DH group1/group14-sha1, no ssh-rsa with SHA-1
+
 ### Client config for self-hosted server
 
 ```
@@ -162,7 +272,12 @@ set -g tmtv-server-rsa-fingerprint SHA256:...
 set -g tmtv-server-ed25519-fingerprint SHA256:...
 ```
 
-Get fingerprints: `ssh-keygen -lf /etc/tmtv/keys/ssh_host_ed25519_key.pub`
+Get fingerprints:
+
+```sh
+ssh-keygen -lf /etc/tmtv/keys/ssh_host_ed25519_key.pub
+ssh-keygen -lf /etc/tmtv/keys/ssh_host_rsa_key.pub
+```
 
 ### Running tests
 
