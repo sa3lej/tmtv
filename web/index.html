@@ -116,116 +116,268 @@
   }
   #theme-toggle:hover { opacity: 1; color: #aaa; background: rgba(255,255,255,0.05); }
 
-  /* --- TV Theme --- */
+  /* --- TV Theme: 1960s tabletop television --- */
   body.theme-tv {
-    background: #2a1f0e;
+    background: #1a1812;
     background-image:
-      radial-gradient(ellipse at 50% 80%, rgba(80, 60, 20, 0.4) 0%, transparent 60%);
+      radial-gradient(ellipse at 50% 100%, rgba(60, 45, 20, 0.5) 0%, transparent 50%);
   }
 
+  /* Hide default chrome in TV mode */
+  .theme-tv #titlebar { display: none; }
+  .theme-tv #tmux-status { display: none; }
+
+  /* The TV cabinet */
   .theme-tv #terminal-wrap {
-    border-radius: 24px;
-    border: 6px solid #3d3225;
-    box-shadow:
-      0 0 0 2px #1a150e,
-      0 0 0 8px #4a3d2e,
-      0 0 0 10px #2a2218,
-      0 12px 60px rgba(0,0,0,0.8),
-      inset 0 0 30px rgba(0,0,0,0.3);
-    position: relative;
-    margin-top: 60px;
+    border-radius: 14px;
     overflow: visible;
+    box-shadow:
+      0 4px 30px rgba(0,0,0,0.7),
+      0 1px 3px rgba(0,0,0,0.4);
+    flex-direction: row;
+    max-width: none;
+    max-height: none;
+    background: linear-gradient(170deg, #3a3330 0%, #2c2724 40%, #231f1c 100%);
+    border: 3px solid #1a1714;
+    position: relative;
+    margin-bottom: 0;
   }
 
-  /* Antennas */
-  .theme-tv #terminal-wrap::before,
-  .theme-tv #terminal-wrap::after {
-    content: '';
-    position: absolute;
-    bottom: 100%;
-    width: 3px;
-    background: linear-gradient(to top, #5a4d3a, #8a7d6a);
-    border-radius: 2px 2px 0 0;
-    z-index: 5;
-  }
-  .theme-tv #terminal-wrap::before {
-    left: 30%;
-    height: 50px;
-    transform: rotate(-15deg);
-    transform-origin: bottom center;
-  }
-  .theme-tv #terminal-wrap::after {
-    right: 30%;
-    height: 50px;
-    transform: rotate(15deg);
-    transform-origin: bottom center;
-  }
-
-  /* Antenna knobs */
-  .theme-tv .antenna-knob-l,
-  .theme-tv .antenna-knob-r {
-    position: absolute;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 30% 30%, #aaa, #555);
-    z-index: 6;
-    bottom: 100%;
-  }
-  .antenna-knob-l, .antenna-knob-r { display: none; }
-  .theme-tv .antenna-knob-l { display: block; left: calc(30% - 12px); margin-bottom: 42px; }
-  .theme-tv .antenna-knob-r { display: block; right: calc(30% - 12px); margin-bottom: 42px; }
-
-  .theme-tv #titlebar {
-    background: linear-gradient(180deg, #4a3d2e 0%, #3d3225 100%);
-    border-bottom: 1px solid #2a2218;
-    border-radius: 18px 18px 0 0;
-  }
-  .theme-tv .dot.red { background: #994433; box-shadow: none; }
-  .theme-tv .dot.yellow { background: #997744; box-shadow: none; }
-  .theme-tv .dot.green { background: #448844; box-shadow: none; }
-
+  /* Screen in TV mode: chrome bezel, takes left portion */
   .theme-tv #terminal-container {
-    border-radius: 8px;
-    margin: 0 4px;
-    box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
+    background: #080c08;
+    border-radius: 12px;
+    margin: 14px 6px 14px 14px;
+    flex: 0 0 auto;
+    width: 70%;
+    border: 3px solid #b8b0a0;
+    box-shadow:
+      0 0 0 2px #8a8070,
+      inset 0 0 0 1px #706860,
+      inset 0 2px 8px rgba(0,0,0,0.5);
+    position: relative;
+    align-self: stretch;
   }
 
-  /* CRT screen curvature effect */
+  /* CRT glass reflection */
   .theme-tv #terminal-container::before {
     content: '';
     position: absolute;
-    inset: 0;
-    border-radius: 8px;
-    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.3) 100%);
+    top: 5%;
+    left: 10%;
+    width: 35%;
+    height: 30%;
+    background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 60%);
+    border-radius: 50%;
     pointer-events: none;
-    z-index: 4;
+    z-index: 5;
   }
 
-  /* Heavier scanlines for TV */
+  /* Heavier CRT scanlines */
   .theme-tv #terminal-container::after {
     background: repeating-linear-gradient(
       0deg,
       transparent,
       transparent 1px,
-      rgba(0,0,0,0.08) 1px,
-      rgba(0,0,0,0.08) 2px
+      rgba(0,0,0,0.07) 1px,
+      rgba(0,0,0,0.07) 2px
     );
     z-index: 3;
   }
 
-  /* Phosphor glow */
-  .theme-tv #terminal-container {
-    background: #0a0f0a;
+  /* Right control panel: 28% */
+  .theme-tv .tv-controls {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 28%;
+    padding: 14px 14px 14px 8px;
+    align-items: center;
+    gap: 8px;
   }
 
-  .theme-tv #tmux-status {
-    border-radius: 0 0 18px 18px;
-    margin: 0 4px 4px 4px;
+  /* Speaker grille */
+  .theme-tv .tv-speaker {
+    width: 90%;
+    aspect-ratio: 1.2;
+    border-radius: 6px;
+    background: #8b6914;
+    position: relative;
+    overflow: hidden;
+    border: 2px solid #6a5010;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .theme-tv .tv-speaker::after {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    background:
+      radial-gradient(circle, #5a4010 1px, transparent 1px);
+    background-size: 6px 6px;
   }
 
-  .theme-tv #theme-toggle { color: #8a7d6a; }
-  .theme-tv #theme-toggle:hover { color: #c0b090; }
+  /* Channel dials */
+  .theme-tv .tv-dial {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #e0d8cc, #8a8070 60%, #5a5248 100%);
+    border: 2px solid #4a4238;
+    box-shadow:
+      0 2px 6px rgba(0,0,0,0.4),
+      inset 0 1px 2px rgba(255,255,255,0.15);
+    position: relative;
+    cursor: default;
+  }
+  .theme-tv .tv-dial::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 3px;
+    height: 14px;
+    background: #333;
+    border-radius: 1px;
+  }
+  .theme-tv .tv-dial-label {
+    font-size: 7px;
+    color: #a09888;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-top: -2px;
+  }
+
+  /* Small knobs row */
+  .theme-tv .tv-knobs {
+    display: flex;
+    gap: 8px;
+    margin-top: auto;
+    padding-top: 8px;
+  }
+  .theme-tv .tv-knob {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #d8d0c0, #7a7268);
+    border: 1px solid #4a4238;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .theme-tv .tv-knob-label {
+    font-size: 5px;
+    color: #908878;
+    text-transform: uppercase;
+    text-align: center;
+    margin-top: 2px;
+    letter-spacing: 0.3px;
+  }
+
+  /* V-shaped rabbit ear antennas from central mount */
+  .theme-tv .tv-antenna-mount {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 20px;
+    height: 12px;
+    background: radial-gradient(ellipse at center, #555 0%, #333 100%);
+    border-radius: 50% 50% 30% 30%;
+    z-index: 6;
+    border: 1px solid #222;
+  }
+  .theme-tv .tv-antenna-l,
+  .theme-tv .tv-antenna-r {
+    position: absolute;
+    bottom: 100%;
+    width: 2px;
+    background: linear-gradient(to top, #888, #ccc 80%, #eee);
+    z-index: 5;
+    border-radius: 1px;
+  }
+  .theme-tv .tv-antenna-l {
+    left: 50%;
+    margin-left: -18px;
+    height: 80px;
+    transform: rotate(-25deg);
+    transform-origin: bottom center;
+  }
+  .theme-tv .tv-antenna-r {
+    left: 50%;
+    margin-left: 16px;
+    height: 80px;
+    transform: rotate(25deg);
+    transform-origin: bottom center;
+  }
+  /* Antenna tips */
+  .theme-tv .tv-antenna-l::after,
+  .theme-tv .tv-antenna-r::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: -2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #eee, #999);
+  }
+
+  /* Four splayed wooden legs */
+  .theme-tv .tv-legs {
+    position: absolute;
+    bottom: -48px;
+    left: 0;
+    right: 0;
+    height: 48px;
+    pointer-events: none;
+  }
+  .theme-tv .tv-leg {
+    position: absolute;
+    width: 6px;
+    height: 48px;
+    background: linear-gradient(90deg, #7a5c3a, #a07848, #7a5c3a);
+    border-radius: 2px;
+  }
+  /* Metal foot tips */
+  .theme-tv .tv-leg::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: -1px;
+    width: 8px;
+    height: 6px;
+    background: linear-gradient(180deg, #b0a090, #888);
+    border-radius: 0 0 3px 3px;
+  }
+  .theme-tv .tv-leg:nth-child(1) { left: 8%;  transform: rotate(-10deg); }
+  .theme-tv .tv-leg:nth-child(2) { right: 8%; transform: rotate(10deg); }
+  .theme-tv .tv-leg:nth-child(3) { left: 14%; transform: rotate(-5deg); z-index: -1; opacity: 0.7; }
+  .theme-tv .tv-leg:nth-child(4) { right: 14%; transform: rotate(5deg); z-index: -1; opacity: 0.7; }
+
+  /* Theme toggle in TV mode — placed bottom right of cabinet */
+  .theme-tv #theme-toggle {
+    position: fixed;
+    bottom: 12px;
+    right: 12px;
+    color: #5a5248;
+    z-index: 20;
+  }
+  .theme-tv #theme-toggle:hover { color: #a09080; }
+
+  /* Hide TV-only elements in default theme */
+  .tv-controls, .tv-speaker,
+  .tv-dial, .tv-dial-label, .tv-knobs, .tv-knob, .tv-knob-label,
+  .tv-antenna-mount, .tv-antenna-l, .tv-antenna-r, .tv-legs, .tv-leg { display: none; }
+  .theme-tv .tv-controls { display: flex; }
+  .theme-tv .tv-speaker { display: block; }
+  .theme-tv .tv-dial { display: flex; }
+  .theme-tv .tv-dial-label { display: block; }
+  .theme-tv .tv-knobs { display: flex; }
+  .theme-tv .tv-knob { display: block; }
+  .theme-tv .tv-knob-label { display: block; }
+  .theme-tv .tv-antenna-mount,
+  .theme-tv .tv-antenna-l,
+  .theme-tv .tv-antenna-r { display: block; }
+  .theme-tv .tv-legs { display: block; }
+  .theme-tv .tv-leg { display: block; }
 
   #terminal-container {
     background: #0d0d1a;
@@ -280,8 +432,12 @@
 <body>
 <div id="status">Connecting...</div>
 <div id="terminal-wrap">
-  <div class="antenna-knob-l"></div>
-  <div class="antenna-knob-r"></div>
+  <!-- TV antennas (visible only in TV theme) -->
+  <div class="tv-antenna-mount"></div>
+  <div class="tv-antenna-l"></div>
+  <div class="tv-antenna-r"></div>
+
+  <!-- Default theme: titlebar -->
   <div id="titlebar">
     <div class="dot red"></div>
     <div class="dot yellow"></div>
@@ -292,10 +448,45 @@
     </span>
     <button id="theme-toggle" title="Toggle theme" aria-label="Toggle theme">&#9781;</button>
   </div>
+
+  <!-- Terminal (always visible, reparented visually by CSS) -->
   <div id="terminal-container"></div>
+
+  <!-- TV theme: right-side control panel -->
+  <div class="tv-controls">
+    <div class="tv-speaker"></div>
+    <div class="tv-dial-label">vhf</div>
+    <div class="tv-dial" style="transform: rotate(30deg);"></div>
+    <div class="tv-dial-label">uhf</div>
+    <div class="tv-dial" style="transform: rotate(-15deg);"></div>
+    <div class="tv-knobs">
+      <div>
+        <div class="tv-knob"></div>
+        <div class="tv-knob-label">vol</div>
+      </div>
+      <div>
+        <div class="tv-knob"></div>
+        <div class="tv-knob-label">tone</div>
+      </div>
+      <div>
+        <div class="tv-knob"></div>
+        <div class="tv-knob-label">brt</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Default theme: tmux status bar (hidden in TV mode) -->
   <div id="tmux-status">
     <span id="tmux-status-left"></span>
     <span id="tmux-status-right"></span>
+  </div>
+
+  <!-- TV legs -->
+  <div class="tv-legs">
+    <div class="tv-leg"></div>
+    <div class="tv-leg"></div>
+    <div class="tv-leg"></div>
+    <div class="tv-leg"></div>
   </div>
 </div>
 
@@ -389,9 +580,15 @@
   /* Compute optimal font size to fill the viewport */
   function computeFontSize() {
     measureCellRatio();
-    var tvExtra = currentTheme === 'tv' ? 80 : 0; /* antenna + bezel space */
-    var availW = window.innerWidth - 32 - (currentTheme === 'tv' ? 20 : 0);
-    var availH = window.innerHeight - 32 - 38 - 20 - tvExtra; /* margins, titlebar, status */
+    var availW, availH;
+    if (currentTheme === 'tv') {
+      /* TV: screen is 72% of cabinet width, with padding+bezel ~48px, antenna+legs ~140px */
+      availW = (window.innerWidth - 80) * 0.72 - 48;
+      availH = window.innerHeight - 140 - 48;
+    } else {
+      availW = window.innerWidth - 32;
+      availH = window.innerHeight - 32 - 38 - 20; /* margins, titlebar, status */
+    }
     var maxFromW = availW / (serverCols * cellRatioW);
     var maxFromH = availH / (contentRows * cellRatioH);
     fontSize = Math.max(6, Math.min(Math.floor(Math.min(maxFromW, maxFromH)), 22));
@@ -552,15 +749,28 @@
     computeFontSize();
     var contentW = Math.ceil(serverCols * cellW);
     var contentH = Math.ceil(contentRows * cellH);
-    var totalH = 38 + contentH + 20;
 
     var wrap = document.getElementById('terminal-wrap');
-    var maxW = window.innerWidth - 32;
-    var maxH = window.innerHeight - 32;
 
-    wrap.style.width = Math.min(contentW, maxW) + 'px';
-    wrap.style.height = Math.min(totalH, maxH) + 'px';
-    container.style.height = contentH + 'px';
+    if (currentTheme === 'tv') {
+      /* TV: cabinet width = screen / 0.72, no titlebar/status */
+      var cabinetW = Math.ceil(contentW / 0.72) + 48;
+      var cabinetH = contentH + 48; /* padding + bezel borders */
+      var maxW = window.innerWidth - 48;
+      var maxH = window.innerHeight - 140; /* room for antennas + legs */
+
+      wrap.style.width = Math.min(cabinetW, maxW) + 'px';
+      wrap.style.height = Math.min(cabinetH, maxH) + 'px';
+      container.style.height = contentH + 'px';
+    } else {
+      var totalH = 38 + contentH + 20;
+      var maxW = window.innerWidth - 32;
+      var maxH = window.innerHeight - 32;
+
+      wrap.style.width = Math.min(contentW, maxW) + 'px';
+      wrap.style.height = Math.min(totalH, maxH) + 'px';
+      container.style.height = contentH + 'px';
+    }
   }
 
   window.addEventListener('resize', function() { sizeToServer(); });
