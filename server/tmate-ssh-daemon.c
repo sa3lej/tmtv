@@ -1,9 +1,9 @@
+#include <sys/stat.h>
 #include "tmate.h"
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <sys/stat.h>
 
 struct tmate_session _tmate_session, *tmate_session = &_tmate_session;
 
