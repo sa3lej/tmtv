@@ -154,7 +154,6 @@ After=network.target
 ExecStart=/usr/local/bin/tmtv-server \
   -k /etc/tmtv/keys \
   -p 22 \
-  -z 4002 \
   -h your.host.com \
   -v
 Restart=always
@@ -171,9 +170,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now tmtv-server
 ```
 
-#### 4. Reverse proxy for web viewer
+That's it — SSH sharing works now. Clients connect via `ssh TOKEN@your.host.com`.
 
-tmtv-server serves SSE on a local port (`-z 4002`). Put a reverse proxy in front for TLS and routing.
+#### 4. Web viewer (optional)
+
+Web sharing is off by default. If you want browser-based viewing, add `-z 4002` to the server flags to enable SSE streaming on a local port, then put a reverse proxy in front for TLS and routing.
 
 **Caddy** (recommended — automatic TLS):
 
