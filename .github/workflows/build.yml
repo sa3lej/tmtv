@@ -278,6 +278,69 @@ jobs:
           name: linux-${{ matrix.arch }}
           path: dist/
 
+  deploy-web:
+    name: Deploy web assets
+    needs: [build-linux]
+    if: github.ref_name == 'main' || github.ref_name == 'staging'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build site
+        run: |
+          cd site
+          npm ci
+          npm run build
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.DEPLOY_SSH_PORT }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload web assets
+        run: |
+          SSH_OPTS="-i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_SSH_PORT }}"
+          HOST="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
+
+          scp $SSH_OPTS site/dist/index.html ${HOST}:staging/
+          scp $SSH_OPTS site/dist/viewer.js ${HOST}:staging/
+          scp $SSH_OPTS site/dist/viewer/index.html ${HOST}:staging/viewer.html
+          scp $SSH_OPTS site/dist/install.sh ${HOST}:staging/
+          scp $SSH_OPTS site/dist/*.png site/dist/*.gif ${HOST}:staging/ 2>/dev/null || true
+          scp $SSH_OPTS site/dist/favicon.* ${HOST}:staging/ 2>/dev/null || true
+
+          ssh $SSH_OPTS ${HOST} 'sudo /usr/local/bin/tmtv-deploy-web'
+
+  deploy-server:
+    name: Deploy server binary
+    needs: [build-linux]
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-amd64
+          path: dist
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.DEPLOY_SSH_PORT }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload and deploy binaries
+        run: |
+          SSH_OPTS="-i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_SSH_PORT }}"
+          HOST="${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}"
+
+          scp $SSH_OPTS dist/tmtv-server-linux-amd64 ${HOST}:staging/tmtv-server
+          scp $SSH_OPTS dist/tmtv-linux-amd64 ${HOST}:staging/tmtv
+
+          ssh $SSH_OPTS ${HOST} 'sudo /usr/local/bin/tmtv-deploy-server'
+
   release:
     name: Create Release
     needs: [build-linux, build-linux-cross, build-macos-arm64, build-macos-amd64]
