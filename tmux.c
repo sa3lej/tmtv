@@ -524,13 +524,13 @@ main(int argc, char **argv)
 
 	/* Apply CLI overrides for tmtv server settings. */
 	if (cli_server_host != NULL)
-		options_set_string(global_options, "tmate-server-host", 0,
+		options_set_string(global_options, "tmtv-server-host", 0,
 		    "%s", cli_server_host);
 	if (cli_server_port != 0)
-		options_set_number(global_options, "tmate-server-port",
+		options_set_number(global_options, "tmtv-server-port",
 		    cli_server_port);
 	if (cli_api_key != NULL)
-		options_set_string(global_options, "tmate-api-key", 0,
+		options_set_string(global_options, "tmtv-api-key", 0,
 		    "%s", cli_api_key);
 
 	/*

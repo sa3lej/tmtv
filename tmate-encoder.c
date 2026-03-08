@@ -255,7 +255,7 @@ void tmate_set_val(const char *name, const char *value)
 {
 	char *buf;
 	xasprintf(&buf, "%s=%s", name, value);
-	tmate_exec_cmd_args(3, (const char *[]){"set-option", "tmate-set", buf});
+	tmate_exec_cmd_args(3, (const char *[]){"set-option", "tmtv-set", buf});
 	free(buf);
 }
 

@@ -228,9 +228,9 @@ static void handle_session_name_options(const char *name, __unused const char *v
 	if (tmate_has_websocket())
 		return;
 
-	if (!strcmp(name, "tmate-api-key") ||
-	    !strcmp(name, "tmate-session-name") ||
-	    !strcmp(name, "tmate-session-name-ro")) {
+	if (!strcmp(name, "tmtv-api-key") ||
+	    !strcmp(name, "tmtv-session-name") ||
+	    !strcmp(name, "tmtv-session-name-ro")) {
 		static bool warned;
 		if (!warned) {
 			tmate_info("Named sessions are not supported (no websocket server)");
