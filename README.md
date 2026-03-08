@@ -233,6 +233,13 @@ The web viewer uses xterm.js with WebGL rendering. Static files are in `web/`:
 
 The viewer connects to the SSE endpoint at `/ws?token=SESSION_TOKEN` and renders the terminal stream in the browser. Late-joining viewers receive a screen dump of the current terminal state.
 
+### Viewer features
+
+- **View-only badge**: Yellow "VIEW ONLY" indicator so viewers know the session is read-only
+- **Session metadata**: Titlebar shows pane count and session duration (live timer)
+- **Auto-reconnect**: If the SSE connection drops, the viewer retries with exponential backoff (up to 5 attempts) before showing "Connection lost"
+- **Session ended**: Clean distinction between connection loss and session termination
+
 ## Architecture
 
 - **tmtv** (client): tmux with tmate hooks that forward PTY data over SSH to the server
