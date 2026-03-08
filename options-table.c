@@ -1026,7 +1026,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "tmtv-server-host",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
-	  .default_str = "",
+	  .default_str = "tmtv.se",
 	  .text = "tmtv server hostname. Empty to run in local-only mode."
 	},
 
@@ -1035,14 +1035,14 @@ const struct options_table_entry options_table[] = {
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .minimum = 1,
 	  .maximum = 65535,
-	  .default_num = 2222,
+	  .default_num = 22,
 	  .text = "tmtv server SSH port."
 	},
 
 	{ .name = "tmtv-server-rsa-fingerprint",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
-	  .default_str = "",
+	  .default_str = "SHA256:p9fAu349dhOFx7fBbzEGKPq4yonPWMX0VQ48DwfRfEA",
 	  .text = "tmtv server RSA host key fingerprint."
 	},
 
@@ -1056,7 +1056,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "tmtv-server-ed25519-fingerprint",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
-	  .default_str = "",
+	  .default_str = "SHA256:8EeNAyFHdQUfp3escz3xfas8v+tHS/34HRIQHpP6Gzg",
 	  .text = "tmtv server Ed25519 host key fingerprint."
 	},
 
