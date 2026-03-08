@@ -61,27 +61,27 @@ fi
 
 # Test 5: tmate options are available
 "$TMTV" -S "$SOCKET" new-session -d -s hooktest 2>/dev/null
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g tmate-server-host 2>/dev/null || echo "MISSING")
-if echo "$OUTPUT" | grep -q "tmate-server-host"; then
-    pass "tmate-server-host option exists"
+OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g tmtv-server-host 2>/dev/null || echo "MISSING")
+if echo "$OUTPUT" | grep -q "tmtv-server-host"; then
+    pass "tmtv-server-host option exists"
 else
-    fail "tmate-server-host option exists" "option not found: $OUTPUT"
+    fail "tmtv-server-host option exists" "option not found: $OUTPUT"
 fi
 
-# Test 6: tmate-server-port option
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g tmate-server-port 2>/dev/null || echo "MISSING")
-if echo "$OUTPUT" | grep -q "tmate-server-port"; then
-    pass "tmate-server-port option exists"
+# Test 6: tmtv-server-port option
+OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g tmtv-server-port 2>/dev/null || echo "MISSING")
+if echo "$OUTPUT" | grep -q "tmtv-server-port"; then
+    pass "tmtv-server-port option exists"
 else
-    fail "tmate-server-port option exists" "option not found: $OUTPUT"
+    fail "tmtv-server-port option exists" "option not found: $OUTPUT"
 fi
 
-# Test 7: tmate-identity option (session scope)
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option tmate-identity 2>/dev/null || echo "MISSING")
-if echo "$OUTPUT" | grep -q "tmate-identity"; then
-    pass "tmate-identity option exists"
+# Test 7: tmtv-identity option (session scope)
+OUTPUT=$("$TMTV" -S "$SOCKET" show-option tmtv-identity 2>/dev/null || echo "MISSING")
+if echo "$OUTPUT" | grep -q "tmtv-identity"; then
+    pass "tmtv-identity option exists"
 else
-    fail "tmate-identity option exists" "option not found: $OUTPUT"
+    fail "tmtv-identity option exists" "option not found: $OUTPUT"
 fi
 
 # Test 8: Core tmux still works with hooks (regression)
