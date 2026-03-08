@@ -5,6 +5,7 @@ static void handle_notify(__unused struct tmate_session *session,
 			  struct tmate_unpacker *uk)
 {
 	char *msg = unpack_string(uk);
+	cfg_add_cause("[tmtv] %s", msg);
 	tmate_status_message("%s", msg);
 	free(msg);
 }

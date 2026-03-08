@@ -108,6 +108,27 @@ main() {
     sudo mv "${TMPDIR}/${ASSET}" "${INSTALL_DIR}/${BINARY}"
   fi
 
+  # create tmux symlink for compatibility (tmux configs work with tmtv)
+  LINK="${INSTALL_DIR}/tmux"
+  if [ ! -e "$LINK" ]; then
+    say "Creating tmux -> tmtv symlink for compatibility..."
+    if [ -w "$INSTALL_DIR" ]; then
+      ln -s "${INSTALL_DIR}/${BINARY}" "$LINK"
+    else
+      sudo ln -s "${INSTALL_DIR}/${BINARY}" "$LINK"
+    fi
+  elif [ -L "$LINK" ]; then
+    # update existing symlink if it points elsewhere
+    say "Updating tmux -> tmtv symlink..."
+    if [ -w "$INSTALL_DIR" ]; then
+      ln -sf "${INSTALL_DIR}/${BINARY}" "$LINK"
+    else
+      sudo ln -sf "${INSTALL_DIR}/${BINARY}" "$LINK"
+    fi
+  else
+    say "Note: ${LINK} already exists (not a symlink), skipping tmux compatibility link"
+  fi
+
   say "Done! Run 'tmtv' to start a session."
   printf '\n'
 }
