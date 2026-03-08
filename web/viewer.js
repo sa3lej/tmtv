@@ -1,0 +1,422 @@
+/*
+ * Copyright (c) 2026 Lars-Erik Jonsson <l@jonsson.es>
+ * ISC license — see LICENSE for details.
+ *
+ * tmtv web viewer — SSE-based terminal viewer with multi-pane support.
+ */
+(function() {
+  'use strict';
+
+  var _dec = new TextDecoder();
+  function toStr(v) {
+    if (v instanceof Uint8Array) return _dec.decode(v);
+    if (v && v.buffer instanceof ArrayBuffer) return _dec.decode(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+    if (Array.isArray(v)) return String.fromCharCode.apply(null, v);
+    return String(v);
+  }
+
+  var CTL_HEADER         = 0;
+  var CTL_DEAMON_OUT_MSG = 1;
+  var OUT_HEADER      = 0;
+  var OUT_SYNC_LAYOUT = 1;
+  var OUT_PTY_DATA    = 2;
+  var OUT_STATUS      = 5;
+  var OUT_FIN         = 8;
+
+  var FONT = '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace';
+  var THEME = {
+    background: '#0d0d1a',
+    foreground: '#e0e0e0',
+    cursor: '#528bff',
+    cursorAccent: '#0d0d1a',
+    selectionBackground: 'rgba(82, 139, 255, 0.3)',
+    black: '#1a1a2e',
+    red: '#ff6b6b',
+    green: '#3ddc84',
+    yellow: '#ffd93d',
+    blue: '#6c9efc',
+    magenta: '#c084fc',
+    cyan: '#67e8f9',
+    white: '#e0e0e0',
+    brightBlack: '#4a4a5e',
+    brightRed: '#ff8a8a',
+    brightGreen: '#6ee7a0',
+    brightYellow: '#ffe066',
+    brightBlue: '#93b8fc',
+    brightMagenta: '#d4a5fc',
+    brightCyan: '#8ef0fc',
+    brightWhite: '#ffffff'
+  };
+
+  var serverCols = window.serverCols = 80;
+  var serverRows = window.serverRows = 24;
+  var contentRows = 24;
+  var panes = {};
+  var pendingData = {};
+  var cellW = 0, cellH = 0;
+  var fontSize = 14;
+  var cellRatioW = 0, cellRatioH = 0;
+  var container = document.getElementById('terminal-container');
+
+  function measureCellRatio() {
+    if (cellRatioW > 0) return;
+    var tmp = document.createElement('div');
+    tmp.style.position = 'absolute';
+    tmp.style.visibility = 'hidden';
+    tmp.style.left = '-9999px';
+    document.body.appendChild(tmp);
+    var t = new Terminal({
+      fontFamily: FONT, fontSize: 14, lineHeight: 1.15,
+      cols: 10, rows: 2, allowProposedApi: true
+    });
+    t.open(tmp);
+    try {
+      var dims = t._core._renderService.dimensions;
+      if (dims && dims.css && dims.css.cell) {
+        cellRatioW = dims.css.cell.width / 14;
+        cellRatioH = dims.css.cell.height / 14;
+      }
+    } catch (e) {}
+    t.dispose();
+    document.body.removeChild(tmp);
+    if (!cellRatioW || !cellRatioH) { cellRatioW = 0.6; cellRatioH = 1.15; }
+  }
+
+  var params = new URLSearchParams(location.search);
+  var currentTheme = params.get('theme') || '';
+  if (currentTheme) document.body.className = 'theme-' + currentTheme;
+
+  function computeFontSize() {
+    measureCellRatio();
+    var availW, availH;
+    if (currentTheme === 'tv') {
+      availW = (window.innerWidth - 80) * 0.72 - 48;
+      availH = window.innerHeight - 140 - 48;
+    } else {
+      availW = window.innerWidth - 32;
+      availH = window.innerHeight - 32 - 38 - 20;
+    }
+    var maxFromW = availW / (serverCols * cellRatioW);
+    var maxFromH = availH / (contentRows * cellRatioH);
+    fontSize = Math.max(6, Math.min(Math.floor(Math.min(maxFromW, maxFromH)), 22));
+    cellW = fontSize * cellRatioW;
+    cellH = fontSize * cellRatioH;
+  }
+
+  function createPaneTerminal(sx, sy) {
+    return new Terminal({
+      fontFamily: FONT, fontSize: fontSize, lineHeight: 1.15,
+      theme: THEME, cols: sx, rows: sy, scrollback: 0,
+      cursorBlink: false, cursorStyle: 'block',
+      disableStdin: true, allowProposedApi: true
+    });
+  }
+
+  function updatePaneLayout(windows, activeWinIdx) {
+    if (!Array.isArray(windows)) return;
+    var paneList = null;
+    var activePaneId = -1;
+    for (var i = 0; i < windows.length; i++) {
+      var win = windows[i];
+      if (!Array.isArray(win)) continue;
+      if (win[0] === activeWinIdx) {
+        paneList = win[2];
+        activePaneId = win[3];
+        break;
+      }
+    }
+    if (!paneList || !Array.isArray(paneList)) return;
+
+    var maxRow = 0;
+    for (var i = 0; i < paneList.length; i++) {
+      var p = paneList[i];
+      if (Array.isArray(p) && p.length >= 5) {
+        var bottom = p[4] + p[2];
+        if (bottom > maxRow) maxRow = bottom;
+      }
+    }
+    if (maxRow > 0) contentRows = maxRow;
+    computeFontSize();
+
+    var seen = {};
+    var oldBorders = container.querySelectorAll('.pane-border');
+    for (var i = 0; i < oldBorders.length; i++) oldBorders[i].remove();
+
+    for (var i = 0; i < paneList.length; i++) {
+      var p = paneList[i];
+      if (!Array.isArray(p) || p.length < 5) continue;
+      var id = p[0], sx = p[1], sy = p[2], xoff = p[3], yoff = p[4];
+      seen[id] = true;
+
+      var left = Math.round(xoff * cellW);
+      var top = Math.round(yoff * cellH);
+      var width = Math.round(sx * cellW);
+      var height = Math.round(sy * cellH);
+
+      if (panes[id]) {
+        var pane = panes[id];
+        pane.el.style.left = left + 'px';
+        pane.el.style.top = top + 'px';
+        pane.el.style.width = width + 'px';
+        pane.el.style.height = height + 'px';
+        if (pane.term.options.fontSize !== fontSize) pane.term.options.fontSize = fontSize;
+        if (pane.term.cols !== sx || pane.term.rows !== sy) pane.term.resize(sx, sy);
+        pane.sx = sx; pane.sy = sy;
+      } else {
+        var el = document.createElement('div');
+        el.style.position = 'absolute';
+        el.style.left = left + 'px';
+        el.style.top = top + 'px';
+        el.style.width = width + 'px';
+        el.style.height = height + 'px';
+        el.style.overflow = 'hidden';
+        container.appendChild(el);
+        var t = createPaneTerminal(sx, sy);
+        t.open(el);
+        panes[id] = { term: t, el: el, sx: sx, sy: sy };
+        if (pendingData[id]) {
+          for (var j = 0; j < pendingData[id].length; j++) {
+            var d = pendingData[id][j];
+            t.write(d instanceof Uint8Array ? d : String(d));
+          }
+          delete pendingData[id];
+        }
+      }
+      panes[id].term.options.cursorBlink = (id === activePaneId);
+
+      if (xoff > 0) {
+        var border = document.createElement('div');
+        border.className = 'pane-border';
+        border.style.left = (left - 1) + 'px';
+        border.style.top = top + 'px';
+        border.style.width = '1px';
+        border.style.height = height + 'px';
+        container.appendChild(border);
+      }
+      if (yoff > 0) {
+        var border = document.createElement('div');
+        border.className = 'pane-border';
+        border.style.left = left + 'px';
+        border.style.top = (top - 1) + 'px';
+        border.style.width = width + 'px';
+        border.style.height = '1px';
+        container.appendChild(border);
+      }
+    }
+
+    for (var id in panes) {
+      if (!seen[id]) {
+        panes[id].term.dispose();
+        panes[id].el.remove();
+        delete panes[id];
+      }
+    }
+    paneCount = Object.keys(panes).length;
+    updateMeta();
+  }
+
+  function sizeToServer() {
+    computeFontSize();
+    var contentW = Math.ceil(serverCols * cellW);
+    var contentH = Math.ceil(contentRows * cellH);
+    var wrap = document.getElementById('terminal-wrap');
+
+    if (currentTheme === 'tv') {
+      var cabinetW = Math.ceil(contentW / 0.72) + 48;
+      var cabinetH = contentH + 48;
+      var maxW = window.innerWidth - 48;
+      var maxH = window.innerHeight - 140;
+      wrap.style.width = Math.min(cabinetW, maxW) + 'px';
+      wrap.style.height = Math.min(cabinetH, maxH) + 'px';
+      container.style.height = contentH + 'px';
+    } else {
+      var totalH = 38 + contentH + 20;
+      var maxW = window.innerWidth - 32;
+      var maxH = window.innerHeight - 32;
+      wrap.style.width = Math.min(contentW, maxW) + 'px';
+      wrap.style.height = Math.min(totalH, maxH) + 'px';
+      container.style.height = contentH + 'px';
+    }
+  }
+
+  window.addEventListener('resize', function() { sizeToServer(); });
+
+  var statusEl = document.getElementById('status');
+  var fadeTimer = null;
+
+  function setStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = 'status ' + (cls || '');
+    if (fadeTimer) clearTimeout(fadeTimer);
+    if (cls === 'connected') {
+      fadeTimer = setTimeout(function() { statusEl.classList.add('fade'); }, 2000);
+    }
+  }
+
+  function updateWindowList(windows, activeIdx) {
+    if (!Array.isArray(windows)) return;
+    var parts = [];
+    for (var i = 0; i < windows.length; i++) {
+      var win = windows[i];
+      if (!Array.isArray(win) || win.length < 2) continue;
+      var idx = win[0];
+      var name = toStr(win[1]);
+      var marker = (idx === activeIdx) ? '*' : '-';
+      parts.push(idx + ':' + name + marker);
+    }
+    var leftEl = document.getElementById('tmux-status-left');
+    if (leftEl && parts.length > 0) leftEl.textContent = '[0] ' + parts.join(' ');
+  }
+
+  var pathMatch = location.pathname.match(/^\/s\/([^\/]+)/);
+  var sessionToken = pathMatch ? pathMatch[1] : null;
+
+  var ssePort = params.get('port');
+  var sseUrl = ssePort
+    ? 'http://' + (location.hostname || 'localhost') + ':' + ssePort + '/' + (sessionToken || '')
+    : '/ws/' + (sessionToken || '');
+
+  var sessionStart = null;
+  var paneCount = 0;
+  var durationTimer = null;
+
+  if (sessionToken) {
+    document.getElementById('titlebar-label').textContent = 'tmtv \u2014 ' + sessionToken.substring(0, 8);
+  }
+
+  function updateMeta() {
+    var parts = [];
+    if (paneCount > 0) parts.push(paneCount + (paneCount === 1 ? ' pane' : ' panes'));
+    if (sessionStart) {
+      var elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+      var m = Math.floor(elapsed / 60);
+      var s = elapsed % 60;
+      parts.push((m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s);
+    }
+    var metaEl = document.getElementById('titlebar-meta');
+    if (metaEl) metaEl.textContent = parts.length ? parts.join(' \u00b7 ') : '';
+  }
+
+  var reconnectAttempts = 0;
+  var maxReconnect = 5;
+  var sessionEnded = false;
+  var everConnected = false;
+
+  function showErrorOverlay(msg) {
+    var overlay = document.getElementById('error-overlay');
+    var msgEl = document.getElementById('error-msg');
+    if (overlay) overlay.classList.remove('hidden');
+    if (msgEl && msg) msgEl.textContent = msg;
+    var wrap = document.getElementById('terminal-wrap');
+    if (wrap) wrap.style.display = 'none';
+  }
+
+  function connect() {
+    setStatus('Connecting...');
+    var es = new EventSource(sseUrl);
+
+    es.onopen = function() {
+      setStatus('Connected', 'connected');
+      reconnectAttempts = 0;
+      everConnected = true;
+      if (!sessionStart) {
+        sessionStart = Date.now();
+        durationTimer = setInterval(updateMeta, 1000);
+      }
+    };
+
+    es.onmessage = function(evt) {
+      var binary = atob(evt.data);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      try {
+        var iter = MessagePack.decodeMulti(bytes);
+        var result = iter.next();
+        while (!result.done) {
+          handleMessage(result.value);
+          result = iter.next();
+        }
+      } catch (e) {}
+    };
+
+    es.onerror = function() {
+      es.close();
+      if (sessionEnded) {
+        setStatus('Session ended', 'error');
+        if (durationTimer) clearInterval(durationTimer);
+        showErrorOverlay('This session has ended.');
+        return;
+      }
+      if (reconnectAttempts < maxReconnect) {
+        reconnectAttempts++;
+        var delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 8000);
+        setStatus('Reconnecting (' + reconnectAttempts + '/' + maxReconnect + ')...', 'error');
+        setTimeout(connect, delay);
+      } else {
+        setStatus('Connection lost', 'error');
+        if (durationTimer) clearInterval(durationTimer);
+        if (!everConnected) {
+          showErrorOverlay('This session may have ended or the token is invalid.');
+        } else {
+          showErrorOverlay('Connection lost. The session may no longer be available.');
+        }
+      }
+    };
+  }
+
+  function handleMessage(msg) {
+    if (!Array.isArray(msg) || msg.length < 2) return;
+    if (msg[0] === CTL_DEAMON_OUT_MSG) handleDaemonMsg(msg[1]);
+  }
+
+  function handleDaemonMsg(inner) {
+    if (!Array.isArray(inner) || inner.length < 1) return;
+    var type = inner[0];
+
+    switch (type) {
+      case OUT_PTY_DATA:
+        if (inner.length >= 3) {
+          var paneId = inner[1];
+          var ptyData = inner[2];
+          var pane = panes[paneId];
+          if (pane) {
+            pane.term.write(ptyData instanceof Uint8Array ? ptyData : String(ptyData));
+          } else {
+            if (!pendingData[paneId]) pendingData[paneId] = [];
+            pendingData[paneId].push(ptyData);
+          }
+        }
+        break;
+      case OUT_SYNC_LAYOUT:
+        if (inner.length >= 3) {
+          var sx = inner[1], sy = inner[2];
+          if (sx > 0 && sy > 0) {
+            serverCols = sx; serverRows = sy;
+            window.serverCols = sx; window.serverRows = sy;
+          }
+          if (inner.length >= 5) {
+            updateWindowList(inner[3], inner[4]);
+            updatePaneLayout(inner[3], inner[4]);
+          }
+          sizeToServer();
+        }
+        break;
+      case OUT_STATUS:
+        if (inner.length >= 3) {
+          var leftEl = document.getElementById('tmux-status-left');
+          var rightEl = document.getElementById('tmux-status-right');
+          if (leftEl && inner[1]) leftEl.textContent = toStr(inner[1]);
+          if (rightEl && inner[2]) rightEl.textContent = toStr(inner[2]);
+        }
+        break;
+      case OUT_FIN:
+        sessionEnded = true;
+        setStatus('Session ended', 'error');
+        if (durationTimer) clearInterval(durationTimer);
+        showErrorOverlay('This session has ended.');
+        break;
+    }
+  }
+
+  connect();
+})();

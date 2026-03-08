@@ -222,12 +222,11 @@ server {
 }
 ```
 
-Copy the web assets (from `site/dist/` after building the site, or from the GitHub release):
+Copy the web viewer from the `web/` directory:
 
 ```sh
 sudo mkdir -p /var/www/tmtv
-sudo cp site/dist/* /var/www/tmtv/
-sudo cp site/dist/viewer/index.html /var/www/tmtv/viewer.html
+sudo cp web/viewer.html web/viewer.js /var/www/tmtv/
 ```
 
 #### 5. Firewall
