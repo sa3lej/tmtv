@@ -6,6 +6,28 @@
 
 char *tmate_left_status, *tmate_right_status;
 
+void tmate_send_web_url(struct tmate_session *session)
+{
+	if (!tmate_has_websocket())
+		return;
+
+	char *web_url;
+	int port = tmate_settings->web_port > 0 ?
+		   tmate_settings->web_port :
+		   tmate_settings->websocket_port;
+	if (port == 80)
+		xasprintf(&web_url, "http://%s/s/%s",
+			  tmate_settings->tmate_host,
+			  session->session_token);
+	else
+		xasprintf(&web_url, "http://%s:%d/s/%s",
+			  tmate_settings->tmate_host,
+			  port, session->session_token);
+	tmate_notify("Web sharing enabled: %s", web_url);
+	tmate_set_env("tmate_web", web_url);
+	free(web_url);
+}
+
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_1 "Server requires authorized_keys but none are given."
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_2 "Use '-a FILENAME' to specify an authorized_keys file."
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_3 "Press <Ctrl-c><Ctrl-d> to exit."
@@ -80,23 +102,9 @@ static void tmate_header(struct tmate_session *session,
 	tmate_set_env("tmate_ssh", ssh_conn_str);
 	free(ssh_conn_str);
 
-	if (tmate_has_websocket()) {
-		char *web_url;
-		int port = tmate_settings->web_port > 0 ?
-			   tmate_settings->web_port :
-			   tmate_settings->websocket_port;
-		if (port == 80)
-			xasprintf(&web_url, "http://%s/s/%s",
-				  tmate_settings->tmate_host,
-				  session->session_token);
-		else
-			xasprintf(&web_url, "http://%s:%d/s/%s",
-				  tmate_settings->tmate_host,
-				  port, session->session_token);
-		tmate_notify("web session: %s", web_url);
-		tmate_set_env("tmate_web", web_url);
-		free(web_url);
-	}
+	/* Web URL is only sent when client enables web sharing */
+	if (tmate_has_websocket() && session->web_sharing_enabled)
+		tmate_send_web_url(session);
 
 	tmate_send_client_ready();
 }

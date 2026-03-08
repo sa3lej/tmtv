@@ -257,6 +257,7 @@ struct tmate_session {
 	struct evconnlistener *ws_listener;
 	int ws_listen_fd; /* pre-bound socket, created before jail */
 	struct event *ev_ws_snapshot; /* periodic snapshot timer */
+	bool web_sharing_enabled; /* client-controlled web sharing toggle */
 
 	/* only for role client-pty */
 	int pty;
