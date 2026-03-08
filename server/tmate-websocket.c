@@ -422,6 +422,52 @@ static char *find_in_mem(const char *s, const char *find, size_t slen)
 	return NULL;
 }
 
+static int sse_validate_token(struct ws_client *wc, const char *path,
+			      size_t path_len)
+{
+	struct tmate_session *s = wc->session;
+	const char *token;
+	size_t tlen;
+
+	/* Strip leading slash: "/TOKEN" or "/ws/TOKEN" -> "TOKEN" */
+	if (path_len > 0 && path[0] == '/') {
+		path++;
+		path_len--;
+	}
+	/* Strip "ws/" prefix if present (nginx proxies full URI) */
+	if (path_len > 3 && strncmp(path, "ws/", 3) == 0) {
+		path += 3;
+		path_len -= 3;
+	}
+
+	if (path_len == 0)
+		return -1;
+
+	/* Check against all session tokens */
+	token = s->session_token;
+	if (token) {
+		tlen = strlen(token);
+		if (tlen == path_len && memcmp(path, token, tlen) == 0)
+			return 0;
+	}
+
+	token = s->session_token_ro;
+	if (token) {
+		tlen = strlen(token);
+		if (tlen == path_len && memcmp(path, token, tlen) == 0)
+			return 0;
+	}
+
+	token = s->session_token_named;
+	if (token) {
+		tlen = strlen(token);
+		if (tlen == path_len && memcmp(path, token, tlen) == 0)
+			return 0;
+	}
+
+	return -1;
+}
+
 static int sse_do_handshake(struct ws_client *wc)
 {
 	struct evbuffer *input = bufferevent_get_input(wc->bev);
@@ -440,51 +486,27 @@ static int sse_do_handshake(struct ws_client *wc)
 	if (!header_end)
 		return 0; /* need more data */
 
-	/*
-	 * Extract token from GET path: "GET /ws/TOKEN ..." or "GET /TOKEN ..."
-	 * Validate against session tokens. Reject with 404 on mismatch.
-	 */
-	int token_ok = 0;
-	if (strncmp(data, "GET ", 4) == 0) {
-		char *path_start = data + 4;
-		char *path_end = memchr(path_start, ' ',
-					header_end - path_start);
-		if (path_end) {
-			/* Skip /ws/ prefix if present */
-			char *tok = path_start;
-			if (strncmp(tok, "/ws/", 4) == 0)
-				tok += 4;
-			else if (*tok == '/')
-				tok += 1;
+	/* Parse GET path from "GET /path HTTP/..." */
+	static const char *reject =
+		"HTTP/1.1 403 Forbidden\r\n"
+		"Content-Length: 0\r\n"
+		"Connection: close\r\n"
+		"\r\n";
 
-			size_t tok_len = path_end - tok;
-			if (tok_len > 0 && wc->session) {
-				const char *st = wc->session->session_token;
-				const char *st_ro = wc->session->session_token_ro;
-				const char *st_named = wc->session->session_token_named;
-				if ((st && strlen(st) == tok_len &&
-				     memcmp(tok, st, tok_len) == 0) ||
-				    (st_ro && strlen(st_ro) == tok_len &&
-				     memcmp(tok, st_ro, tok_len) == 0) ||
-				    (st_named && strlen(st_named) == tok_len &&
-				     memcmp(tok, st_named, tok_len) == 0))
-					token_ok = 1;
+	if (strncmp(data, "GET ", 4) == 0) {
+		const char *path_start = data + 4;
+		const char *path_end = memchr(path_start, ' ',
+					      header_end - path_start);
+		if (path_end) {
+			if (sse_validate_token(wc, path_start,
+					       path_end - path_start) < 0) {
+				tmate_debug("SSE token rejected");
+				evbuffer_drain(input, (header_end - data) + 4);
+				bufferevent_write(wc->bev, reject,
+						  strlen(reject));
+				return -1;
 			}
 		}
-	}
-
-	evbuffer_drain(input, (header_end - data) + 4);
-
-	if (!token_ok) {
-		static const char *resp_404 =
-			"HTTP/1.1 404 Not Found\r\n"
-			"Content-Type: text/plain\r\n"
-			"Connection: close\r\n"
-			"\r\n"
-			"session not found\n";
-		bufferevent_write(wc->bev, resp_404, strlen(resp_404));
-		tmate_info("SSE handshake rejected: invalid token");
-		return -1;
 	}
 
 	static const char *response =
@@ -496,6 +518,7 @@ static int sse_do_handshake(struct ws_client *wc)
 		"X-Accel-Buffering: no\r\n"
 		"\r\n";
 
+	evbuffer_drain(input, (header_end - data) + 4);
 	bufferevent_write(wc->bev, response, strlen(response));
 
 	return 1;

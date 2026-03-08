@@ -68,8 +68,8 @@ import Viewer from '../layouts/Viewer.astro';
 </Viewer>
 
 <style is:global>
-  *, *::before, *::after { margin: 0; padding: 0; }
   body {
+    margin: 0;
     background: #0c0c16;
     color: #e0e0e0;
     -webkit-font-smoothing: antialiased;
@@ -123,13 +123,6 @@ import Viewer from '../layouts/Viewer.astro';
   .terminal-container {
     background: #0d0d1a; position: relative; flex: 0 0 auto; overflow: hidden;
   }
-  /* Undo Tailwind preflight damage to xterm.js internals */
-  .terminal-container canvas {
-    display: inline; vertical-align: baseline;
-  }
-  .terminal-container * {
-    box-sizing: content-box;
-  }
   .pane-border { position: absolute; background: #333346; z-index: 2; }
 
   .tmux-status {
@@ -141,11 +134,7 @@ import Viewer from '../layouts/Viewer.astro';
   #tmux-status-left { color: #ffffff; font-weight: bold; }
   #tmux-status-right { color: #d0d0d0; }
 
-  .terminal-container::after {
-    content: ''; position: absolute; inset: 0; pointer-events: none;
-    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.02) 2px, rgba(0,0,0,0.02) 4px);
-    z-index: 3;
-  }
+  /* scanlines removed — caused visible banding artifacts */
   .xterm-viewport::-webkit-scrollbar { display: none; }
   .xterm-viewport { scrollbar-width: none; }
 
