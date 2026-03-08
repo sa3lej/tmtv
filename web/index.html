@@ -91,6 +91,27 @@
     font-size: 12px;
     font-weight: 500;
     letter-spacing: 0.3px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #titlebar-meta {
+    color: #666;
+    font-size: 10px;
+    font-weight: 400;
+  }
+  #readonly-badge {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #ffd93d;
+    background: rgba(255, 217, 61, 0.1);
+    border: 1px solid rgba(255, 217, 61, 0.2);
+    border-radius: 4px;
+    padding: 1px 6px;
+    position: absolute;
+    right: 14px;
   }
 
   #terminal-container {
@@ -150,7 +171,11 @@
     <div class="dot red"></div>
     <div class="dot yellow"></div>
     <div class="dot green"></div>
-    <span id="titlebar-text">tmtv</span>
+    <span id="titlebar-text">
+      <span id="titlebar-label">tmtv</span>
+      <span id="titlebar-meta"></span>
+    </span>
+    <span id="readonly-badge">view only</span>
   </div>
   <div id="terminal-container"></div>
   <div id="tmux-status">
@@ -400,6 +425,10 @@
         delete panes[id];
       }
     }
+
+    /* Update pane count metadata */
+    paneCount = Object.keys(panes).length;
+    updateMeta();
   }
 
   /* Resize the terminal-wrap to fit the server's terminal dimensions */
@@ -464,9 +493,31 @@
     ? 'http://' + (location.hostname || 'localhost') + ':' + ssePort
     : '/ws';
 
+  /* --- Session metadata --- */
+  var sessionStart = null;
+  var paneCount = 0;
+  var durationTimer = null;
+
   if (sessionToken) {
-    document.getElementById('titlebar-text').textContent = 'tmtv — ' + sessionToken.substring(0, 8);
+    document.getElementById('titlebar-label').textContent = 'tmtv — ' + sessionToken.substring(0, 8);
   }
+
+  function updateMeta() {
+    var parts = [];
+    if (paneCount > 0) parts.push(paneCount + (paneCount === 1 ? ' pane' : ' panes'));
+    if (sessionStart) {
+      var elapsed = Math.floor((Date.now() - sessionStart) / 1000);
+      var m = Math.floor(elapsed / 60);
+      var s = elapsed % 60;
+      parts.push((m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s);
+    }
+    var metaEl = document.getElementById('titlebar-meta');
+    if (metaEl) metaEl.textContent = parts.length ? parts.join(' · ') : '';
+  }
+
+  var reconnectAttempts = 0;
+  var maxReconnect = 5;
+  var sessionEnded = false;
 
   function connect() {
     setStatus('Connecting...');
@@ -475,6 +526,11 @@
 
     es.onopen = function() {
       setStatus('Connected', 'connected');
+      reconnectAttempts = 0;
+      if (!sessionStart) {
+        sessionStart = Date.now();
+        durationTimer = setInterval(updateMeta, 1000);
+      }
     };
 
     es.onmessage = function(evt) {
@@ -493,8 +549,20 @@
     };
 
     es.onerror = function() {
-      if (es.readyState === EventSource.CLOSED) {
+      es.close();
+      if (sessionEnded) {
         setStatus('Session ended', 'error');
+        if (durationTimer) clearInterval(durationTimer);
+        return;
+      }
+      if (reconnectAttempts < maxReconnect) {
+        reconnectAttempts++;
+        var delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 8000);
+        setStatus('Reconnecting (' + reconnectAttempts + '/' + maxReconnect + ')...', 'error');
+        setTimeout(connect, delay);
+      } else {
+        setStatus('Connection lost', 'error');
+        if (durationTimer) clearInterval(durationTimer);
       }
     };
   }
@@ -565,7 +633,9 @@
         break;
 
       case OUT_FIN:
+        sessionEnded = true;
         setStatus('Session ended', 'error');
+        if (durationTimer) clearInterval(durationTimer);
         break;
     }
   }
