@@ -100,21 +100,6 @@
     font-size: 10px;
     font-weight: 400;
   }
-  #theme-toggle {
-    position: absolute;
-    right: 12px;
-    background: none;
-    border: none;
-    color: #555;
-    font-size: 16px;
-    cursor: pointer;
-    padding: 2px 6px;
-    border-radius: 4px;
-    transition: color 0.2s, background 0.2s;
-    line-height: 1;
-    opacity: 0.4;
-  }
-  #theme-toggle:hover { opacity: 1; color: #aaa; background: rgba(255,255,255,0.05); }
 
   /* ============================================
    * TV Theme v3 — Rounded 1960s tabletop TV
@@ -442,16 +427,6 @@
   .theme-tv .tv-leg:nth-child(3) { left: 15%;  transform: rotate(-4deg); z-index: -1; opacity: 0.65; }
   .theme-tv .tv-leg:nth-child(4) { right: 15%; transform: rotate(4deg); z-index: -1; opacity: 0.65; }
 
-  /* Theme toggle — subtle, bottom-right */
-  .theme-tv #theme-toggle {
-    position: fixed;
-    bottom: 12px;
-    right: 12px;
-    color: #5a4830;
-    z-index: 20;
-    opacity: 0.3;
-  }
-  .theme-tv #theme-toggle:hover { color: #a08860; opacity: 1; }
 
   /* === Visibility: hide TV elements in default theme === */
   .tv-controls, .tv-speaker,
@@ -537,7 +512,6 @@
       <span id="titlebar-label">tmtv</span>
       <span id="titlebar-meta"></span>
     </span>
-    <button id="theme-toggle" title="Toggle theme" aria-label="Toggle theme">&#9781;</button>
   </div>
 
   <!-- Terminal (always visible, reparented visually by CSS) -->
@@ -905,19 +879,11 @@
   var pathMatch = location.pathname.match(/^\/s\/([^\/]+)/);
   var sessionToken = pathMatch ? pathMatch[1] : null;
 
-  /* --- Theme support --- */
+  /* --- Theme support (URL param only: ?theme=tv) --- */
+  localStorage.removeItem('tmtv-theme'); /* clean up old toggle storage */
   var params = new URLSearchParams(location.search);
-  var currentTheme = params.get('theme') || localStorage.getItem('tmtv-theme') || '';
-  function applyTheme(name) {
-    document.body.className = name ? 'theme-' + name : '';
-    currentTheme = name;
-    localStorage.setItem('tmtv-theme', name);
-  }
-  applyTheme(currentTheme);
-  document.getElementById('theme-toggle').addEventListener('click', function() {
-    applyTheme(currentTheme === 'tv' ? '' : 'tv');
-    sizeToServer();
-  });
+  var currentTheme = params.get('theme') || '';
+  if (currentTheme) document.body.className = 'theme-' + currentTheme;
 
   var ssePort = params.get('port');
   var sseUrl = ssePort
