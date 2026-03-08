@@ -7,7 +7,7 @@ CLEANFILES = tmux.1.mdoc tmux.1.man cmd-parse.c
 
 # Distribution tarball options.
 EXTRA_DIST = \
-	CHANGES README README.ja COPYING example_tmux.conf \
+	CHANGES README README.ja LICENSE example_tmux.conf \
 	osdep-*.c mdoc2man.awk tmux.1
 dist_EXTRA_tmtv_SOURCES = compat/*.[ch]
 
