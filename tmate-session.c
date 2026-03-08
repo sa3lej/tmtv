@@ -212,6 +212,14 @@ void tmate_session_start(void)
 		cfg_add_cause("%s", "---------------------------------------------------------------------");
 	}
 
+	/* Send named session request if configured */
+	{
+		const char *sname = options_get_string(global_options,
+						      "tmtv-session-name");
+		if (sname && *sname)
+			tmate_set_val("session_name", sname);
+	}
+
 	send_authorized_keys();
 	tmate_write_uname();
 	tmate_write_ready();

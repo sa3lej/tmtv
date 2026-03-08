@@ -11,6 +11,9 @@ void tmate_send_web_url(struct tmate_session *session)
 	if (!tmate_has_websocket())
 		return;
 
+	const char *url_token = session->session_token_named ?
+				session->session_token_named :
+				session->session_token;
 	char *web_url;
 	int port = tmate_settings->web_port > 0 ?
 		   tmate_settings->web_port :
@@ -18,11 +21,11 @@ void tmate_send_web_url(struct tmate_session *session)
 	if (port == 80)
 		xasprintf(&web_url, "http://%s/s/%s",
 			  tmate_settings->tmate_host,
-			  session->session_token);
+			  url_token);
 	else
 		xasprintf(&web_url, "http://%s:%d/s/%s",
 			  tmate_settings->tmate_host,
-			  port, session->session_token);
+			  port, url_token);
 	tmate_notify("Web sharing enabled: %s", web_url);
 	tmate_set_env("tmtv_web", web_url);
 	free(web_url);

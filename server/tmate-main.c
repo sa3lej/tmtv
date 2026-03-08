@@ -206,12 +206,12 @@ int main(int argc, char **argv, char **envp)
 		tmate_fatal("Cannot prepare session in " TMATE_WORKDIR);
 
 	if ((chmod(TMATE_WORKDIR, 0700)             < 0) ||
-	    (chmod(TMATE_WORKDIR "/sessions", 0700) < 0) ||
+	    (chmod(TMATE_WORKDIR "/sessions", 0733) < 0) ||
 	    (chmod(TMATE_WORKDIR "/jail", 0700)     < 0))
 		tmate_fatal("Cannot prepare session in " TMATE_WORKDIR);
 
 	if (check_owned_directory_mode(TMATE_WORKDIR, 0700) ||
-	    check_owned_directory_mode(TMATE_WORKDIR "/sessions", 0700) ||
+	    check_owned_directory_mode(TMATE_WORKDIR "/sessions", 0733) ||
 	    check_owned_directory_mode(TMATE_WORKDIR "/jail", 0700))
 		tmate_fatal(TMATE_WORKDIR " and subdirectories has incorrect ownership/mode. "
 			    "Try deleting " TMATE_WORKDIR " and try again");
