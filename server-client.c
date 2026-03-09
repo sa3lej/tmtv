@@ -3376,6 +3376,34 @@ server_client_dispatch(struct imsg *imsg, void *arg)
 		if (server_client_dispatch_identify(c, imsg) != 0)
 			goto bad;
 		break;
+#ifdef TMATE_SERVER_BUILD
+	case MSG_IDENTIFY_TMATE_AUTH_PUBKEY:
+	case MSG_IDENTIFY_TMATE_AUTH_NONE: {
+		/*
+		 * SSH server pre-auth check: a viewer is connecting and
+		 * the SSH server fork asks us whether to allow it.
+		 * Reply immediately — the caller blocks on read().
+		 */
+		const char *pubkey = NULL;
+		if (imsg->hdr.type == MSG_IDENTIFY_TMATE_AUTH_PUBKEY &&
+		    datalen > 0)
+			pubkey = (const char *)imsg->data;
+		struct {
+			struct imsg_hdr hdr;
+			bool allow;
+		} __packed reply;
+		memset(&reply, 0, sizeof(reply));
+		reply.hdr.type = MSG_TMATE_AUTH_STATUS;
+		reply.hdr.len = sizeof(reply);
+		reply.hdr.peerid = PROTOCOL_VERSION;
+		reply.hdr.pid = -1;
+		reply.allow = tmate_allow_auth(pubkey);
+		if (c->peer != NULL)
+			proc_send(c->peer, MSG_TMATE_AUTH_STATUS,
+			    -1, &reply.allow, sizeof(reply.allow));
+		break;
+	}
+#endif
 	case MSG_COMMAND:
 		if (server_client_dispatch_command(c, imsg) != 0)
 			goto bad;

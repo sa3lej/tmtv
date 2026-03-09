@@ -90,7 +90,8 @@ static void tmate_set(char *key, char *value)
 		bool enabled = !strcmp(value, "true") || !strcmp(value, "1") || !strcmp(value, "on");
 		tmate_session->web_sharing_enabled = enabled;
 		if (enabled) {
-			tmate_send_web_url(tmate_session);
+			if (tmate_session->urls_sent)
+				tmate_send_web_url(tmate_session);
 		} else {
 			tmate_notify("Web sharing disabled");
 			tmate_disconnect_ws_clients(tmate_session);

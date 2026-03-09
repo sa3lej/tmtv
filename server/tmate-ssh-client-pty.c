@@ -6,6 +6,8 @@
 #include <signal.h>
 #include "tmate.h"
 
+extern int server_fd;
+
 static int on_ssh_channel_read(__unused ssh_session _session,
 			       __unused ssh_channel channel,
 			       void *_data, uint32_t total_len,
@@ -200,6 +202,7 @@ void tmate_spawn_pty_client(struct tmate_session *session)
 		}
 
 		session->tmux_socket_fd = sock_fd;
+		server_fd = sock_fd;
 		goto connect_ok;
 
 connect_failed:
@@ -216,11 +219,13 @@ connect_ok:
 	 * 2) We prevent any input (aside from the window size) to go through
 	 *    to the server.
 	 */
-	session->readonly = false;
-	if (lstat(socket_path, &fstat) < 0)
-		tmate_fatal("Cannot fstat()");
-	if (S_ISLNK(fstat.st_mode)) {
-		session->readonly = true;
+	/*
+	 * Read-only tokens always have the "ro-" prefix.  Named session
+	 * tokens are also symlinks but should be read-write, so check
+	 * the prefix instead of the symlink status.
+	 */
+	session->readonly = (strncmp(token, "ro-", 3) == 0);
+	if (session->readonly) {
 		argv = argv_ro;
 		argc = 2;
 	}
@@ -232,7 +237,8 @@ connect_ok:
 	dup2(slave_pty, STDOUT_FILENO);
 	dup2(slave_pty, STDERR_FILENO);
 
-	setup_ncurse(slave_pty, "screen-256color");
+	setup_ncurse(slave_pty, "xterm-256color");
+	setenv("TERM", "xterm-256color", 1);
 
 	tmate_client_pty_init(session);
 
@@ -240,7 +246,11 @@ connect_ok:
 				 session->tmux_socket_fd,
 				 ssh_get_fd(session->ssh_client.session),
 				 session->pty}, 6);
-	get_in_jail();
+	/*
+	 * Viewer forks don't enter the jail. They are already sandboxed:
+	 * only 6 fds open, and they only proxy between SSH and the tmux
+	 * socket. Skipping chroot avoids needing terminfo files in the jail.
+	 */
 	event_reinit(session->ev_base);
 
 	/*

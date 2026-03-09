@@ -32,6 +32,10 @@
 
 #include "tmux.h"
 
+#ifdef TMATE_SERVER_BUILD
+extern int server_fd;
+#endif
+
 static struct tmuxproc	*client_proc;
 static struct tmuxpeer	*client_peer;
 static uint64_t		 client_flags;
@@ -281,6 +285,13 @@ client_main(struct event_base *base, int argc, char **argv, uint64_t flags,
 	log_debug("flags are %#llx", (unsigned long long)client_flags);
 
 	/* Initialize the client socket and start the server. */
+#ifdef TMATE_SERVER_BUILD
+	/* Viewer fork: socket already connected by tmate_spawn_pty_client */
+	if (server_fd >= 0) {
+		fd = server_fd;
+	} else
+#endif
+	{
 #ifdef HAVE_SYSTEMD
 	if (systemd_activated()) {
 		/* socket-based activation, do not even try to be a client. */
@@ -297,6 +308,7 @@ client_main(struct event_base *base, int argc, char **argv, uint64_t flags,
 			    socket_path, strerror(errno));
 		}
 		return (1);
+	}
 	}
 	client_peer = proc_add_peer(client_proc, fd, client_dispatch, NULL);
 
