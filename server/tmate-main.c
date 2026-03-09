@@ -51,7 +51,7 @@ void request_server_termination(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "usage: tmtv-server [-A] [-b ip] [-h hostname] [-k keys_dir] [-p listen_port] [-q ssh_port_advertized] [-w web_port] [-z sse_port] [-x] [-v]\n");
+	fprintf(stderr, "usage: tmtv-server [-A] [-b ip] [-h hostname] [-k keys_dir] [-p listen_port] [-q ssh_port_advertized] [-V] [-w web_port] [-z sse_port] [-x] [-v]\n");
 }
 
 static char* get_full_hostname(void)
@@ -122,8 +122,12 @@ int main(int argc, char **argv, char **envp)
 {
 	int opt;
 
-	while ((opt = getopt(argc, argv, "Ab:h:k:p:q:w:z:xv")) != -1) {
+	while ((opt = getopt(argc, argv, "Ab:h:k:p:q:Vw:z:xv")) != -1) {
 		switch (opt) {
+		case 'V':
+			printf("tmtv-server %s (based on tmux %s)\n",
+			       TMTV_VERSION, TMUX_VERSION);
+			return 0;
 		case 'A':
 			tmate_settings->authorized_keys_only = true;
 			break;
