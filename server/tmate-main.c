@@ -206,13 +206,27 @@ int main(int argc, char **argv, char **envp)
 	    (mkdir(TMATE_WORKDIR "/jail", 0700)     < 0 && errno != EEXIST))
 		tmate_fatal("Cannot prepare session in " TMATE_WORKDIR);
 
+	/*
+	 * Sessions dir: 0730 = owner rwx, group wx, other nothing.
+	 * Jailed children run as TMATE_JAIL_USER and need group-write
+	 * to create symlinks via sessions_dir_fd.  Other local users
+	 * get no access (fixes CVE-2021-44512).
+	 */
+	{
+		struct passwd *jail_pw = getpwnam(TMATE_JAIL_USER);
+		if (!jail_pw)
+			tmate_fatal("Cannot find user %s", TMATE_JAIL_USER);
+		if (chown(TMATE_WORKDIR "/sessions", 0, jail_pw->pw_gid) < 0)
+			tmate_fatal("Cannot chown sessions dir");
+	}
+
 	if ((chmod(TMATE_WORKDIR, 0711)             < 0) ||
-	    (chmod(TMATE_WORKDIR "/sessions", 0733) < 0) ||
+	    (chmod(TMATE_WORKDIR "/sessions", 0730) < 0) ||
 	    (chmod(TMATE_WORKDIR "/jail", 0700)     < 0))
 		tmate_fatal("Cannot prepare session in " TMATE_WORKDIR);
 
 	if (check_owned_directory_mode(TMATE_WORKDIR, 0711) ||
-	    check_owned_directory_mode(TMATE_WORKDIR "/sessions", 0733) ||
+	    check_owned_directory_mode(TMATE_WORKDIR "/sessions", 0730) ||
 	    check_owned_directory_mode(TMATE_WORKDIR "/jail", 0700))
 		tmate_fatal(TMATE_WORKDIR " and subdirectories has incorrect ownership/mode. "
 			    "Try deleting " TMATE_WORKDIR " and try again");
@@ -283,8 +297,12 @@ void set_session_token(struct tmate_session *session, const char *token)
 void close_fds_except(int *fd_to_preserve, int num_fds)
 {
 	int fd, i, preserve;
+	int max_fd = (int)sysconf(_SC_OPEN_MAX);
 
-	for (fd = 0; fd < 1024; fd++) {
+	if (max_fd < 0 || max_fd > 65536)
+		max_fd = 1024;
+
+	for (fd = 0; fd < max_fd; fd++) {
 		preserve = 0;
 		for (i = 0; i < num_fds; i++)
 			if (fd_to_preserve[i] == fd)
