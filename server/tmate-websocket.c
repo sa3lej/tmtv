@@ -366,8 +366,12 @@ static void sse_send_pane_dump(struct bufferevent *bev,
 			}
 		}
 
-		if (y < sy - 1)
-			evbuffer_add(vt, "\r\n", 2);
+		if (y < sy - 1) {
+			char cup[16];
+			int cuplen = snprintf(cup, sizeof(cup),
+					      "\033[%u;1H", y + 2);
+			evbuffer_add(vt, cup, cuplen);
+		}
 	}
 
 	/* Reset attributes, position cursor, show it */
