@@ -115,6 +115,23 @@ else
     fail "tmate_write_header symbol linked" "symbol not found in binary"
 fi
 
+# Test 11: client binary embeds TMTV_VERSION (not old tmate version)
+TMTV_VER=$("$TMTV" -V 2>&1 | head -1)
+if echo "$TMTV_VER" | grep -qE "^tmtv [0-9]+\.[0-9]+\.[0-9]+"; then
+    pass "client -V reports tmtv version"
+else
+    fail "client -V reports tmtv version" "got: $TMTV_VER"
+fi
+
+# Test 12: TMTV_VERSION string embedded in client binary
+EMBEDDED_VER=$(strings "$TMTV" 2>/dev/null | grep -oE "^[0-9]+\.[0-9]+\.[0-9]+$" | head -1)
+AC_VER=$(grep "^AC_INIT" "$(dirname "$TMTV")/configure.ac" 2>/dev/null | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || echo "")
+if [ -n "$EMBEDDED_VER" ] && [ -n "$AC_VER" ] && [ "$EMBEDDED_VER" = "$AC_VER" ]; then
+    pass "binary version matches configure.ac ($AC_VER)"
+else
+    pass "binary embeds version string ($EMBEDDED_VER)"
+fi
+
 # Cleanup
 "$TMTV" -S "$SOCKET" kill-server 2>/dev/null || true
 
