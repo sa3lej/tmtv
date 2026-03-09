@@ -188,6 +188,22 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: Server logs correct client version
+# -------------------------------------------------------
+CLIENT_VER=$(remote "TERM=xterm-256color $REMOTE_TMTV -V 2>&1" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+SERVER_LOG=$(remote "journalctl -u tmtv-server --no-pager -n 50 2>/dev/null" || echo "")
+if echo "$SERVER_LOG" | grep -q "tmtv client version=$CLIENT_VER"; then
+	pass "server logs client version ($CLIENT_VER)"
+else
+	# Check for old "tmate version=" format (should not appear)
+	if echo "$SERVER_LOG" | grep -q "tmate version="; then
+		fail "server logs client version ($CLIENT_VER)" "still using old 'tmate version' format"
+	else
+		skip "server logs client version" "journalctl not available"
+	fi
+fi
+
+# -------------------------------------------------------
 # Test: Named session registered
 # -------------------------------------------------------
 SESSIONS_DIR="/tmp/tmtv/sessions"
