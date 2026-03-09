@@ -70,7 +70,7 @@ import Viewer from '../layouts/Viewer.astro';
 <style is:global>
   body {
     margin: 0;
-    background: #0c0c16;
+    background: #12151e;
     color: #e0e0e0;
     -webkit-font-smoothing: antialiased;
     display: flex;
@@ -92,9 +92,9 @@ import Viewer from '../layouts/Viewer.astro';
     backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.05);
     transition: opacity 0.8s ease, color 0.4s ease, border-color 0.4s ease;
   }
-  .status.connected { color: #3ddc84; border-color: rgba(61, 220, 132, 0.15); }
+  .status.connected { color: #6caa71; border-color: rgba(108, 170, 113, 0.15); }
   .status.connected.fade { opacity: 0; pointer-events: none; }
-  .status.error { color: #ff6b6b; border-color: rgba(255, 107, 107, 0.2); }
+  .status.error { color: #df6c5a; border-color: rgba(223, 108, 90, 0.2); }
 
   .terminal-wrap {
     border-radius: 10px; overflow: hidden;
@@ -104,7 +104,7 @@ import Viewer from '../layouts/Viewer.astro';
   }
 
   .titlebar {
-    background: linear-gradient(180deg, #333346 0%, #2a2a3d 100%);
+    background: linear-gradient(180deg, #2a3040 0%, #222838 100%);
     height: 38px; min-height: 38px; display: flex; align-items: center;
     padding: 0 14px; position: relative; border-bottom: 1px solid rgba(0,0,0,0.4);
   }
@@ -121,9 +121,9 @@ import Viewer from '../layouts/Viewer.astro';
   #titlebar-meta { color: #666; font-size: 10px; font-weight: 400; }
 
   .terminal-container {
-    background: #0d0d1a; position: relative; flex: 0 0 auto; overflow: hidden;
+    background: #191d27; position: relative; flex: 0 0 auto; overflow: hidden;
   }
-  .pane-border { position: absolute; background: #333346; z-index: 2; }
+  .pane-border { position: absolute; background: #2a3040; z-index: 2; }
 
   .tmux-status {
     background: #005f00; color: #e0e0e0;
