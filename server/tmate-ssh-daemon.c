@@ -208,6 +208,9 @@ void tmate_spawn_daemon(struct tmate_session *session)
 	session->tmux_socket_fd = fd;
 	server_fd = fd;
 
+	/* Allow viewer forks (running as nobody) to connect to the socket */
+	chmod(socket_path, 0777);
+
 	create_session_ro_symlink(session);
 
 	/*
