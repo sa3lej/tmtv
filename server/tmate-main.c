@@ -51,7 +51,7 @@ void request_server_termination(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "usage: tmtv-server [-A] [-b ip] [-h hostname] [-k keys_dir] [-p listen_port] [-q ssh_port_advertized] [-w web_port] [-z sse_port] [-x] [-v]\n");
+	fprintf(stderr, "usage: tmtv-server [-A] [-b ip] [-h hostname] [-k keys_dir] [-p listen_port] [-q ssh_port_advertized] [-V] [-w web_port] [-z sse_port] [-x] [-v]\n");
 }
 
 static char* get_full_hostname(void)
@@ -122,8 +122,12 @@ int main(int argc, char **argv, char **envp)
 {
 	int opt;
 
-	while ((opt = getopt(argc, argv, "Ab:h:k:p:q:w:z:xv")) != -1) {
+	while ((opt = getopt(argc, argv, "Ab:h:k:p:q:Vw:z:xv")) != -1) {
 		switch (opt) {
+		case 'V':
+			printf("tmtv-server %s (based on tmux %s)\n",
+			       TMTV_VERSION, TMUX_VERSION);
+			return 0;
 		case 'A':
 			tmate_settings->authorized_keys_only = true;
 			break;
@@ -206,13 +210,27 @@ int main(int argc, char **argv, char **envp)
 	    (mkdir(TMATE_WORKDIR "/jail", 0700)     < 0 && errno != EEXIST))
 		tmate_fatal("Cannot prepare session in " TMATE_WORKDIR);
 
-	if ((chmod(TMATE_WORKDIR, 0700)             < 0) ||
-	    (chmod(TMATE_WORKDIR "/sessions", 0733) < 0) ||
+	/*
+	 * Sessions dir: 0730 = owner rwx, group wx, other nothing.
+	 * Jailed children run as TMATE_JAIL_USER and need group-write
+	 * to create symlinks via sessions_dir_fd.  Other local users
+	 * get no access (fixes CVE-2021-44512).
+	 */
+	{
+		struct passwd *jail_pw = getpwnam(TMATE_JAIL_USER);
+		if (!jail_pw)
+			tmate_fatal("Cannot find user %s", TMATE_JAIL_USER);
+		if (chown(TMATE_WORKDIR "/sessions", 0, jail_pw->pw_gid) < 0)
+			tmate_fatal("Cannot chown sessions dir");
+	}
+
+	if ((chmod(TMATE_WORKDIR, 0711)             < 0) ||
+	    (chmod(TMATE_WORKDIR "/sessions", 0730) < 0) ||
 	    (chmod(TMATE_WORKDIR "/jail", 0700)     < 0))
 		tmate_fatal("Cannot prepare session in " TMATE_WORKDIR);
 
-	if (check_owned_directory_mode(TMATE_WORKDIR, 0700) ||
-	    check_owned_directory_mode(TMATE_WORKDIR "/sessions", 0733) ||
+	if (check_owned_directory_mode(TMATE_WORKDIR, 0711) ||
+	    check_owned_directory_mode(TMATE_WORKDIR "/sessions", 0730) ||
 	    check_owned_directory_mode(TMATE_WORKDIR "/jail", 0700))
 		tmate_fatal(TMATE_WORKDIR " and subdirectories has incorrect ownership/mode. "
 			    "Try deleting " TMATE_WORKDIR " and try again");
@@ -283,8 +301,12 @@ void set_session_token(struct tmate_session *session, const char *token)
 void close_fds_except(int *fd_to_preserve, int num_fds)
 {
 	int fd, i, preserve;
+	int max_fd = (int)sysconf(_SC_OPEN_MAX);
 
-	for (fd = 0; fd < 1024; fd++) {
+	if (max_fd < 0 || max_fd > 65536)
+		max_fd = 1024;
+
+	for (fd = 0; fd < max_fd; fd++) {
 		preserve = 0;
 		for (i = 0; i < num_fds; i++)
 			if (fd_to_preserve[i] == fd)

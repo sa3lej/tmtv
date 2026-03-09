@@ -204,7 +204,7 @@ extern void tmate_ssh_server_main(struct tmate_session *session,
 
 #define TMATE_DEFAULT_WEBSOCKET_PORT 4002
 
-#define TMATE_TOKEN_LEN 25
+#define TMATE_TOKEN_LEN 8
 #define TMATE_WORKDIR "/tmp/tmtv"
 #define TMATE_JAIL_USER "nobody"
 
@@ -241,7 +241,8 @@ struct tmate_session {
 
 	const char *session_token;
 	const char *session_token_ro;
-	const char *session_token_named; /* user-chosen name, or NULL */
+	const char *session_token_named;    /* user-chosen name, e.g. "fish" */
+	const char *session_token_rw_named; /* RW symlink: "<digits>-<name>" */
 	int sessions_dir_fd; /* fd to sessions dir, kept open for post-jail symlinks */
 	const char *obfuscated_session_token; /* for logging purposes */
 
@@ -260,6 +261,7 @@ struct tmate_session {
 	int ws_listen_fd; /* pre-bound socket, created before jail */
 	struct event *ev_ws_snapshot; /* periodic snapshot timer */
 	bool web_sharing_enabled; /* client-controlled web sharing toggle */
+	bool urls_sent;           /* true after initial URLs sent in tmate_ready */
 
 	/* only for role client-pty */
 	int pty;
@@ -291,6 +293,7 @@ struct random_stream {
 };
 
 extern void tmate_init_rand(void);
+extern int tmate_get_urandom_fd(void);
 extern void random_stream_init(struct random_stream *rs);
 extern char *random_stream_get(struct random_stream *rs, size_t count);
 extern void setup_ncurse(int fd, const char *name);

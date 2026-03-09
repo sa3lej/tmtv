@@ -63,6 +63,7 @@ static void dns_cb(int errcode, struct evutil_addrinfo *addr, void *ptr)
 		return;
 	}
 
+	cfg_add_cause("Connecting to %s...", host);
 	tmate_status_message("Connecting to %s...", host);
 
 	int i, num_clients = 0;
@@ -207,7 +208,7 @@ void tmate_session_start(void)
 		tmate_info("To connect to the session locally, run: tmtv -S %s attach", socket_path);
 	} else {
 		cfg_add_cause("%s", "Tip: if you wish to use tmtv only for remote access, run: tmtv -F");
-		cfg_add_cause("%s", "To see the following messages again, run in a tmtv session: tmtv show-messages");
+		cfg_add_cause("%s", "To see the following messages again, run: tmtv show-messages");
 		cfg_add_cause("%s", "Press <q> or <ctrl-c> to continue");
 		cfg_add_cause("%s", "---------------------------------------------------------------------");
 	}

@@ -16,7 +16,71 @@
 #include <netinet/in.h>
 #endif
 
+#include <time.h>
 #include "tmate.h"
+
+/*
+ * Connection limits (CVE-2021-44512 DoS mitigation)
+ */
+#define MAX_CHILDREN       100
+#define RATE_WINDOW_SEC    30
+#define RATE_MAX_PER_IP    10
+#define CONN_HISTORY_SIZE  512
+
+struct conn_record {
+	char ip[64];
+	time_t ts;
+};
+
+static struct conn_record conn_history[CONN_HISTORY_SIZE];
+static int conn_history_pos;
+
+static bool check_rate_limit(const char *ip)
+{
+	time_t now = time(NULL);
+	int count = 0;
+
+	for (int i = 0; i < CONN_HISTORY_SIZE; i++) {
+		if (conn_history[i].ts > 0 &&
+		    now - conn_history[i].ts < RATE_WINDOW_SEC &&
+		    strcmp(conn_history[i].ip, ip) == 0)
+			count++;
+	}
+
+	strlcpy(conn_history[conn_history_pos].ip, ip,
+		sizeof(conn_history[0].ip));
+	conn_history[conn_history_pos].ts = now;
+	conn_history_pos = (conn_history_pos + 1) % CONN_HISTORY_SIZE;
+
+	return count < RATE_MAX_PER_IP;
+}
+
+static int get_peer_ip(int fd, char *dst, size_t len)
+{
+	struct sockaddr_storage sa;
+	socklen_t sa_len = sizeof(sa);
+
+	if (getpeername(fd, (struct sockaddr *)&sa, &sa_len) < 0)
+		return -1;
+
+	switch (sa.ss_family) {
+	case AF_INET:
+		if (!inet_ntop(AF_INET,
+			       &((struct sockaddr_in *)&sa)->sin_addr,
+			       dst, len))
+			return -1;
+		break;
+	case AF_INET6:
+		if (!inet_ntop(AF_INET6,
+			       &((struct sockaddr_in6 *)&sa)->sin6_addr,
+			       dst, len))
+			return -1;
+		break;
+	default:
+		return -1;
+	}
+	return 0;
+}
 
 /*
  * SSH algorithm policy — modern algorithms only.
@@ -466,6 +530,7 @@ static ssh_bind prepare_ssh(const char *keys_dir, const char *bind_addr, int por
 }
 
 static volatile sig_atomic_t pending_gc = 0;
+static volatile sig_atomic_t active_children = 0;
 
 static void handle_sigchld(__unused int sig)
 {
@@ -473,10 +538,8 @@ static void handle_sigchld(__unused int sig)
 	pid_t pid;
 
 	while ((pid = waitpid(WAIT_ANY, &status, WNOHANG)) > 0) {
-		/*
-		 * It's not safe to call indirectly malloc() here, because
-		 * of potential deadlocks with other malloc() calls.
-		 */
+		if (active_children > 0)
+			active_children--;
 	}
 
 	/* Schedule GC for next iteration of accept loop */
@@ -611,11 +674,34 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 			tmate_fatal("Error accepting connection");
 		}
 
-		if ((pid = fork()) < 0)
-			tmate_fatal("Can't fork");
+		/* Enforce max children limit */
+		if (active_children >= MAX_CHILDREN) {
+			tmate_info("Max connections reached (%d), rejecting",
+				   MAX_CHILDREN);
+			close(fd);
+			continue;
+		}
+
+		/* Per-IP rate limiting (uses socket peer, not proxy header) */
+		{
+			char peer_ip[64];
+			if (get_peer_ip(fd, peer_ip, sizeof(peer_ip)) == 0 &&
+			    !check_rate_limit(peer_ip)) {
+				tmate_info("Rate limit exceeded for %s", peer_ip);
+				close(fd);
+				continue;
+			}
+		}
+
+		if ((pid = fork()) < 0) {
+			tmate_info("Fork failed: %s", strerror(errno));
+			close(fd);
+			continue;
+		}
 
 		if (pid) {
 			/* Parent process */
+			active_children++;
 			close(fd);
 			continue;
 		}

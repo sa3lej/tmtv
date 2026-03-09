@@ -26,6 +26,9 @@
 #include <unistd.h>
 
 #include "tmux.h"
+#ifdef TMATE
+#include "tmate.h"
+#endif
 
 /* Command queue flags. */
 #define CMDQ_FIRED 0x1
@@ -645,6 +648,14 @@ cmdq_fire_command(struct cmdq_item *item)
 	retval = cmdq_find_flag(item, &item->target, &entry->target);
 	if (retval == CMD_RETURN_ERROR)
 		goto out;
+
+#ifdef TMATE_SERVER_BUILD
+	if (!tmate_should_exec_cmd_locally(entry)) {
+		tmate_client_cmd(-1, cmd);
+		retval = CMD_RETURN_NORMAL;
+		goto out;
+	}
+#endif
 
 	retval = entry->exec(cmd, item);
 	if (retval == CMD_RETURN_ERROR)
