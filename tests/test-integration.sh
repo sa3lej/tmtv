@@ -801,6 +801,46 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: second new-session gives error, not crash
+# -------------------------------------------------------
+remote "TERM=xterm-256color $REMOTE_TMTV new -d -s multi1" 2>/dev/null
+sleep 2
+if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "multi1"; then
+	remote "TERM=xterm-256color $REMOTE_TMTV new -d -s multi2" 2>/dev/null || true
+	sleep 1
+	# Server must still be alive after the failed second session
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "multi1"; then
+		pass "second new-session errors without crash"
+	else
+		fail "second new-session errors without crash" "server died"
+	fi
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+else
+	fail "second new-session errors without crash" "could not create test session"
+fi
+sleep 1
+
+# -------------------------------------------------------
+# Test: bare tmtv auto-attaches to existing session
+# -------------------------------------------------------
+remote "TERM=xterm-256color $REMOTE_TMTV new -d -s autoattach" 2>/dev/null
+sleep 2
+if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "autoattach"; then
+	# Run bare tmtv with timeout — will block on attach (no TTY), but must not crash
+	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV" 2>/dev/null || true
+	sleep 1
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "autoattach"; then
+		pass "bare tmtv auto-attaches without crash"
+	else
+		fail "bare tmtv auto-attaches without crash" "server died"
+	fi
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+else
+	fail "bare tmtv auto-attaches without crash" "could not create test session"
+fi
+sleep 1
+
+# -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
 echo ""

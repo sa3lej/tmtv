@@ -276,6 +276,12 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 		av = args_next_value(av);
 	}
 	s = session_create(prefix, newname, cwd, env, oo, tiop);
+	if (s == NULL) {
+		cmdq_error(item, "multiple sessions are not supported");
+		environ_free(env);
+		options_free(oo);
+		goto fail;
+	}
 
 	/* Spawn the initial window. */
 	sc.item = item;
