@@ -287,38 +287,64 @@ static void sse_send_pane_dump(struct bufferevent *bev,
 			int attr = gc.attr;
 
 			if (fg != prev_fg || bg != prev_bg || attr != prev_attr) {
-				char sgr[64];
+				char sgr[96];
 				int n = 0;
 				n += snprintf(sgr + n, sizeof(sgr) - n, "\033[0");
 
-				if (attr & 0x01)
+				if (attr & GRID_ATTR_BRIGHT)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";1");
-				if (attr & 0x02)
+				if (attr & GRID_ATTR_DIM)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";2");
-				if (attr & 0x40)
+				if (attr & GRID_ATTR_ITALICS)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";3");
-				if (attr & 0x04)
+				if (attr & GRID_ATTR_UNDERSCORE)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";4");
-				if (attr & 0x08)
+				if (attr & GRID_ATTR_BLINK)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";5");
-				if (attr & 0x10)
+				if (attr & GRID_ATTR_REVERSE)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";7");
-				if (attr & 0x80)
+				if (attr & GRID_ATTR_HIDDEN)
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";8");
+				if (attr & GRID_ATTR_STRIKETHROUGH)
 					n += snprintf(sgr + n, sizeof(sgr) - n, ";9");
+				if (attr & GRID_ATTR_OVERLINE)
+					n += snprintf(sgr + n, sizeof(sgr) - n, ";53");
 
-				if (fg <= 7)
-					n += snprintf(sgr + n, sizeof(sgr) - n, ";%d", 30 + fg);
-				else if (fg >= 10 && fg <= 15)
-					n += snprintf(sgr + n, sizeof(sgr) - n, ";%d", 90 + fg - 10);
-				else if (fg >= 16 && fg < 256)
-					n += snprintf(sgr + n, sizeof(sgr) - n, ";38;5;%d", fg);
+				if (fg & COLOUR_FLAG_RGB) {
+					n += snprintf(sgr + n, sizeof(sgr) - n,
+						";38;2;%d;%d;%d",
+						(fg >> 16) & 0xff,
+						(fg >> 8) & 0xff,
+						fg & 0xff);
+				} else if (fg & COLOUR_FLAG_256) {
+					n += snprintf(sgr + n, sizeof(sgr) - n,
+						";38;5;%d", fg & 0xff);
+				} else if (fg >= 90 && fg <= 97) {
+					n += snprintf(sgr + n, sizeof(sgr) - n,
+						";%d", fg);
+				} else if (fg >= 0 && fg <= 7) {
+					n += snprintf(sgr + n, sizeof(sgr) - n,
+						";%d", 30 + fg);
+				}
+				/* 8=default, 9=terminal: reset handles it */
 
-				if (bg <= 7)
-					n += snprintf(sgr + n, sizeof(sgr) - n, ";%d", 40 + bg);
-				else if (bg >= 10 && bg <= 15)
-					n += snprintf(sgr + n, sizeof(sgr) - n, ";%d", 100 + bg - 10);
-				else if (bg >= 16 && bg < 256)
-					n += snprintf(sgr + n, sizeof(sgr) - n, ";48;5;%d", bg);
+				if (bg & COLOUR_FLAG_RGB) {
+					n += snprintf(sgr + n, sizeof(sgr) - n,
+						";48;2;%d;%d;%d",
+						(bg >> 16) & 0xff,
+						(bg >> 8) & 0xff,
+						bg & 0xff);
+				} else if (bg & COLOUR_FLAG_256) {
+					n += snprintf(sgr + n, sizeof(sgr) - n,
+						";48;5;%d", bg & 0xff);
+				} else if (bg >= 90 && bg <= 97) {
+					n += snprintf(sgr + n, sizeof(sgr) - n,
+						";%d", bg + 10);
+				} else if (bg >= 0 && bg <= 7) {
+					n += snprintf(sgr + n, sizeof(sgr) - n,
+						";%d", 40 + bg);
+				}
+				/* 8=default, 9=terminal: reset handles it */
 
 				n += snprintf(sgr + n, sizeof(sgr) - n, "m");
 				evbuffer_add(vt, sgr, n);
