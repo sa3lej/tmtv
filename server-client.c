@@ -428,6 +428,12 @@ server_client_lost(struct client *c)
 	struct client_window	*cw, *cw1;
 
 	c->flags |= CLIENT_DEAD;
+#ifdef TMATE_SERVER_BUILD
+	{
+		extern void tmate_viewer_left(struct client *);
+		tmate_viewer_left(c);
+	}
+#endif
 
 	server_client_clear_overlay(c);
 	status_prompt_clear(c);
@@ -3680,6 +3686,12 @@ server_client_dispatch_identify(struct client *c, struct imsg *imsg)
 	if (imsg->hdr.type != MSG_IDENTIFY_DONE)
 		return (0);
 	c->flags |= CLIENT_IDENTIFIED;
+#ifdef TMATE_SERVER_BUILD
+	{
+		extern void tmate_viewer_joined(struct client *);
+		tmate_viewer_joined(c);
+	}
+#endif
 
 	if (c->term_name == NULL || *c->term_name == '\0') {
 		free(c->term_name);
