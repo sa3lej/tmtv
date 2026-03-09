@@ -33,7 +33,12 @@ const { title, description = 'Share your terminal, keep your tmux' } = Astro.pro
   <title>{title}</title>
 </head>
 <body class="bg-tmtv-bg min-h-screen font-sans text-gray-200 antialiased">
-  <slot />
+  <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:bg-tmtv-blue focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm focus:font-semibold">
+    Skip to content
+  </a>
+  <main id="main">
+    <slot />
+  </main>
 </body>
 </html>
 

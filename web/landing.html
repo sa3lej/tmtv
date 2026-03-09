@@ -18,15 +18,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Share your terminal, keep your tmux">
-<meta property="og:title" content="tmtv — terminal sharing">
-<meta property="og:description" content="Share your terminal, keep your tmux">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<title>tmtv — terminal sharing</title>
+<meta name="description" content="Terminal sharing built on tmux">
+<title>tmtv</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
-
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
@@ -38,15 +32,15 @@
     flex-direction: column;
     align-items: center;
     min-height: 100vh;
-    font-family: "Inter", -apple-system, sans-serif;
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
     color: #e0e0e0;
     padding: 0 20px;
     -webkit-font-smoothing: antialiased;
   }
 
   a { color: inherit; text-decoration: none; }
+  code, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
 
-  /* --- Hero --- */
   .hero {
     display: flex;
     flex-direction: column;
@@ -56,7 +50,7 @@
   }
 
   .logo {
-    font-family: "JetBrains Mono", monospace;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 56px;
     font-weight: 700;
     letter-spacing: -1px;
@@ -75,7 +69,6 @@
     margin-bottom: 48px;
   }
 
-  /* --- Session card --- */
   .card {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.06);
@@ -105,7 +98,7 @@
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     padding: 14px 16px;
-    font-family: "JetBrains Mono", monospace;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 14px;
     color: #e0e0e0;
     outline: none;
@@ -119,7 +112,6 @@
     border: none;
     border-radius: 12px;
     padding: 14px 24px;
-    font-family: "Inter", sans-serif;
     font-size: 14px;
     font-weight: 600;
     color: #fff;
@@ -137,14 +129,12 @@
     line-height: 1.6;
   }
   .hint code {
-    font-family: "JetBrains Mono", monospace;
     background: rgba(255, 255, 255, 0.05);
     padding: 2px 6px;
     border-radius: 4px;
     font-size: 11px;
   }
 
-  /* --- Shared section styling --- */
   .section {
     width: 672px;
     max-width: 90vw;
@@ -161,75 +151,6 @@
     margin-bottom: 24px;
   }
 
-  /* --- Demo GIF --- */
-  .demo-wrap {
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  }
-  .demo-wrap img { width: 100%; display: block; }
-
-  /* --- Install --- */
-  .install-card {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 16px;
-    padding: 32px;
-  }
-
-  .install-card h3 {
-    font-size: 12px;
-    font-weight: 500;
-    color: #4b5563;
-    text-transform: uppercase;
-    letter-spacing: 2.4px;
-    margin-bottom: 16px;
-  }
-
-  .install-cmd {
-    background: rgba(0, 0, 0, 0.4);
-    border-radius: 12px;
-    padding: 16px;
-    font-family: "JetBrains Mono", monospace;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-  }
-
-  .install-cmd code {
-    color: #3ddc84;
-    white-space: nowrap;
-    overflow-x: auto;
-  }
-
-  .install-cmd button {
-    background: none;
-    border: none;
-    color: #4b5563;
-    cursor: pointer;
-    flex-shrink: 0;
-    padding: 0;
-    transition: color 0.2s;
-  }
-  .install-cmd button:hover { color: #9ca3af; }
-
-  .install-note {
-    margin-top: 12px;
-    font-size: 12px;
-    color: #374151;
-  }
-  .install-note a {
-    color: #6b7280;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    transition: color 0.2s;
-  }
-  .install-note a:hover { color: #9ca3af; }
-
-  /* --- How it works --- */
   .steps {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -245,7 +166,7 @@
   }
 
   .step-icon {
-    font-family: "JetBrains Mono", monospace;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 24px;
     font-weight: 700;
     margin-bottom: 12px;
@@ -269,7 +190,6 @@
   }
 
   .step code {
-    font-family: "JetBrains Mono", monospace;
     font-size: 11px;
     background: rgba(108, 158, 252, 0.1);
     color: #6c9efc;
@@ -284,10 +204,7 @@
     margin-top: 24px;
   }
 
-  .feature {
-    text-align: center;
-    padding: 16px 12px;
-  }
+  .feature { text-align: center; padding: 16px 12px; }
 
   .feature-label {
     font-size: 11px;
@@ -297,141 +214,12 @@
   }
 
   .feature-value {
-    font-family: "JetBrains Mono", monospace;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 12px;
     color: #3ddc84;
     margin-top: 4px;
   }
 
-  /* --- Why tmtv --- */
-  .why-card {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    border-radius: 12px;
-    padding: 32px;
-    font-size: 14px;
-    color: #9ca3af;
-    line-height: 1.6;
-  }
-
-  .why-card p + p { margin-top: 12px; }
-  .why-card a { color: #6c9efc; }
-  .why-card a:hover { text-decoration: underline; }
-  .why-card strong { color: #d1d5db; }
-
-  /* --- Screenshots --- */
-  .screenshots {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-  }
-
-  .screenshot {
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .screenshot img { width: 100%; display: block; }
-
-  .screenshot-label {
-    text-align: center;
-    font-size: 10px;
-    color: #374151;
-    padding: 8px 0;
-  }
-
-  .screenshot-hint {
-    text-align: center;
-    font-size: 11px;
-    color: #374151;
-    margin-top: 12px;
-  }
-
-  .screenshot-hint code {
-    font-family: "JetBrains Mono", monospace;
-    background: rgba(255, 255, 255, 0.05);
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
-
-  /* --- Changelog --- */
-  .changelog-list {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.04);
-    border-radius: 12px;
-    padding: 16px 20px;
-  }
-
-  .changelog-entry {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-    padding: 8px 0;
-  }
-
-  .changelog-entry + .changelog-entry {
-    border-top: 1px solid rgba(255, 255, 255, 0.03);
-  }
-
-  .changelog-ver {
-    font-family: "JetBrains Mono", monospace;
-    font-size: 13px;
-    font-weight: 600;
-    color: #3ddc84;
-    flex-shrink: 0;
-    min-width: 44px;
-  }
-
-  .changelog-date {
-    font-family: "JetBrains Mono", monospace;
-    font-size: 11px;
-    color: #444;
-    flex-shrink: 0;
-  }
-
-  .changelog-desc {
-    font-size: 13px;
-    color: #6b7280;
-    line-height: 1.4;
-  }
-
-  /* --- Author / credits --- */
-  .credits {
-    text-align: center;
-    padding-bottom: 16px;
-  }
-
-  .credits p {
-    font-size: 14px;
-    color: #6b7280;
-  }
-
-  .credits strong { color: #9ca3af; }
-  .credits a.blue { color: #6c9efc; }
-  .credits a.blue:hover { text-decoration: underline; }
-  .credits a.purple { color: #c084fc; }
-  .credits a.purple:hover { text-decoration: underline; }
-
-  .credits-links {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    margin-top: 12px;
-  }
-
-  .credits-links a {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: #4b5563;
-    transition: color 0.2s;
-  }
-  .credits-links a:hover { color: #9ca3af; }
-
-  /* --- Footer --- */
   .footer {
     padding: 32px 0 24px;
     font-size: 11px;
@@ -442,24 +230,18 @@
   .footer a { color: #6b7280; transition: color 0.2s; }
   .footer a:hover { color: #9ca3af; }
 
-  /* --- Responsive --- */
   @media (max-width: 640px) {
     .logo { font-size: 40px; }
     .steps { grid-template-columns: 1fr; }
     .features { grid-template-columns: 1fr; gap: 8px; }
-    .screenshots { grid-template-columns: 1fr; }
-    .changelog-entry { flex-wrap: wrap; gap: 6px; }
-    .changelog-date { order: 2; margin-left: auto; }
-    .changelog-desc { order: 3; flex-basis: 100%; }
   }
 </style>
 </head>
 <body>
 
-  <!-- Hero -->
   <div class="hero">
     <h1 class="logo">tmtv</h1>
-    <p class="tagline">share your terminal, keep your tmux</p>
+    <p class="tagline">terminal sharing built on tmux</p>
 
     <div class="card">
       <h2>View a session</h2>
@@ -474,30 +256,6 @@
     </div>
   </div>
 
-  <!-- Demo GIF -->
-  <div class="section">
-    <div class="demo-wrap">
-      <img src="/tmtv-demo.gif" alt="tmtv web viewer — live terminal session">
-    </div>
-  </div>
-
-  <!-- Install -->
-  <div class="section">
-    <div class="install-card">
-      <h3>Install</h3>
-      <div class="install-cmd">
-        <code>curl -fsSL https://tmtv.se/install.sh | sh</code>
-        <button id="copy-btn" title="Copy">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
-        </button>
-      </div>
-      <p class="install-note">
-        Linux and macOS. Or build from <a href="https://github.com/sa3lej/tmtv">source</a>.
-      </p>
-    </div>
-  </div>
-
-  <!-- How it works -->
   <div class="section">
     <h3 class="section-title">How it works</h3>
     <div class="steps">
@@ -533,75 +291,6 @@
     </div>
   </div>
 
-  <!-- Why tmtv -->
-  <div class="section">
-    <h3 class="section-title">Why tmtv?</h3>
-    <div class="why-card">
-      <p>I loved <a href="https://github.com/tmate-io/tmate">tmate</a> but it was stuck on tmux 2.4 from 2017. Nine years of tmux improvements &mdash; popup menus, extended keys, sixel graphics &mdash; all missing.</p>
-      <p>So I rebased it on <strong>tmux 3.6a</strong>, added web sharing, and here we are. Same SSH-based sharing you know, now with a modern tmux and a browser viewer for anyone who just wants to watch. And there's more coming.</p>
-    </div>
-  </div>
-
-  <!-- Screenshots -->
-  <div class="section">
-    <h3 class="section-title">What it looks like</h3>
-    <div class="screenshots">
-      <div class="screenshot">
-        <img src="/screenshot-default.png" alt="tmtv default theme" loading="lazy">
-        <div class="screenshot-label">Default theme</div>
-      </div>
-      <div class="screenshot">
-        <img src="/screenshot-tmux.png" alt="tmtv viewer showing a normal tmux session" loading="lazy">
-        <div class="screenshot-label">Normal session</div>
-      </div>
-      <div class="screenshot">
-        <img src="/screenshot-tv.png" alt="tmtv TV theme" loading="lazy">
-        <div class="screenshot-label">TV theme</div>
-      </div>
-    </div>
-    <p class="screenshot-hint">
-      Try it: add <code>?theme=tv</code> to any viewer URL
-    </p>
-  </div>
-
-  <!-- Changelog -->
-  <div class="section">
-    <h3 class="section-title">Recent updates</h3>
-    <div class="changelog-list">
-      <div class="changelog-entry">
-        <span class="changelog-ver">1.1.1</span>
-        <span class="changelog-date">2026-03-09</span>
-        <span class="changelog-desc">Your fish finally have the right colors. Fixed 256-color, RGB, and bright palette rendering in the web viewer.</span>
-      </div>
-      <div class="changelog-entry">
-        <span class="changelog-ver">1.1.0</span>
-        <span class="changelog-date">2026-03-08</span>
-        <span class="changelog-desc">Named sessions so you can stop sharing random hex. Web sharing toggle &mdash; because sometimes you want an audience, sometimes you don't. Plus SSH read-only viewer.</span>
-      </div>
-      <div class="changelog-entry">
-        <span class="changelog-ver">1.0.0</span>
-        <span class="changelog-date">2026-03-07</span>
-        <span class="changelog-desc">Hello, world. Terminal sharing over SSH and web, built on tmux 3.6a. Nine years of catching up, done in a weekend.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- Credits -->
-  <div class="section credits">
-    <p>Built by <strong>Lars-Erik Jonsson</strong> (<a href="https://github.com/sa3lej" class="blue">SA3LEJ</a>) with <a href="https://claude.ai/code" class="purple">Claude Code</a>.</p>
-    <div class="credits-links">
-      <a href="https://github.com/sa3lej/tmtv">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-        GitHub
-      </a>
-      <a href="https://buymeacoffee.com/lejo">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" x2="6" y1="2" y2="4"/><line x1="10" x2="10" y1="2" y2="4"/><line x1="14" x2="14" y1="2" y2="4"/></svg>
-        Buy me a coffee
-      </a>
-    </div>
-  </div>
-
-  <!-- Footer -->
   <footer class="footer">
     powered by <a href="https://github.com/sa3lej/tmtv">tmtv</a>
     &mdash; terminal sharing for IT professionals
@@ -612,30 +301,6 @@ document.getElementById('session-form').addEventListener('submit', function(e) {
   e.preventDefault();
   var token = document.getElementById('token').value.trim();
   if (token) window.location.href = '/s/' + encodeURIComponent(token);
-});
-
-document.getElementById('copy-btn').addEventListener('click', function() {
-  var cmd = 'curl -fsSL https://tmtv.se/install.sh | sh';
-  var btn = this;
-  var done = function() {
-    btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
-    setTimeout(function() {
-      btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
-    }, 1500);
-  };
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(cmd).then(done).catch(done);
-  } else {
-    var ta = document.createElement('textarea');
-    ta.value = cmd;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    done();
-  }
 });
 </script>
 </body>
