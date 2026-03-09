@@ -93,6 +93,18 @@ static void tmate_ready(struct tmate_session *session,
 	 */
 	tmate_send_client_ready();
 
+	/* Set status-right to show viewer counts for SSH clients */
+	{
+		struct session *s = RB_MIN(sessions, &sessions);
+		if (s) {
+			options_set_string(s->options, "status-right", 0,
+				"S:#{tmtv_ssh_viewers} W:#{tmtv_web_viewers}");
+		}
+		/* Initialize viewer count format variables */
+		tmate_set_env("tmtv_ssh_viewers", "0");
+		tmate_set_env("tmtv_web_viewers", "0");
+	}
+
 	server_add_accept(0);
 }
 

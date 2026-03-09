@@ -671,15 +671,101 @@ static void tmate_send_snapshot(void)
 	tmate_send_snapshot_ex(TMATE_HLIMIT);
 }
 
+/* --- Viewer counting --- */
+
+static int count_web_viewers(struct tmate_session *session)
+{
+	struct ws_client *wc;
+	int count = 0;
+	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+		if (wc->handshake_done)
+			count++;
+	}
+	return count;
+}
+
+static void count_ssh_viewers(int *rw, int *ro)
+{
+	struct client *c;
+	*rw = 0;
+	*ro = 0;
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (!(c->flags & CLIENT_IDENTIFIED))
+			continue;
+		if (c->readonly)
+			(*ro)++;
+		else
+			(*rw)++;
+	}
+}
+
+static void sse_send_viewer_count(struct bufferevent *bev,
+				  int ssh_rw, int ssh_ro, int web)
+{
+	msgpack_sbuffer sbuf;
+	msgpack_packer pk;
+
+	msgpack_sbuffer_init(&sbuf);
+	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+
+	msgpack_pack_array(&pk, 4);
+	msgpack_pack_int(&pk, TMATE_OUT_VIEWER_COUNT);
+	msgpack_pack_int(&pk, ssh_rw);
+	msgpack_pack_int(&pk, ssh_ro);
+	msgpack_pack_int(&pk, web);
+
+	sse_send_data(bev, (unsigned char *)sbuf.data, sbuf.size);
+	msgpack_sbuffer_destroy(&sbuf);
+}
+
+void tmate_broadcast_viewer_count(struct tmate_session *session)
+{
+	struct ws_client *wc;
+	int ssh_rw, ssh_ro, web;
+	char buf[32];
+
+	if (!tmate_has_websocket())
+		return;
+
+	count_ssh_viewers(&ssh_rw, &ssh_ro);
+	web = count_web_viewers(session);
+
+	/* Update format variables for status bar */
+	snprintf(buf, sizeof(buf), "%d", ssh_rw + ssh_ro);
+	tmate_set_env("tmtv_ssh_viewers", buf);
+	snprintf(buf, sizeof(buf), "%d", web);
+	tmate_set_env("tmtv_web_viewers", buf);
+
+	/* Broadcast to all SSE clients */
+	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+		if (wc->handshake_done)
+			sse_send_viewer_count(wc->bev, ssh_rw, ssh_ro, web);
+	}
+
+	/* Trigger status bar redraw for SSH viewers */
+	struct client *c;
+	TAILQ_FOREACH(c, &clients, entry)
+		c->flags |= CLIENT_REDRAWSTATUS;
+}
+
 /* --- Client management --- */
 
 static void ws_client_free(struct ws_client *wc)
 {
+	struct tmate_session *session = wc->session;
+	bool was_connected = wc->handshake_done;
+
 	tmate_info("SSE client disconnected");
-	TAILQ_REMOVE(&wc->session->ws_clients, wc, entry);
+	TAILQ_REMOVE(&session->ws_clients, wc, entry);
 	if (wc->bev)
 		bufferevent_free(wc->bev);
 	free(wc);
+
+	if (was_connected)
+		tmate_broadcast_viewer_count(session);
 }
 
 void tmate_disconnect_ws_clients(struct tmate_session *session)
@@ -711,6 +797,8 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		sse_send_sync_layout(wc->bev);
 		/* Send current screen state from tmux grid */
 		sse_send_screen_dump(wc->bev);
+		/* Broadcast updated viewer counts to all clients */
+		tmate_broadcast_viewer_count(wc->session);
 		return;
 	}
 
@@ -898,6 +986,8 @@ void tmate_notify_client_join(__unused struct tmate_session *session,
 	pack(string, c->ip_address);
 	pack_string_or_nil(c->pubkey);
 	pack(boolean, c->readonly);
+
+	tmate_broadcast_viewer_count(session);
 }
 
 void tmate_notify_client_left(__unused struct tmate_session *session,
@@ -919,6 +1009,8 @@ void tmate_notify_client_left(__unused struct tmate_session *session,
 	pack(array, 2);
 	pack(int, TMATE_CTL_CLIENT_LEFT);
 	pack(int, c->pid);
+
+	tmate_broadcast_viewer_count(session);
 }
 
 void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,

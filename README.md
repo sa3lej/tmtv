@@ -70,6 +70,8 @@ Names must be 3-32 characters, alphanumeric and hyphens only.
 - Web viewer with xterm.js and WebGL rendering
 - Late-join support — browser viewers see current terminal state
 - Server-Sent Events streaming — works through proxies and firewalls
+- Live viewer counts — `S:N W:N` in tmux status bar and web titlebar
+- Dynamic page titles — link previews show the session name (Slack, Discord, iMessage)
 - Zero config — just type `tmtv`
 
 ## Format variables
@@ -82,6 +84,8 @@ Session URLs are available as tmux format variables:
 | `#{tmtv_ssh_ro}` | SSH connection string (read-only) |
 | `#{tmtv_web}` | Web viewer URL |
 | `#{tmtv_session_name}` | Named session name (if set) |
+| `#{tmtv_ssh_viewers}` | Number of connected SSH viewers |
+| `#{tmtv_web_viewers}` | Number of connected web viewers |
 
 Example: `tmtv display-message -p '#{tmtv_web}'`
 
@@ -175,54 +179,9 @@ That's it — SSH sharing works now. Clients connect via `ssh TOKEN@your.host.co
 
 #### 4. Web viewer (optional)
 
-Web sharing is off by default. If you want browser-based viewing, add `-z 4002` to the server flags to enable SSE streaming on a local port, then put a reverse proxy in front for TLS and routing.
+Web sharing is off by default. If you want browser-based viewing, add `-z 4002` to the server flags to enable SSE streaming on a local port, then put Caddy in front for TLS and routing.
 
-**Caddy** (recommended — automatic TLS):
-
-```
-your.host.com {
-    handle /s/* {
-        root * /var/www/tmtv
-        try_files /viewer.html
-        file_server
-    }
-
-    handle /ws/* {
-        reverse_proxy 127.0.0.1:4002 {
-            flush_interval -1
-        }
-    }
-
-    handle {
-        root * /var/www/tmtv
-        file_server
-    }
-}
-```
-
-**nginx**:
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name your.host.com;
-
-    root /var/www/tmtv;
-
-    location /s/ {
-        try_files /viewer.html =404;
-    }
-
-    location ~ ^/ws/ {
-        proxy_pass http://127.0.0.1:4002;
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_set_header Connection '';
-        proxy_http_version 1.1;
-        chunked_transfer_encoding off;
-    }
-}
-```
+A production-ready Caddyfile is provided in [`deploy/Caddyfile`](deploy/Caddyfile). It includes Caddy templates for dynamic page titles (link previews show the session name in Slack, Discord, iMessage). Replace `tmtv.se` with your hostname.
 
 Copy the web viewer from the `web/` directory:
 
@@ -253,6 +212,7 @@ Port 4002 (SSE) should NOT be exposed — the reverse proxy handles it.
 | `-z` | SSE port for web viewer | disabled |
 | `-b` | Bind address | all interfaces |
 | `-A` | Require authorized keys (reject clients without `-a`) | off |
+| `-x` | Enable PROXY protocol (for use behind load balancers) | off |
 | `-V` | Print version and exit | — |
 | `-v` | Increase log verbosity | quiet |
 
@@ -294,7 +254,7 @@ cd tests && make all
 
 #### Integration tests
 
-Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, and more (30 tests).
+Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, viewer counts, and more (33 tests).
 
 **Build machine requirements** (where you run the tests):
 - `ssh`, `curl`
