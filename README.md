@@ -209,30 +209,6 @@ your.host.com {
 }
 ```
 
-**nginx**:
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name your.host.com;
-
-    root /var/www/tmtv;
-
-    location ~ ^/s/[a-zA-Z0-9_-]+$ {
-        try_files /viewer.html =404;
-    }
-
-    location ~ ^/ws/ {
-        proxy_pass http://127.0.0.1:4002;
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_set_header Connection '';
-        proxy_http_version 1.1;
-        chunked_transfer_encoding off;
-    }
-}
-```
-
 Copy the web viewer from the `web/` directory:
 
 ```sh
