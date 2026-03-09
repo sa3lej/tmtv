@@ -63,8 +63,9 @@ session-cleanup:
 
 integration:
 	@echo ""
-	@echo "Running integration tests (requires TEST_HOST)..."
-	@sh test-integration.sh
+	@echo "Running integration tests (requires TEST_HOST env var)..."
+	@test -n "$(TEST_HOST)" || { echo "ERROR: set TEST_HOST=<ip>"; exit 1; }
+	@TEST_HOST=$(TEST_HOST) sh test-integration.sh
 
 wiring:
 	@echo ""

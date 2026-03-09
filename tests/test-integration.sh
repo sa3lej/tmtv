@@ -4,20 +4,23 @@
 # Tests real SSH and SSE workflows against a running tmtv-server.
 #
 # Requirements:
-#   - TEST_HOST: IP of test machine (default: 89.167.2.83)
+#   - TEST_HOST: IP or hostname of test machine (required, no default)
 #   - tmtv-server running on TEST_HOST:2222 (SSH) and :4002 (SSE)
 #   - nginx on TEST_HOST:8080 serving web viewer
 #   - tmtv client at /root/tmtv on TEST_HOST
 #   - SSH access as root to TEST_HOST on port 22
 #
 # Usage:
-#   sh test-integration.sh              # run all tests
-#   sh test-integration.sh --quick      # skip slow tests
+#   TEST_HOST=<ip> sh test-integration.sh
+#   TEST_HOST=<ip> sh test-integration.sh --quick
 #
 
 set -e
 
-TEST_HOST="${TEST_HOST:-89.167.2.83}"
+if [ -z "$TEST_HOST" ]; then
+	echo "ERROR: TEST_HOST is required (set to IP/hostname of test machine)" >&2
+	exit 1
+fi
 TEST_SSH_PORT="${TEST_SSH_PORT:-22}"
 TMTV_PORT="${TMTV_PORT:-2222}"
 SSE_PORT="${SSE_PORT:-4002}"
@@ -97,12 +100,25 @@ fi
 # -------------------------------------------------------
 # Test: Start a tmtv session with web sharing + named session
 # -------------------------------------------------------
+# Derive key fingerprints from the server's keys directory
+KEYS_DIR="${REMOTE_KEYS_DIR:-/root/keys}"
+RSA_FP=$(remote "ssh-keygen -lf $KEYS_DIR/ssh_host_rsa_key -E sha256 2>/dev/null" \
+	| awk '{print $2}' || echo "")
+ED25519_FP=$(remote "ssh-keygen -lf $KEYS_DIR/ssh_host_ed25519_key -E sha256 2>/dev/null" \
+	| awk '{print $2}' || echo "")
+
+if [ -z "$RSA_FP" ] && [ -z "$ED25519_FP" ]; then
+	fail "read server key fingerprints" "no keys found in $KEYS_DIR"
+	echo "Cannot continue without fingerprints. Aborting."
+	exit 1
+fi
+
 # Create a test config that enables web sharing and sets a name
 remote "cat > $REMOTE_CONF << CONF
 set -g tmtv-server-host \"127.0.0.1\"
 set -g tmtv-server-port $TMTV_PORT
-set -g tmtv-server-rsa-fingerprint \"SHA256:EhO9cNmdn7Jk00qY25oamWMp8CDTFxPa1N+DeqffuDE\"
-set -g tmtv-server-ed25519-fingerprint \"SHA256:EfE1dXoDHmTi/XGh/T4+SUT6sK1+PA4ohcbkhsIZyyQ\"
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
 set -g tmtv-session-name \"$TESTID\"
 set -g tmtv-web-sharing on
 CONF"
