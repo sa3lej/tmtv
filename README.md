@@ -284,8 +284,43 @@ ssh-keygen -lf /etc/tmtv/keys/ssh_host_rsa_key.pub
 
 ### Running tests
 
+#### Unit and functional tests
+
+Run locally — no server required:
+
 ```sh
 cd tests && make all
+```
+
+#### Integration tests
+
+Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, and more (30 tests).
+
+**Build machine requirements** (where you run the tests):
+- `ssh`, `curl`
+- `npx` + Playwright for visual tests: `npm i -D playwright && npx playwright install chromium`
+
+**Test machine requirements** (the server):
+- `tmtv-server` running via systemd
+- `tmtv` client binary
+- Caddy (or any reverse proxy) on port 8080 with `/s/*` → `viewer.html` and `/ws/*` → SSE proxy
+- `expect` for SSH RW/RO tests: `apt install expect`
+- SSH host keys in `/root/keys/`
+
+```sh
+# Deploy and test
+make && \
+  scp tmtv-server root@<host>:/usr/local/bin/tmtv-server && \
+  scp tmtv root@<host>:/root/tmtv && \
+  scp web/viewer.html web/viewer.js root@<host>:/var/www/tmtv/ && \
+  ssh root@<host> systemctl restart tmtv-server && \
+  cd tests && TEST_HOST=<host> make integration
+```
+
+Quick mode skips slow tests (Playwright, web sharing toggle):
+
+```sh
+TEST_HOST=<host> sh test-integration.sh --quick
 ```
 
 ## License
