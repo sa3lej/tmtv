@@ -25,28 +25,29 @@
   var OUT_VIEWER_COUNT  = 14;
 
   var FONT = '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace';
+  /* macOS Terminal.app "Clear Dark" palette */
   var THEME = {
-    background: '#0d0d1a',
+    background: '#191d27',
     foreground: '#e0e0e0',
-    cursor: '#528bff',
-    cursorAccent: '#0d0d1a',
-    selectionBackground: 'rgba(82, 139, 255, 0.3)',
-    black: '#1a1a2e',
-    red: '#ff6b6b',
-    green: '#3ddc84',
-    yellow: '#ffd93d',
-    blue: '#6c9efc',
-    magenta: '#c084fc',
-    cyan: '#67e8f9',
-    white: '#e0e0e0',
-    brightBlack: '#4a4a5e',
-    brightRed: '#ff8a8a',
-    brightGreen: '#6ee7a0',
-    brightYellow: '#ffe066',
-    brightBlue: '#93b8fc',
-    brightMagenta: '#d4a5fc',
-    brightCyan: '#8ef0fc',
-    brightWhite: '#ffffff'
+    cursor: '#67b5ed',
+    cursorAccent: '#191d27',
+    selectionBackground: 'rgba(39, 61, 76, 0.75)',
+    black: '#35424c',
+    red: '#b45648',
+    green: '#6caa71',
+    yellow: '#c4ac62',
+    blue: '#6d96b4',
+    magenta: '#bd7bcd',
+    cyan: '#7ccbcd',
+    white: '#dee5eb',
+    brightBlack: '#465c6d',
+    brightRed: '#df6c5a',
+    brightGreen: '#79be7e',
+    brightYellow: '#e5c872',
+    brightBlue: '#67b5ed',
+    brightMagenta: '#d389e5',
+    brightCyan: '#84dde0',
+    brightWhite: '#e5eff5'
   };
 
   var serverCols = window.serverCols = 80;
@@ -174,7 +175,7 @@
         container.appendChild(el);
         var t = createPaneTerminal(sx, sy);
         t.open(el);
-        panes[id] = { term: t, el: el, sx: sx, sy: sy };
+        panes[id] = { term: t, el: el, sx: sx, sy: sy, needsRefresh: true };
         if (pendingData[id]) {
           for (var j = 0; j < pendingData[id].length; j++) {
             var d = pendingData[id][j];
@@ -386,6 +387,12 @@
           var pane = panes[paneId];
           if (pane) {
             pane.term.write(ptyData instanceof Uint8Array ? ptyData : String(ptyData));
+            if (pane.needsRefresh) {
+              pane.needsRefresh = false;
+              (function(p) {
+                setTimeout(function() { p.term.refresh(0, p.sy - 1); }, 50);
+              })(pane);
+            }
           } else {
             if (!pendingData[paneId]) pendingData[paneId] = [];
             pendingData[paneId].push(ptyData);

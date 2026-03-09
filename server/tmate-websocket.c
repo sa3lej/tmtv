@@ -269,6 +269,7 @@ static void sse_send_pane_dump(struct bufferevent *bev,
 
 	/* Reset terminal and home cursor */
 	evbuffer_add(vt, "\033[!p", 4);     /* DECSTR soft reset */
+	evbuffer_add(vt, "\033[2J", 4);     /* erase entire display */
 	evbuffer_add(vt, "\033[H", 3);      /* cursor home */
 	evbuffer_add(vt, "\033[?25l", 6);   /* hide cursor */
 
