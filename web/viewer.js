@@ -281,7 +281,9 @@
   var durationTimer = null;
 
   if (sessionToken) {
-    document.getElementById('titlebar-label').textContent = 'tmtv \u2014 ' + sessionToken.substring(0, 8);
+    var displayName = sessionToken.substring(0, 8);
+    document.getElementById('titlebar-label').textContent = 'tmtv \u2014 ' + displayName;
+    document.title = 'tmtv \u2014 ' + displayName;
   }
 
   function updateMeta() {
