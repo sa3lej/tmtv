@@ -96,10 +96,10 @@ remote_tmtv() {
 	remote "TERM=xterm-256color $REMOTE_TMTV $*"
 }
 
-REMOTE_CONF="/root/.tmtv-test-$TESTID.conf"
-
 # Generate unique session name for this test run
 TESTID="t$$"
+
+REMOTE_CONF="/root/.tmtv-test-$TESTID.conf"
 
 cleanup() {
 	# Kill any test sessions
@@ -513,6 +513,92 @@ if [ -n "$TOKEN" ]; then
 else
 	skip "SSH RO sees session output (no token)"
 	skip "SSH RO is read-only (no token)"
+fi
+
+# -------------------------------------------------------
+# Test: SSH viewer status bar shows viewer count (S:N W:N)
+# -------------------------------------------------------
+if [ -n "$TOKEN" ]; then
+	# Connect an SSH RO viewer and capture the terminal output
+	VIEWER_LOG=$(remote "TERM=xterm-256color script -qc \
+		'timeout 6 ssh -tt -p $TMTV_PORT -o StrictHostKeyChecking=no \
+		ro-${TESTID}@127.0.0.1' /tmp/viewer-status.log 2>/dev/null; \
+		strings /tmp/viewer-status.log" || echo "")
+
+	if echo "$VIEWER_LOG" | grep -qo "S:[0-9]* W:[0-9]*"; then
+		pass "SSH viewer status bar shows S:N W:N"
+	else
+		fail "SSH viewer status bar shows S:N W:N" \
+			"pattern not found in viewer output"
+	fi
+
+	# Verify the count is at least S:1 (the viewer itself)
+	VIEWER_S=$(echo "$VIEWER_LOG" | grep -o "S:[0-9]*" | tail -1 | cut -d: -f2)
+	if [ -n "$VIEWER_S" ] && [ "$VIEWER_S" -ge 1 ] 2>/dev/null; then
+		pass "SSH viewer count >= 1"
+	else
+		fail "SSH viewer count >= 1" "got S:${VIEWER_S:-empty}"
+	fi
+
+	# Test web viewer count: connect SSE client, verify W:1 in SSH status bar
+	curl -s -m 15 -N "http://$TEST_HOST:$SSE_PORT/$TOKEN" > /dev/null 2>&1 &
+	WEB_CURL_PID=$!
+	sleep 3
+
+	VIEWER_LOG2=$(remote "TERM=xterm-256color script -qc \
+		'timeout 6 ssh -tt -p $TMTV_PORT -o StrictHostKeyChecking=no \
+		ro-${TESTID}@127.0.0.1' /tmp/viewer-web.log 2>/dev/null; \
+		strings /tmp/viewer-web.log" || echo "")
+	kill $WEB_CURL_PID 2>/dev/null || true
+
+	VIEWER_W=$(echo "$VIEWER_LOG2" | grep -o "W:[0-9]*" | tail -1 | cut -d: -f2)
+	if [ -n "$VIEWER_W" ] && [ "$VIEWER_W" -ge 1 ] 2>/dev/null; then
+		pass "web viewer count >= 1 in SSH status bar"
+	else
+		fail "web viewer count >= 1 in SSH status bar" "got W:${VIEWER_W:-empty}"
+	fi
+else
+	skip "SSH viewer status bar shows S:N W:N (no token)"
+	skip "SSH viewer count >= 1 (no token)"
+	skip "web viewer count >= 1 in SSH status bar (no token)"
+fi
+
+# -------------------------------------------------------
+# Test: Status bar customization (set-option status-right)
+# -------------------------------------------------------
+if [ -n "$TOKEN" ]; then
+	# Override status-right with 24H clock and ISO date
+	remote_tmtv "set-option -g status-right 'S:#{tmtv_ssh_viewers} W:#{tmtv_web_viewers} \"#{=21:pane_title}\" %H:%M %Y-%m-%d'"
+	sleep 2
+
+	# Connect SSH RO viewer and capture the status bar
+	CUSTOM_LOG=$(remote "TERM=xterm-256color script -qc \
+		'timeout 6 ssh -tt -p $TMTV_PORT -o StrictHostKeyChecking=no \
+		ro-${TESTID}@127.0.0.1' /tmp/viewer-custom.log 2>/dev/null; \
+		strings /tmp/viewer-custom.log" || echo "")
+
+	# Verify ISO date format (YYYY-MM-DD) appears
+	if echo "$CUSTOM_LOG" | grep -qE "[0-9]{4}-[0-9]{2}-[0-9]{2}"; then
+		pass "status-right override (ISO date)"
+	else
+		fail "status-right override (ISO date)" \
+			"YYYY-MM-DD not found in viewer output"
+	fi
+
+	# Verify viewer counts still work after override
+	if echo "$CUSTOM_LOG" | grep -qo "S:[0-9]* W:[0-9]*"; then
+		pass "viewer counts survive status-right override"
+	else
+		fail "viewer counts survive status-right override" \
+			"S:N W:N not found after set-option"
+	fi
+
+	# Restore default
+	remote_tmtv "set-option -gu status-right"
+	sleep 1
+else
+	skip "status-right override (ISO date) (no token)"
+	skip "viewer counts survive status-right override (no token)"
 fi
 
 # -------------------------------------------------------

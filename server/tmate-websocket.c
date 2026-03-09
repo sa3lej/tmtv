@@ -1013,6 +1013,17 @@ void tmate_notify_client_left(__unused struct tmate_session *session,
 	tmate_broadcast_viewer_count(session);
 }
 
+/* Wrappers callable from shared code (server-client.c) without tmate_session */
+void tmate_viewer_joined(struct client *c)
+{
+	tmate_notify_client_join(tmate_session, c);
+}
+
+void tmate_viewer_left(struct client *c)
+{
+	tmate_notify_client_left(tmate_session, c);
+}
+
 void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 				     struct tmate_unpacker *uk)
 {

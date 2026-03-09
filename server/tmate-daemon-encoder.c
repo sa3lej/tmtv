@@ -65,8 +65,35 @@ void tmate_send_client_ready(void)
 	pack(int, TMATE_IN_READY);
 }
 
+/* Local env storage for format variable injection into status bar */
+struct tmate_env_entry {
+	TAILQ_ENTRY(tmate_env_entry) entry;
+	char *name;
+	char *value;
+};
+
+static TAILQ_HEAD(, tmate_env_entry) tmate_env_list =
+    TAILQ_HEAD_INITIALIZER(tmate_env_list);
+
 void tmate_set_env(const char *name, const char *value)
 {
+	struct tmate_env_entry *e;
+
+	/* Store locally for format variable resolution */
+	TAILQ_FOREACH(e, &tmate_env_list, entry) {
+		if (!strcmp(e->name, name)) {
+			free(e->value);
+			e->value = xstrdup(value);
+			goto send;
+		}
+	}
+	e = xmalloc(sizeof(*e));
+	e->name = xstrdup(name);
+	e->value = xstrdup(value);
+	TAILQ_INSERT_HEAD(&tmate_env_list, e, entry);
+
+send:
+	/* Send to client over the wire */
 	if (tmate_session->client_protocol_version < 4)
 		return;
 
@@ -74,6 +101,15 @@ void tmate_set_env(const char *name, const char *value)
 	pack(int, TMATE_IN_SET_ENV);
 	pack(string, name);
 	pack(string, value);
+}
+
+void tmate_format(struct format_tree *ft)
+{
+	struct tmate_env_entry *e;
+
+	TAILQ_FOREACH(e, &tmate_env_list, entry) {
+		format_add(ft, e->name, "%s", e->value);
+	}
 }
 
 void tmate_client_resize(u_int sx, u_int sy)
