@@ -15,18 +15,10 @@ void tmate_send_web_url(struct tmate_session *session)
 				session->session_token_named :
 				session->session_token;
 	char *web_url;
-	int port = tmate_settings->web_port > 0 ?
-		   tmate_settings->web_port :
-		   tmate_settings->websocket_port;
-	if (port == 80)
-		xasprintf(&web_url, "http://%s/s/%s",
-			  tmate_settings->tmate_host,
-			  url_token);
-	else
-		xasprintf(&web_url, "http://%s:%d/s/%s",
-			  tmate_settings->tmate_host,
-			  port, url_token);
-	tmate_notify("Web sharing enabled: %s", web_url);
+	xasprintf(&web_url, "https://%s/s/%s",
+		  tmate_settings->tmate_host,
+		  url_token);
+	tmate_notify("web session: %s", web_url);
 	tmate_set_env("tmtv_web", web_url);
 	free(web_url);
 }
@@ -34,6 +26,36 @@ void tmate_send_web_url(struct tmate_session *session)
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_1 "Server requires authorized_keys but none are given."
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_2 "Use '-a FILENAME' to specify an authorized_keys file."
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_3 "Press <Ctrl-c><Ctrl-d> to exit."
+
+static void tmate_send_session_urls(struct tmate_session *session)
+{
+	char *ssh_conn_str;
+	const char *rw_token, *ro_token;
+
+	/*
+	 * Use named tokens if a session name was set during config,
+	 * otherwise fall back to random tokens.
+	 */
+	rw_token = session->session_token_rw_named ?
+		   session->session_token_rw_named :
+		   session->session_token;
+	ro_token = session->session_token_ro;
+
+	tmate_notify("Note: clear your terminal before sharing readonly access");
+
+	ssh_conn_str = get_ssh_conn_string(ro_token);
+	tmate_notify("ssh session read only: %s", ssh_conn_str);
+	tmate_set_env("tmtv_ssh_ro", ssh_conn_str);
+	free(ssh_conn_str);
+
+	ssh_conn_str = get_ssh_conn_string(rw_token);
+	tmate_notify("ssh session: %s", ssh_conn_str);
+	tmate_set_env("tmtv_ssh", ssh_conn_str);
+	free(ssh_conn_str);
+
+	if (session->web_sharing_enabled)
+		tmate_send_web_url(session);
+}
 
 static void tmate_ready(struct tmate_session *session,
 			__unused struct tmate_unpacker *uk)
@@ -49,28 +71,34 @@ static void tmate_ready(struct tmate_session *session,
 		int count = get_num_authorized_keys(session->authorized_keys);
 		tmate_info("Restricting ssh access, num_keys=%d", count);
 	} else if (tmate_settings->authorized_keys_only) {
-		/* Inform the user that this connexion isn't happening,
-		 * and what to do about it.
-		 */
-
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_1);
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_2);
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_3);
 		tmate_notify("");
-		/*
-		 * tmux 3.6a: server_send_exit() is static. Use kill(getpid(), SIGTERM)
-		 * to trigger clean shutdown instead.
-		 */
 		kill(getpid(), SIGTERM);
 	}
+
+	/*
+	 * Send URLs now — after all config (session_name, web_sharing,
+	 * authorized_keys) has been processed. This avoids sending
+	 * stale random tokens that get replaced by named ones.
+	 */
+	tmate_send_session_urls(session);
+	session->urls_sent = true;
+
+	/*
+	 * Signal the client that URLs are ready. The client's
+	 * handle_ready() shows the startup overlay, so this must
+	 * come AFTER the URLs are sent.
+	 */
+	tmate_send_client_ready();
+
 	server_add_accept(0);
 }
 
 static void tmate_header(struct tmate_session *session,
 			 struct tmate_unpacker *uk)
 {
-	char *ssh_conn_str;
-
 	session->client_protocol_version = unpack_int(uk);
 
 	if (session->client_protocol_version >= 3) {
@@ -96,22 +124,8 @@ static void tmate_header(struct tmate_session *session,
 	if (tmate_has_websocket())
 		tmate_send_websocket_header(session);
 
-	ssh_conn_str = get_ssh_conn_string(session->session_token_ro);
-	tmate_notify("Note: clear your terminal before sharing readonly access");
-	tmate_notify("ssh session read only: %s", ssh_conn_str);
-	tmate_set_env("tmtv_ssh_ro", ssh_conn_str);
-	free(ssh_conn_str);
-
-	ssh_conn_str = get_ssh_conn_string(session->session_token);
-	tmate_notify("ssh session: %s", ssh_conn_str);
-	tmate_set_env("tmtv_ssh", ssh_conn_str);
-	free(ssh_conn_str);
-
-	/* Web URL is only sent when client enables web sharing */
-	if (tmate_has_websocket() && session->web_sharing_enabled)
-		tmate_send_web_url(session);
-
-	tmate_send_client_ready();
+	/* URLs and client_ready are sent in tmate_ready(), after all
+	 * config (session_name, web_sharing) has been processed. */
 }
 
 static void tmate_uname(struct tmate_session *session,
@@ -373,6 +387,8 @@ out:
 	free(cmd_str);
 }
 
+extern void tmate_hook_set_option_auth(const char *name, const char *val);
+
 static void tmate_exec_cmd(__unused struct tmate_session *session,
 			   struct tmate_unpacker *uk)
 {
@@ -388,6 +404,20 @@ static void tmate_exec_cmd(__unused struct tmate_session *session,
 	argv = xmalloc(sizeof(char *) * argc);
 	for (i = 0; i < argc; i++)
 		argv[i] = unpack_string(uk);
+
+	/*
+	 * Intercept "set-option tmtv-set key=val" and process it
+	 * synchronously. The command queue is async and would delay
+	 * session_name/web_sharing until after tmate_ready().
+	 */
+	if (argc == 3 &&
+	    !strcmp(argv[0], "set-option") &&
+	    !strcmp(argv[1], "tmtv-set")) {
+		tmate_debug("Sync tmtv-set: %s", argv[2]);
+		tmate_hook_set_option_auth("tmtv-set", argv[2]);
+		cmd_free_argv(argc, argv);
+		return;
+	}
 
 	/* Build a command string from argv and parse it */
 	len = 0;

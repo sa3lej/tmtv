@@ -9,6 +9,11 @@ void tmate_init_rand(void)
 		tmate_fatal("Cannot open /dev/urandom");
 }
 
+int tmate_get_urandom_fd(void)
+{
+	return dev_urandom_fd;
+}
+
 void tmate_get_random_bytes(void *buffer, ssize_t len)
 {
 	if (read(dev_urandom_fd, buffer, len) != len)

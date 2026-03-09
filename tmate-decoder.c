@@ -1,12 +1,19 @@
 #include "tmate.h"
 #include "tmate-protocol.h"
 
-static void handle_notify(__unused struct tmate_session *session,
+static void handle_notify(struct tmate_session *session,
 			  struct tmate_unpacker *uk)
 {
 	char *msg = unpack_string(uk);
-	cfg_add_cause("[tmtv] %s", msg);
-	tmate_status_message("%s", msg);
+
+	if (session->reconnected) {
+		/* Suppress overlay/status bar spam on reconnect */
+		tmate_debug("reconnect notify: %s", msg);
+	} else {
+		cfg_add_cause("[tmtv] %s", msg);
+		tmate_status_message("%s", msg);
+	}
+
 	free(msg);
 }
 
@@ -174,12 +181,21 @@ static void handle_ready(struct tmate_session *session,
 			 __unused struct tmate_unpacker *uk)
 {
 	session->tmate_env_ready = 1;
-	/* In tmux 3.6a, signal_waiting_clients doesn't exist.
-	 * Use notify_session to signal readiness instead. */
+
+	/*
+	 * Show the startup overlay on first connect only.
+	 * It contains the tip lines (added in tmate_session_start)
+	 * plus the SSH/web URLs (added by handle_notify).
+	 * On reconnect, env vars are still updated via SET_ENV
+	 * but we skip the overlay to avoid spamming the user.
+	 */
 	{
 		struct session *s = RB_MIN(sessions, &sessions);
-		if (s != NULL)
+		if (s != NULL) {
+			if (!session->reconnected)
+				cfg_show_causes(s);
 			notify_session("tmtv-ready", s);
+		}
 	}
 }
 

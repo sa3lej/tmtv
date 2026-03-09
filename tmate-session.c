@@ -63,6 +63,7 @@ static void dns_cb(int errcode, struct evutil_addrinfo *addr, void *ptr)
 		return;
 	}
 
+	cfg_add_cause("Connecting to %s...", host);
 	tmate_status_message("Connecting to %s...", host);
 
 	int i, num_clients = 0;

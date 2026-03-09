@@ -54,9 +54,21 @@ cfg_done(__unused struct cmdq_item *item, __unused void *data)
 
 #ifdef TMATE
 	tmate_session_start();
-#endif
-
+	/*
+	 * If connecting to a server, defer cfg_show_causes() until
+	 * TMATE_IN_READY arrives so that SSH URLs appear in the
+	 * startup overlay together with the tip lines.
+	 * If no server configured (local-only), show causes now.
+	 */
+	{
+		const char *host = options_get_string(global_options,
+						      "tmtv-server-host");
+		if (!host || !*host)
+			cfg_show_causes(NULL);
+	}
+#else
 	cfg_show_causes(NULL);
+#endif
 
 	if (cfg_item != NULL)
 		cmdq_continue(cfg_item);

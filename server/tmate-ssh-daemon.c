@@ -106,6 +106,8 @@ static void cleanup_session_files(void)
 		unlinkat(dirfd, s->session_token_ro, 0);
 	if (s->session_token_named)
 		unlinkat(dirfd, s->session_token_named, 0);
+	if (s->session_token_rw_named)
+		unlinkat(dirfd, s->session_token_rw_named, 0);
 }
 
 /*
@@ -229,11 +231,12 @@ void tmate_spawn_daemon(struct tmate_session *session)
 					O_RDONLY | O_DIRECTORY);
 
 	{
-		int keep_fds[5];
+		int keep_fds[6];
 		int nfds = 0;
 		keep_fds[nfds++] = session->tmux_socket_fd;
 		keep_fds[nfds++] = ssh_get_fd(session->ssh_client.session);
 		keep_fds[nfds++] = STDERR_FILENO;
+		keep_fds[nfds++] = tmate_get_urandom_fd();
 		if (session->ws_listen_fd >= 0)
 			keep_fds[nfds++] = session->ws_listen_fd;
 		if (session->sessions_dir_fd >= 0)
@@ -284,9 +287,11 @@ extern void tmate_send_web_url(struct tmate_session *session);
 void tmate_register_session_name(struct tmate_session *session,
 				 const char *name)
 {
-	char *named_path;
 	struct stat st;
-	bool created = false;
+	char *rw_named, *ro_named;
+	char prefix[6];
+	char *ssh_conn_str;
+	char *old_ro;
 
 	if (!is_valid_session_name(name)) {
 		tmate_notify("Invalid session name (3-32 alphanumeric/hyphens)");
@@ -298,35 +303,78 @@ void tmate_register_session_name(struct tmate_session *session,
 		return;
 	}
 
-	/* Check if name is taken */
-	if (fstatat(session->sessions_dir_fd, name, &st, AT_SYMLINK_NOFOLLOW) == 0) {
+	/* Check if name (used for web + RO) is already taken */
+	xasprintf(&ro_named, "ro-%s", name);
+	if (fstatat(session->sessions_dir_fd, name, &st, AT_SYMLINK_NOFOLLOW) == 0 ||
+	    fstatat(session->sessions_dir_fd, ro_named, &st, AT_SYMLINK_NOFOLLOW) == 0) {
 		tmate_notify("Session name '%s' is already taken", name);
+		free(ro_named);
 		return;
 	}
 
-	/* Create symlink via pre-jail fd (survives chroot + namespace) */
-	unlinkat(session->sessions_dir_fd, name, 0);
+	/* Generate RW token: <5 random digits>-<name> */
+	snprintf(prefix, sizeof(prefix), "%05d",
+		 (int)(labs(tmate_get_random_long()) % 100000));
+	xasprintf(&rw_named, "%s-%s", prefix, name);
+
+	/* Create web symlink: <name> -> <session_token> */
 	if (symlinkat(session->session_token, session->sessions_dir_fd, name) < 0) {
 		tmate_info("Named session symlink failed: %s", strerror(errno));
 		tmate_notify("Named session unavailable (%s)", strerror(errno));
+		free(rw_named);
+		free(ro_named);
 		return;
 	}
 
+	/* Create RW symlink: <digits>-<name> -> <session_token> */
+	if (symlinkat(session->session_token, session->sessions_dir_fd, rw_named) < 0) {
+		tmate_info("RW named symlink failed: %s", strerror(errno));
+		unlinkat(session->sessions_dir_fd, name, 0);
+		tmate_notify("Named session unavailable (%s)", strerror(errno));
+		free(rw_named);
+		free(ro_named);
+		return;
+	}
+
+	/* Create RO symlink: ro-<name> -> <session_token> */
+	if (symlinkat(session->session_token, session->sessions_dir_fd, ro_named) < 0)
+		tmate_info("RO named symlink failed: %s", strerror(errno));
+
+	/* Remove old random RO symlink */
+	old_ro = (char *)session->session_token_ro;
+	if (old_ro)
+		unlinkat(session->sessions_dir_fd, old_ro, 0);
+
+	/* Update session state */
 	session->session_token_named = xstrdup(name);
+	session->session_token_rw_named = rw_named;
+	free(old_ro);
+	session->session_token_ro = ro_named;
+
 	tmate_info("Named session registered: %s -> %s",
 		   name, session->obfuscated_session_token);
-	tmate_notify("Session name set: %s", name);
 
-	/* Send updated URLs using the named token */
 	tmate_set_env("tmtv_session_name", name);
 
-	char *ssh_conn_str;
-	ssh_conn_str = get_ssh_conn_string(name);
-	tmate_set_env("tmtv_ssh", ssh_conn_str);
-	free(ssh_conn_str);
+	/*
+	 * Only send URLs if tmate_ready() has already fired.
+	 * During startup, tmate_ready() sends the final URLs
+	 * after all config is processed. At runtime, we need
+	 * to notify the client of the new URLs immediately.
+	 */
+	if (session->urls_sent) {
+		ssh_conn_str = get_ssh_conn_string(rw_named);
+		tmate_notify("ssh session: %s", ssh_conn_str);
+		tmate_set_env("tmtv_ssh", ssh_conn_str);
+		free(ssh_conn_str);
 
-	if (session->web_sharing_enabled)
+		ssh_conn_str = get_ssh_conn_string(ro_named);
+		tmate_notify("ssh session read only: %s", ssh_conn_str);
+		tmate_set_env("tmtv_ssh_ro", ssh_conn_str);
+		free(ssh_conn_str);
+
 		tmate_send_web_url(session);
+	}
 }
 
 static void handle_session_name_options(const char *name,
@@ -348,7 +396,8 @@ static void handle_web_sharing_option(const char *name, const char *val)
 	bool enabled = val && (!strcmp(val, "on") || !strcmp(val, "1"));
 	tmate_session->web_sharing_enabled = enabled;
 	if (enabled) {
-		tmate_send_web_url(tmate_session);
+		if (tmate_session->urls_sent)
+			tmate_send_web_url(tmate_session);
 	} else {
 		tmate_notify("Web sharing disabled");
 		tmate_disconnect_ws_clients(tmate_session);
