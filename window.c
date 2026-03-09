@@ -1278,7 +1278,17 @@ window_pane_key(struct window_pane *wp, struct client *c, struct session *s,
 		return (0);
 	}
 
-	if (wp->fd == -1 || wp->flags & PANE_INPUTOFF)
+	if (wp->flags & PANE_INPUTOFF)
+		return (0);
+
+#ifdef TMATE_SERVER_BUILD
+	if (wp->fd == -1) {
+		tmate_client_pane_key(wp->id, key);
+		return (0);
+	}
+#endif
+
+	if (wp->fd == -1)
 		return (0);
 
 	if (input_key_pane(wp, key, m) != 0)
