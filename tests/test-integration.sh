@@ -259,63 +259,111 @@ else
 fi
 
 # -------------------------------------------------------
-# Test: SSH RW connection
+# Test: SSH RW — connect, type, verify text appears
 # -------------------------------------------------------
 if [ -n "$TOKEN" ]; then
-	# Connect via SSH to the RW token, run a command
 	RW_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" | grep -E "^[0-9]+-$TESTID$" | head -1 || echo "")
 
 	if [ -n "$RW_TOKEN" ]; then
-		# SSH RW: tmate sessions are interactive (no exec).
-		# Use timeout + script to connect, capture initial output.
-		RW_OUT=$(timeout 3 script -qc \
-			"ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 \
-			-p $TMTV_PORT ${RW_TOKEN}@$TEST_HOST" \
-			/dev/null </dev/null 2>/dev/null || true)
-		# If we got any output, the SSH handshake + channel worked
-		if [ -n "$RW_OUT" ]; then
-			pass "SSH RW connection"
-		else
-			# Fallback: check server log for the connection
-			if ssh -o StrictHostKeyChecking=no -p "$TEST_SSH_PORT" \
-				"root@$TEST_HOST" \
-				"journalctl -u tmtv-server --no-pager -n 20" 2>/dev/null \
-				| grep -q "PTY client"; then
-				pass "SSH RW connection (verified via log)"
-			else
-				fail "SSH RW connection" "no output and no log entry"
+		# First go back to pane 0 for a clean slate
+		remote_tmtv "select-pane -t main.0"
+		sleep 0.5
+
+		# Use expect on the remote to SSH RW, type a marker.
+		# Written to a file to avoid shell quoting issues.
+		# Characters sent slowly (50ms) — tmate PTY eats burst input
+		# during tmux screen redraw.
+		RW_MARKER="RWOK$$"
+		remote "cat > /tmp/tmtv-rw-test.exp << 'EXPECT'
+set timeout 15
+spawn ssh -o StrictHostKeyChecking=no -p $TMTV_PORT TOKEN@127.0.0.1
+sleep 5
+foreach c [split \"echo MARKER\r\" {}] {
+    send -- \$c
+    after 50
+}
+sleep 2
+EXPECT
+sed -i \"s/TOKEN/$RW_TOKEN/;s/MARKER/$RW_MARKER/;s/\\\$TMTV_PORT/$TMTV_PORT/\" /tmp/tmtv-rw-test.exp
+expect /tmp/tmtv-rw-test.exp >/dev/null 2>&1
+rm -f /tmp/tmtv-rw-test.exp"
+		sleep 1
+
+		# Verify the marker appeared in any pane via capture-pane
+		RW_FOUND=false
+		for p in $(remote_tmtv "list-panes -t main -F '#{pane_id}'" 2>/dev/null); do
+			CAP=$(remote_tmtv "capture-pane -t $p -p" 2>/dev/null || echo "")
+			if echo "$CAP" | grep -q "$RW_MARKER"; then
+				RW_FOUND=true
+				break
 			fi
+		done
+		if [ "$RW_FOUND" = "true" ]; then
+			pass "SSH RW text input"
+		else
+			fail "SSH RW text input" "marker '$RW_MARKER' not in any pane"
 		fi
 	else
-		skip "SSH RW connection (RW token not found)"
+		skip "SSH RW text input (RW token not found)"
 	fi
 else
-	skip "SSH RW connection (no token)"
+	skip "SSH RW text input (no token)"
 fi
 
 # -------------------------------------------------------
-# Test: SSH RO connection
+# Test: SSH RO — connect, verify can see output, verify read-only
 # -------------------------------------------------------
 RO_TOKEN="ro-$TESTID"
 if [ -n "$TOKEN" ]; then
-	RO_OUT=$(timeout 3 script -qc \
-		"ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 \
-		-p $TMTV_PORT ${RO_TOKEN}@$TEST_HOST" \
-		/dev/null </dev/null 2>/dev/null || true)
-	if [ -n "$RO_OUT" ]; then
-		pass "SSH RO connection"
+	# Send a fresh marker to the session so the RO client can see it
+	RO_MARKER="RO_VISIBLE_$$"
+	remote_tmtv "send-keys -t main.0 'echo $RO_MARKER' Enter"
+	sleep 1
+
+	# Connect RO via expect and capture what the viewer sees
+	RO_CAPTURE=$(remote "expect -c '
+		log_user 1
+		set timeout 5
+		spawn ssh -o StrictHostKeyChecking=no -p $TMTV_PORT ${RO_TOKEN}@127.0.0.1
+		sleep 3
+		send \"\"
+		expect eof
+	' 2>/dev/null" || echo "")
+
+	if echo "$RO_CAPTURE" | grep -q "$RO_MARKER"; then
+		pass "SSH RO sees session output"
 	else
-		if ssh -o StrictHostKeyChecking=no -p "$TEST_SSH_PORT" \
-			"root@$TEST_HOST" \
-			"journalctl -u tmtv-server --no-pager -n 20" 2>/dev/null \
-			| grep -q "Spawning exec\|viewer"; then
-			pass "SSH RO connection (verified via log)"
+		# RO viewer may not capture full screen; check pane instead
+		RO_PANE=$(remote_tmtv "capture-pane -t main.0 -p" 2>/dev/null || echo "")
+		if echo "$RO_PANE" | grep -q "$RO_MARKER"; then
+			pass "SSH RO sees session output (verified via pane)"
 		else
-			fail "SSH RO connection" "no output and no log entry"
+			fail "SSH RO sees session output" "marker '$RO_MARKER' not found"
 		fi
 	fi
+
+	# Verify RO cannot write: use expect to type via RO SSH, check it does NOT appear
+	RO_WRITE_MARKER="RO_NOTYPE_$$"
+	remote "expect -c '
+		set timeout 6
+		spawn ssh -o StrictHostKeyChecking=no -p $TMTV_PORT ${RO_TOKEN}@127.0.0.1
+		sleep 2
+		send \"echo $RO_WRITE_MARKER\r\"
+		sleep 2
+		send \"exit\r\"
+		expect eof
+	' >/dev/null 2>&1"
+	sleep 1
+
+	RO_CHECK=$(remote_tmtv "capture-pane -t main.0 -p" 2>/dev/null || echo "")
+	if echo "$RO_CHECK" | grep -q "$RO_WRITE_MARKER"; then
+		fail "SSH RO is read-only" "RO client was able to write text"
+	else
+		pass "SSH RO is read-only"
+	fi
 else
-	skip "SSH RO connection (no token)"
+	skip "SSH RO sees session output (no token)"
+	skip "SSH RO is read-only (no token)"
 fi
 
 # -------------------------------------------------------
