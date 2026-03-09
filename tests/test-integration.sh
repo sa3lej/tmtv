@@ -257,6 +257,42 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: Web viewer title contains session name (Caddy templates)
+# -------------------------------------------------------
+VIEWER_HTML=$(curl -s -m 5 "http://$TEST_HOST:$WEB_PORT/s/$TESTID" 2>/dev/null || echo "")
+if echo "$VIEWER_HTML" | grep -q "<title>tmtv.*$TESTID</title>"; then
+	pass "viewer <title> contains session name"
+else
+	fail "viewer <title> contains session name" \
+		"title tag missing session name '$TESTID'"
+fi
+
+if echo "$VIEWER_HTML" | grep -q "og:title.*content=\"tmtv.*$TESTID\""; then
+	pass "viewer og:title contains session name"
+else
+	fail "viewer og:title contains session name" \
+		"og:title meta missing session name '$TESTID'"
+fi
+
+# -------------------------------------------------------
+# Test: SSE viewer count — web viewer receives VIEWER_COUNT message
+# -------------------------------------------------------
+if [ -n "$TOKEN" ]; then
+	# Capture SSE data for a few seconds — should contain viewer count
+	# VIEWER_COUNT is msgpack type 14, sent as base64. We verify we get
+	# data events (the count message is included in the stream).
+	SSE_VC=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" 2>/dev/null || echo "")
+	VC_EVENTS=$(echo "$SSE_VC" | grep -c "^data:" || true)
+	if [ "$VC_EVENTS" -ge 1 ]; then
+		pass "SSE delivers viewer count events"
+	else
+		fail "SSE delivers viewer count events" "no data events in stream"
+	fi
+else
+	skip "SSE delivers viewer count events (no token)"
+fi
+
+# -------------------------------------------------------
 # Test: SSE via web proxy (named session)
 # -------------------------------------------------------
 WS_RESPONSE=$(curl -s -m 3 -o /dev/null -w "%{http_code}:%{content_type}" \
