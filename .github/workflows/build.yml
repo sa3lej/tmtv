@@ -329,7 +329,7 @@ jobs:
           SSH_OPTS="-i $KEY -o StrictHostKeyChecking=accept-new -p ${DEPLOY_PORT}"
 
           scp ${SCP_OPTS} site/dist/index.html "${DEPLOY_TARGET}:staging/"
-          scp ${SCP_OPTS} site/dist/viewer.js "${DEPLOY_TARGET}:staging/"
+          scp ${SCP_OPTS} web/viewer.js "${DEPLOY_TARGET}:staging/"
           scp ${SCP_OPTS} site/dist/viewer/index.html "${DEPLOY_TARGET}:staging/viewer.html"
           scp ${SCP_OPTS} site/dist/install.sh "${DEPLOY_TARGET}:staging/"
           for f in site/dist/*.png site/dist/*.gif site/dist/favicon.*; do
