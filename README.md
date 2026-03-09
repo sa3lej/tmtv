@@ -25,7 +25,7 @@ SSH sharing is always on. Web sharing is opt-in:
 
 ```sh
 tmtv set -g tmtv-web-sharing on
-# [tmtv] Web sharing enabled: https://tmtv.se/s/TOKEN
+# [tmtv] web session: https://tmtv.se/s/TOKEN
 ```
 
 Share the URL — viewers watch in their browser, no install needed.
@@ -46,7 +46,8 @@ set -g tmtv-session-name demo
 ```
 
 Your session is now at:
-- `ssh demo@tmtv.se` (SSH)
+- `ssh 12345-demo@tmtv.se` (SSH read-write, random prefix)
+- `ssh ro-demo@tmtv.se` (SSH read-only)
 - `https://tmtv.se/s/demo` (web)
 
 Names must be 3-32 characters, alphanumeric and hyphens only.
@@ -247,10 +248,12 @@ Port 4002 (SSE) should NOT be exposed — the reverse proxy handles it.
 |------|-------------|---------|
 | `-k` | SSH host keys directory | `keys` |
 | `-p` | SSH listen port | `2222` |
+| `-q` | SSH port shown in connection strings | same as `-p` |
 | `-h` | Hostname in connection strings | system hostname |
 | `-z` | SSE port for web viewer | disabled |
-| `-w` | Web port shown in URL notifications | disabled |
 | `-b` | Bind address | all interfaces |
+| `-A` | Require authorized keys (reject clients without `-a`) | off |
+| `-V` | Print version and exit | — |
 | `-v` | Increase log verbosity | quiet |
 
 #### SSH security
