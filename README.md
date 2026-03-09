@@ -89,6 +89,34 @@ Session URLs are available as tmux format variables:
 
 Example: `tmtv display-message -p '#{tmtv_web}'`
 
+## Status bar
+
+tmtv prepends live viewer counts to the standard tmux status bar. The default `status-right` is:
+
+```
+S:#{tmtv_ssh_viewers} W:#{tmtv_web_viewers} "#{=21:pane_title}" %H:%M %d-%b-%y
+```
+
+This gives you something like:
+
+```
+S:2 W:1 "myhost" 14:30 09-Mar-26
+```
+
+Everything after the viewer counts is the stock tmux default — pane title, 12-hour clock, and date. This is set via the tmux options system, so you can override it in `~/.tmtv.conf` like any tmux option.
+
+### Customizing the status bar
+
+Add to `~/.tmtv.conf`:
+
+```
+set -g status-right 'S:#{tmtv_ssh_viewers} W:#{tmtv_web_viewers} "#{=21:pane_title}" %H:%M %Y-%m-%d'
+```
+
+This keeps the viewer counts and pane title, switches to a 24-hour clock (`%H:%M`), and uses ISO date format (`%Y-%m-%d`).
+
+Any valid tmux `status-right` format works — tmtv is a full tmux, so you have access to all tmux format variables alongside the tmtv-specific ones. See `man tmux` for the complete list of format strings.
+
 ## Using tmtv as tmux
 
 tmtv is a full tmux replacement. All tmux commands work:
@@ -254,7 +282,7 @@ cd tests && make all
 
 #### Integration tests
 
-Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, viewer counts, and more (33 tests).
+Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, viewer counts, and more (36+ tests).
 
 **Build machine requirements** (where you run the tests):
 - `ssh`, `curl`
