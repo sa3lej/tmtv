@@ -112,6 +112,7 @@ extern void tmate_client_cmd(int client_id, struct cmd *cmd);
 extern void tmate_client_set_active_pane(int client_id, int win_idx, int pane_id);
 extern int tmate_should_exec_cmd_locally(const struct cmd_entry *cmd);
 extern void tmate_set_env(const char *name, const char *value);
+extern void tmate_format(struct format_tree *ft);
 extern void tmate_send_client_ready(void);
 extern void tmate_send_mc_obj(msgpack_object *obj);
 
