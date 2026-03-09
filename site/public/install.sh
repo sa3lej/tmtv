@@ -4,8 +4,18 @@
 set -e
 
 REPO="sa3lej/tmtv"
-INSTALL_DIR="/usr/local/bin"
 BINARY="tmtv"
+
+# Pick an install directory that's already in PATH
+detect_install_dir() {
+  for dir in /usr/local/bin "$HOME/.local/bin" "$HOME/bin"; do
+    case ":$PATH:" in
+      *":${dir}:"*) [ -d "$dir" ] && [ -w "$dir" ] && echo "$dir" && return ;;
+    esac
+  done
+  # fallback
+  echo "$HOME/.local/bin"
+}
 
 # --- helpers ---
 
@@ -21,17 +31,19 @@ need() {
 detect_os() {
   case "$(uname -s)" in
     Linux*)  echo "linux" ;;
-    Darwin*) echo "darwin" ;;
+    Darwin*) echo "macos" ;;
     *)       err "Unsupported OS: $(uname -s)" ;;
   esac
 }
 
 detect_arch() {
+  OS="$1"
   case "$(uname -m)" in
     x86_64|amd64)    echo "amd64" ;;
-    aarch64|arm64)   echo "arm64" ;;
-    armv7l)          echo "armv7" ;;
-    armv6l)          echo "armv6" ;;
+    aarch64|arm64)
+      if [ "$OS" = "linux" ]; then echo "arm64v8"; else echo "arm64"; fi ;;
+    armv7l)          echo "arm32v7" ;;
+    armv6l)          echo "arm32v6" ;;
     i686|i386)       echo "i386" ;;
     *)               err "Unsupported architecture: $(uname -m)" ;;
   esac
@@ -53,7 +65,9 @@ main() {
   need curl
 
   OS="$(detect_os)"
-  ARCH="$(detect_arch)"
+  ARCH="$(detect_arch "$OS")"
+
+  INSTALL_DIR="$(detect_install_dir)"
 
   printf '\n  tmtv installer\n\n'
   say "OS:   $OS"
@@ -101,6 +115,7 @@ main() {
   chmod +x "${TMPDIR}/${ASSET}"
 
   # install
+  mkdir -p "$INSTALL_DIR"
   say "Installing to ${INSTALL_DIR}/${BINARY}..."
   if [ -w "$INSTALL_DIR" ]; then
     mv "${TMPDIR}/${ASSET}" "${INSTALL_DIR}/${BINARY}"
@@ -108,28 +123,11 @@ main() {
     sudo mv "${TMPDIR}/${ASSET}" "${INSTALL_DIR}/${BINARY}"
   fi
 
-  # create tmux symlink for compatibility (tmux configs work with tmtv)
-  LINK="${INSTALL_DIR}/tmux"
-  if [ ! -e "$LINK" ]; then
-    say "Creating tmux -> tmtv symlink for compatibility..."
-    if [ -w "$INSTALL_DIR" ]; then
-      ln -s "${INSTALL_DIR}/${BINARY}" "$LINK"
-    else
-      sudo ln -s "${INSTALL_DIR}/${BINARY}" "$LINK"
-    fi
-  elif [ -L "$LINK" ]; then
-    # update existing symlink if it points elsewhere
-    say "Updating tmux -> tmtv symlink..."
-    if [ -w "$INSTALL_DIR" ]; then
-      ln -sf "${INSTALL_DIR}/${BINARY}" "$LINK"
-    else
-      sudo ln -sf "${INSTALL_DIR}/${BINARY}" "$LINK"
-    fi
-  else
-    say "Note: ${LINK} already exists (not a symlink), skipping tmux compatibility link"
-  fi
-
   say "Done! Run 'tmtv' to start a session."
+  case ":$PATH:" in
+    *":${INSTALL_DIR}:"*) ;;
+    *) say "Note: Add ${INSTALL_DIR} to your PATH if 'tmtv' is not found." ;;
+  esac
   printf '\n'
 }
 

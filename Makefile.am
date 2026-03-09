@@ -418,11 +418,8 @@ fuzz_input_fuzzer_LDFLAGS = $(FUZZING_LIBS)
 fuzz_input_fuzzer_LDADD = $(LDADD) $(tmtv_OBJECTS)
 endif
 
-# Create tmux -> tmtv symlink for compatibility with existing tmux configs.
+# Install tmtv.1 in the right format.
 install-exec-hook:
-	if test ! -e "$(DESTDIR)$(bindir)/tmux"; then \
-		ln -s tmtv "$(DESTDIR)$(bindir)/tmux"; \
-	fi
 	if test x@MANFORMAT@ = xmdoc; then \
 		sed -e "s|@SYSCONFDIR@|$(sysconfdir)|g" $(srcdir)/tmtv.1 \
 			>$(srcdir)/tmtv.1.mdoc; \
