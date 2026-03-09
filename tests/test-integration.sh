@@ -563,6 +563,44 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: Status bar customization (set-option status-right)
+# -------------------------------------------------------
+if [ -n "$TOKEN" ]; then
+	# Override status-right with 24H clock and ISO date
+	remote_tmtv "set-option -g status-right 'S:#{tmtv_ssh_viewers} W:#{tmtv_web_viewers} \"#{=21:pane_title}\" %H:%M %Y-%m-%d'"
+	sleep 2
+
+	# Connect SSH RO viewer and capture the status bar
+	CUSTOM_LOG=$(remote "TERM=xterm-256color script -qc \
+		'timeout 6 ssh -tt -p $TMTV_PORT -o StrictHostKeyChecking=no \
+		ro-${TESTID}@127.0.0.1' /tmp/viewer-custom.log 2>/dev/null; \
+		strings /tmp/viewer-custom.log" || echo "")
+
+	# Verify ISO date format (YYYY-MM-DD) appears
+	if echo "$CUSTOM_LOG" | grep -qE "[0-9]{4}-[0-9]{2}-[0-9]{2}"; then
+		pass "status-right override (ISO date)"
+	else
+		fail "status-right override (ISO date)" \
+			"YYYY-MM-DD not found in viewer output"
+	fi
+
+	# Verify viewer counts still work after override
+	if echo "$CUSTOM_LOG" | grep -qo "S:[0-9]* W:[0-9]*"; then
+		pass "viewer counts survive status-right override"
+	else
+		fail "viewer counts survive status-right override" \
+			"S:N W:N not found after set-option"
+	fi
+
+	# Restore default
+	remote_tmtv "set-option -gu status-right"
+	sleep 1
+else
+	skip "status-right override (ISO date) (no token)"
+	skip "viewer counts survive status-right override (no token)"
+fi
+
+# -------------------------------------------------------
 # Test: Create new window
 # -------------------------------------------------------
 remote_tmtv "new-window -t main -n testwin"
