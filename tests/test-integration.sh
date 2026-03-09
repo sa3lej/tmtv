@@ -3,16 +3,37 @@
 # Integration tests for tmtv.
 # Tests real SSH and SSE workflows against a running tmtv-server.
 #
-# Requirements:
-#   - TEST_HOST: IP or hostname of test machine (required, no default)
-#   - tmtv-server running on TEST_HOST:2222 (SSH) and :4002 (SSE)
-#   - nginx on TEST_HOST:8080 serving web viewer
-#   - tmtv client at /root/tmtv on TEST_HOST
-#   - SSH access as root to TEST_HOST on port 22
+# Requirements on the BUILD machine (where this script runs):
+#   - ssh client (OpenSSH)
+#   - curl
+#   - npx + playwright (for visual tests): npm i -D playwright
+#     Install browsers: npx playwright install chromium
+#   - TEST_HOST env var set to IP/hostname of the test machine
+#
+# Requirements on the TEST machine (TEST_HOST):
+#   - tmtv-server running (systemd), listening on SSH port (default 2222)
+#     and SSE port (default 4002)
+#   - tmtv client binary at /root/tmtv (or REMOTE_TMTV path)
+#   - Caddy (or any web server) on port 8080 serving:
+#       /           -> landing page
+#       /s/<token>  -> viewer.html
+#       /ws/<token> -> reverse proxy to SSE port
+#   - SSH keys in /root/keys/ (or REMOTE_KEYS_DIR)
+#   - expect (for SSH RW/RO text tests): apt install expect
+#   - SSH access as root on port 22 (or TEST_SSH_PORT)
 #
 # Usage:
 #   TEST_HOST=<ip> sh test-integration.sh
-#   TEST_HOST=<ip> sh test-integration.sh --quick
+#   TEST_HOST=<ip> sh test-integration.sh --quick   # skip slow tests
+#
+# Environment variables (all optional except TEST_HOST):
+#   TEST_HOST        - IP/hostname of test machine (REQUIRED)
+#   TEST_SSH_PORT    - SSH port for admin access (default: 22)
+#   TMTV_PORT        - tmtv-server SSH port (default: 2222)
+#   SSE_PORT         - tmtv-server SSE port (default: 4002)
+#   WEB_PORT         - web server port (default: 8080)
+#   REMOTE_TMTV      - path to tmtv client on remote (default: /root/tmtv)
+#   REMOTE_KEYS_DIR  - path to SSH keys on remote (default: /root/keys)
 #
 
 set -e
@@ -25,14 +46,20 @@ TEST_SSH_PORT="${TEST_SSH_PORT:-22}"
 TMTV_PORT="${TMTV_PORT:-2222}"
 SSE_PORT="${SSE_PORT:-4002}"
 WEB_PORT="${WEB_PORT:-8080}"
-REMOTE_TMTV="/root/tmtv"
+REMOTE_TMTV="${REMOTE_TMTV:-/root/tmtv}"
 QUICK=false
+HAS_PLAYWRIGHT=false
 
 for arg in "$@"; do
 	case "$arg" in
 		--quick) QUICK=true ;;
 	esac
 done
+
+# Check for Playwright (optional — visual tests skipped without it)
+if command -v npx >/dev/null 2>&1 && npx playwright --version >/dev/null 2>&1; then
+	HAS_PLAYWRIGHT=true
+fi
 
 PASSED=0
 FAILED=0
@@ -95,6 +122,23 @@ else
 	fail "tmtv-server is running" "No tmtv-server process on $TEST_HOST"
 	echo "Cannot continue without server. Aborting."
 	exit 1
+fi
+
+# -------------------------------------------------------
+# Test: Version sanity — server and client report a version
+# -------------------------------------------------------
+SERVER_VER=$(remote "tmtv-server -V 2>&1" || echo "")
+if echo "$SERVER_VER" | grep -q "tmtv-server"; then
+	pass "tmtv-server -V outputs version"
+else
+	fail "tmtv-server -V outputs version" "got: $SERVER_VER"
+fi
+
+CLIENT_VER=$(remote "TERM=xterm-256color $REMOTE_TMTV -V 2>&1" || echo "")
+if echo "$CLIENT_VER" | grep -q "tmtv\|tmux"; then
+	pass "tmtv client -V outputs version"
+else
+	fail "tmtv client -V outputs version" "got: $CLIENT_VER"
 fi
 
 # -------------------------------------------------------
@@ -208,7 +252,7 @@ else
 fi
 
 # -------------------------------------------------------
-# Test: SSE via nginx proxy (named session)
+# Test: SSE via web proxy (named session)
 # -------------------------------------------------------
 WS_RESPONSE=$(curl -s -m 3 -o /dev/null -w "%{http_code}:%{content_type}" \
 	"http://$TEST_HOST:$WEB_PORT/ws/$TESTID" 2>/dev/null || echo "000:")
@@ -216,10 +260,10 @@ WS_CODE=$(echo "$WS_RESPONSE" | cut -d: -f1)
 WS_CTYPE=$(echo "$WS_RESPONSE" | cut -d: -f2-)
 
 if [ "$WS_CODE" = "200" ] && echo "$WS_CTYPE" | grep -q "event-stream"; then
-	pass "SSE via nginx proxy /ws/<name>"
+	pass "SSE via web proxy /ws/<name>"
 else
 	# Might not have nginx proxy configured for /ws/
-	skip "SSE via nginx proxy /ws/<name> (got $WS_RESPONSE)"
+	skip "SSE via web proxy /ws/<name> (got $WS_RESPONSE)"
 fi
 
 # -------------------------------------------------------
@@ -478,6 +522,134 @@ if [ "$QUICK" = "false" ] && [ -n "$TOKEN" ]; then
 	fi
 else
 	skip "web sharing toggle (--quick or no token)"
+fi
+
+# -------------------------------------------------------
+# Test: Terminal resize propagates to SSE
+# -------------------------------------------------------
+if [ -n "$TOKEN" ]; then
+	# Resize the terminal to 100x30
+	remote_tmtv "resize-window -t main -x 100 -y 30"
+	sleep 2
+
+	# Capture SSE data — should contain layout sync with new dimensions
+	# The SSE stream sends binary msgpack; we check for non-empty data
+	# after resize, which includes the new SYNC_LAYOUT message
+	SSE_RESIZE=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" \
+		2>/dev/null || echo "")
+	if echo "$SSE_RESIZE" | grep -q "^data:"; then
+		pass "SSE delivers data after resize"
+	else
+		fail "SSE delivers data after resize" "no data after resize"
+	fi
+
+	# Verify the session dimensions changed
+	DIMS=$(remote_tmtv "display-message -t main -p '#{window_width}x#{window_height}'" \
+		2>/dev/null || echo "")
+	if [ "$DIMS" = "100x30" ]; then
+		pass "terminal resize applied"
+	else
+		fail "terminal resize applied" "expected 100x30, got $DIMS"
+	fi
+
+	# Restore to standard size
+	remote_tmtv "resize-window -t main -x 80 -y 24"
+	sleep 1
+else
+	skip "SSE delivers data after resize (no token)"
+	skip "terminal resize applied (no token)"
+fi
+
+# -------------------------------------------------------
+# Test: Multi-window SSE — switch window, SSE still streams
+# -------------------------------------------------------
+if [ -n "$TOKEN" ]; then
+	# We already have window 0 and testwin from earlier tests
+	remote_tmtv "select-window -t main:testwin"
+	sleep 1
+
+	# Send a marker to the new window
+	WIN_MARKER="WINTST_$$"
+	remote_tmtv "send-keys 'echo $WIN_MARKER' Enter"
+	sleep 1
+
+	# Verify SSE still delivers data on the active window
+	SSE_WIN=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" \
+		2>/dev/null || echo "")
+	if echo "$SSE_WIN" | grep -q "^data:"; then
+		pass "SSE streams after window switch"
+	else
+		fail "SSE streams after window switch" "no data"
+	fi
+
+	# Verify the marker is in the testwin pane
+	WIN_CAP=$(remote_tmtv "capture-pane -t main:testwin -p" 2>/dev/null || echo "")
+	if echo "$WIN_CAP" | grep -q "$WIN_MARKER"; then
+		pass "text input in switched window"
+	else
+		fail "text input in switched window" "marker not found"
+	fi
+
+	# Switch back
+	remote_tmtv "select-window -t main:0"
+	sleep 0.5
+else
+	skip "SSE streams after window switch (no token)"
+	skip "text input in switched window (no token)"
+fi
+
+# -------------------------------------------------------
+# Test: SSE reconnect — new client gets screen dump
+# -------------------------------------------------------
+if [ -n "$TOKEN" ]; then
+	# Put a unique marker on screen
+	RECONNECT_MARKER="RECONN_$$"
+	remote_tmtv "send-keys -t main:0 'echo $RECONNECT_MARKER' Enter"
+	sleep 1
+
+	# Connect a fresh SSE client — should get screen dump with marker
+	SSE_RECONNECT=$(curl -s -m 4 "http://$TEST_HOST:$SSE_PORT/$TOKEN" \
+		2>/dev/null || echo "")
+	if echo "$SSE_RECONNECT" | grep -q "^data:"; then
+		pass "SSE reconnect delivers screen dump"
+	else
+		fail "SSE reconnect delivers screen dump" "no data on reconnect"
+	fi
+else
+	skip "SSE reconnect delivers screen dump (no token)"
+fi
+
+# -------------------------------------------------------
+# Test: Playwright visual — web viewer renders terminal content
+# -------------------------------------------------------
+if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$QUICK" = "false" ]; then
+	# Put a unique visual marker on screen
+	VIS_MARKER="VISUAL_$$"
+	remote_tmtv "send-keys -t main:0 'echo $VIS_MARKER' Enter"
+	sleep 2
+
+	SCREENSHOT="/tmp/tmtv-visual-$$.png"
+	if npx playwright screenshot --browser chromium \
+		"http://$TEST_HOST:$WEB_PORT/s/$TESTID" \
+		"$SCREENSHOT" >/dev/null 2>&1; then
+
+		# Verify the screenshot file exists and is non-trivial (>10KB)
+		FSIZE=$(stat -c%s "$SCREENSHOT" 2>/dev/null || echo "0")
+		if [ "$FSIZE" -gt 10000 ]; then
+			pass "web viewer renders (screenshot ${FSIZE}B)"
+		else
+			fail "web viewer renders" "screenshot too small: ${FSIZE}B"
+		fi
+		rm -f "$SCREENSHOT"
+	else
+		fail "web viewer renders" "playwright screenshot failed"
+	fi
+else
+	if [ "$HAS_PLAYWRIGHT" != "true" ]; then
+		skip "web viewer renders (playwright not installed)"
+	else
+		skip "web viewer renders (--quick)"
+	fi
 fi
 
 # -------------------------------------------------------
