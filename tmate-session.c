@@ -207,7 +207,7 @@ void tmate_session_start(void)
 		tmate_info("To connect to the session locally, run: tmtv -S %s attach", socket_path);
 	} else {
 		cfg_add_cause("%s", "Tip: if you wish to use tmtv only for remote access, run: tmtv -F");
-		cfg_add_cause("%s", "To see the following messages again, run: tmux show-messages (or tmtv show-messages)");
+		cfg_add_cause("%s", "To see the following messages again, run: tmtv show-messages");
 		cfg_add_cause("%s", "Press <q> or <ctrl-c> to continue");
 		cfg_add_cause("%s", "---------------------------------------------------------------------");
 	}
