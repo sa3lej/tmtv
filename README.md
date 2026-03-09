@@ -179,35 +179,9 @@ That's it — SSH sharing works now. Clients connect via `ssh TOKEN@your.host.co
 
 #### 4. Web viewer (optional)
 
-Web sharing is off by default. If you want browser-based viewing, add `-z 4002` to the server flags to enable SSE streaming on a local port, then put a reverse proxy in front for TLS and routing.
+Web sharing is off by default. If you want browser-based viewing, add `-z 4002` to the server flags to enable SSE streaming on a local port, then put Caddy in front for TLS and routing.
 
-**Caddy** (recommended — automatic TLS):
-
-```
-your.host.com {
-    # Web viewer with dynamic title (link previews show session name)
-    @viewer path_regexp viewer ^/s/([a-zA-Z0-9_-]+)$
-    handle @viewer {
-        root * /var/www/tmtv
-        templates
-        rewrite * /viewer.html
-        file_server
-    }
-
-    # SSE proxy
-    handle /ws/* {
-        reverse_proxy 127.0.0.1:4002 {
-            flush_interval -1
-        }
-    }
-
-    # Static assets
-    handle {
-        root * /var/www/tmtv
-        file_server
-    }
-}
-```
+A production-ready Caddyfile is provided in [`deploy/Caddyfile`](deploy/Caddyfile). It includes Caddy templates for dynamic page titles (link previews show the session name in Slack, Discord, iMessage). Replace `tmtv.se` with your hostname.
 
 Copy the web viewer from the `web/` directory:
 
