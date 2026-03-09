@@ -31,7 +31,7 @@
     cursor: '#528bff',
     cursorAccent: '#0d0d1a',
     selectionBackground: 'rgba(82, 139, 255, 0.3)',
-    black: '#1a1a2e',
+    black: '#0d0d1a',
     red: '#ff6b6b',
     green: '#3ddc84',
     yellow: '#ffd93d',
@@ -174,7 +174,7 @@
         container.appendChild(el);
         var t = createPaneTerminal(sx, sy);
         t.open(el);
-        panes[id] = { term: t, el: el, sx: sx, sy: sy };
+        panes[id] = { term: t, el: el, sx: sx, sy: sy, needsRefresh: true };
         if (pendingData[id]) {
           for (var j = 0; j < pendingData[id].length; j++) {
             var d = pendingData[id][j];
@@ -386,6 +386,12 @@
           var pane = panes[paneId];
           if (pane) {
             pane.term.write(ptyData instanceof Uint8Array ? ptyData : String(ptyData));
+            if (pane.needsRefresh) {
+              pane.needsRefresh = false;
+              (function(p) {
+                setTimeout(function() { p.term.refresh(0, p.sy - 1); }, 50);
+              })(pane);
+            }
           } else {
             if (!pendingData[paneId]) pendingData[paneId] = [];
             pendingData[paneId].push(ptyData);
