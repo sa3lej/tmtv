@@ -21,7 +21,7 @@ UNIT_TESTS = test-msgpack
 SERVER_TESTS = test-server-header
 TMTV ?= ../tmtv
 
-.PHONY: all unit server-unit functional hooks session-cleanup clean
+.PHONY: all unit server-unit functional hooks session-cleanup integration clean
 
 all: unit server-unit functional hooks session-cleanup
 
@@ -60,6 +60,12 @@ session-cleanup:
 	@echo ""
 	@echo "Running session cleanup tests..."
 	@sh test-session-cleanup.sh
+
+integration:
+	@echo ""
+	@echo "Running integration tests (requires TEST_HOST env var)..."
+	@test -n "$(TEST_HOST)" || { echo "ERROR: set TEST_HOST=<ip>"; exit 1; }
+	@TEST_HOST=$(TEST_HOST) sh test-integration.sh
 
 wiring:
 	@echo ""
