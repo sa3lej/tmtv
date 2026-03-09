@@ -111,6 +111,11 @@ trap cleanup EXIT
 
 echo ""
 echo "== Integration Tests (${TEST_HOST}:${TMTV_PORT}) =="
+# Show versions under test
+SERVER_VER_DISPLAY=$(remote "tmtv-server -V 2>&1" || echo "unknown")
+CLIENT_VER_DISPLAY=$(remote "TERM=xterm-256color $REMOTE_TMTV -V 2>&1" || echo "unknown")
+echo "   server: $SERVER_VER_DISPLAY"
+echo "   client: $CLIENT_VER_DISPLAY"
 echo ""
 
 # -------------------------------------------------------
