@@ -53,7 +53,9 @@ RUN sh autogen.sh && \
     ac_cv_search_forkpty="none required"
 RUN make -j $(nproc)
 RUN objcopy --only-keep-debug tmtv tmtv.symbols && chmod -x tmtv.symbols && strip tmtv
+RUN objcopy --only-keep-debug tmtv-server tmtv-server.symbols && chmod -x tmtv-server.symbols && strip tmtv-server
 RUN ./tmtv -V
+RUN ./tmtv-server -V
 
 FROM alpine:3.20
 
@@ -62,3 +64,5 @@ RUN mkdir /build
 ENV PATH=/build:$PATH
 COPY --from=build /build/tmtv.symbols /build
 COPY --from=build /build/tmtv /build
+COPY --from=build /build/tmtv-server.symbols /build
+COPY --from=build /build/tmtv-server /build

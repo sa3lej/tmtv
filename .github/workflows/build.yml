@@ -33,7 +33,7 @@ jobs:
             bison \
             libutf8proc-dev
 
-      - name: Build
+      - name: Build (dynamic, for tests)
         run: |
           sh autogen.sh
           ./configure
@@ -42,18 +42,35 @@ jobs:
       - name: Verify binaries
         run: |
           ./tmtv -V
-          ls -la tmtv-server
-          ./tmtv-server 2>&1 | head -1 || true
+          ./tmtv-server -V
 
       - name: Run tests
         run: |
           cd tests && make all
 
+      - name: Build static binaries (Docker/Alpine)
+        run: |
+          docker build --build-arg PLATFORM=amd64 --output type=local,dest=./out .
+
+      - name: Verify static binaries
+        run: |
+          file out/build/tmtv
+          out/build/tmtv -V
+          file out/build/tmtv-server
+          out/build/tmtv-server -V
+          # Ensure no dynamic library dependencies (musl static)
+          if ldd out/build/tmtv 2>&1 | grep -q 'not a dynamic'; then
+            echo "OK: tmtv is statically linked"
+          elif ldd out/build/tmtv 2>&1 | grep -qv 'linux-vdso\|ld-musl\|ld-linux'; then
+            echo "WARNING: tmtv has unexpected dynamic dependencies"
+            ldd out/build/tmtv
+          fi
+
       - name: Package binaries
         run: |
           mkdir -p dist
-          cp tmtv dist/tmtv-linux-amd64
-          cp tmtv-server dist/tmtv-server-linux-amd64
+          cp out/build/tmtv dist/tmtv-linux-amd64
+          cp out/build/tmtv-server dist/tmtv-server-linux-amd64
 
       - uses: actions/upload-artifact@v4
         with:
@@ -268,10 +285,11 @@ jobs:
             --output type=local,dest=./out \
             .
 
-      - name: Package binary
+      - name: Package binaries
         run: |
           mkdir -p dist
           cp out/build/tmtv dist/tmtv-linux-${{ matrix.arch }}
+          cp out/build/tmtv-server dist/tmtv-server-linux-${{ matrix.arch }}
 
       - uses: actions/upload-artifact@v4
         with:
