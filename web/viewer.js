@@ -31,7 +31,7 @@
     cursor: '#528bff',
     cursorAccent: '#0d0d1a',
     selectionBackground: 'rgba(82, 139, 255, 0.3)',
-    black: '#0d0d1a',
+    black: '#171726',
     red: '#ff6b6b',
     green: '#3ddc84',
     yellow: '#ffd93d',
