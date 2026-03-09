@@ -59,6 +59,7 @@ enum tmate_daemon_out_msg_types {
 	TMATE_OUT_SNAPSHOT,
 	TMATE_OUT_EXEC_CMD,
 	TMATE_OUT_UNAME,
+	TMATE_OUT_VIEWER_COUNT,
 };
 
 /*
@@ -82,6 +83,7 @@ enum tmate_daemon_out_msg_types {
 [TMATE_OUT_EXEC_CMD, string: cmd_name, ...string: args]
 [TMATE_OUT_UNAME, string: name.sysname, string: name.nodename,
                   string: name.release, string: name.version, string: name.machine]
+[TMATE_OUT_VIEWER_COUNT, int: ssh_rw, int: ssh_ro, int: web]
 */
 
 enum tmate_daemon_in_msg_types {

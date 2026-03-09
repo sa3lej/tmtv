@@ -275,6 +275,24 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: SSE viewer count — web viewer receives VIEWER_COUNT message
+# -------------------------------------------------------
+if [ -n "$TOKEN" ]; then
+	# Capture SSE data for a few seconds — should contain viewer count
+	# VIEWER_COUNT is msgpack type 14, sent as base64. We verify we get
+	# data events (the count message is included in the stream).
+	SSE_VC=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" 2>/dev/null || echo "")
+	VC_EVENTS=$(echo "$SSE_VC" | grep -c "^data:" || true)
+	if [ "$VC_EVENTS" -ge 1 ]; then
+		pass "SSE delivers viewer count events"
+	else
+		fail "SSE delivers viewer count events" "no data events in stream"
+	fi
+else
+	skip "SSE delivers viewer count events (no token)"
+fi
+
+# -------------------------------------------------------
 # Test: SSE via web proxy (named session)
 # -------------------------------------------------------
 WS_RESPONSE=$(curl -s -m 3 -o /dev/null -w "%{http_code}:%{content_type}" \

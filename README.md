@@ -70,6 +70,8 @@ Names must be 3-32 characters, alphanumeric and hyphens only.
 - Web viewer with xterm.js and WebGL rendering
 - Late-join support — browser viewers see current terminal state
 - Server-Sent Events streaming — works through proxies and firewalls
+- Live viewer counts — `S:N W:N` in tmux status bar and web titlebar
+- Dynamic page titles — link previews show the session name (Slack, Discord, iMessage)
 - Zero config — just type `tmtv`
 
 ## Format variables
@@ -82,6 +84,8 @@ Session URLs are available as tmux format variables:
 | `#{tmtv_ssh_ro}` | SSH connection string (read-only) |
 | `#{tmtv_web}` | Web viewer URL |
 | `#{tmtv_session_name}` | Named session name (if set) |
+| `#{tmtv_ssh_viewers}` | Number of connected SSH viewers |
+| `#{tmtv_web_viewers}` | Number of connected web viewers |
 
 Example: `tmtv display-message -p '#{tmtv_web}'`
 
@@ -181,18 +185,23 @@ Web sharing is off by default. If you want browser-based viewing, add `-z 4002` 
 
 ```
 your.host.com {
-    handle /s/* {
+    # Web viewer with dynamic title (link previews show session name)
+    @viewer path_regexp viewer ^/s/([a-zA-Z0-9_-]+)$
+    handle @viewer {
         root * /var/www/tmtv
-        try_files /viewer.html
+        templates
+        rewrite * /viewer.html
         file_server
     }
 
+    # SSE proxy
     handle /ws/* {
         reverse_proxy 127.0.0.1:4002 {
             flush_interval -1
         }
     }
 
+    # Static assets
     handle {
         root * /var/www/tmtv
         file_server
@@ -209,7 +218,7 @@ server {
 
     root /var/www/tmtv;
 
-    location /s/ {
+    location ~ ^/s/[a-zA-Z0-9_-]+$ {
         try_files /viewer.html =404;
     }
 
@@ -253,6 +262,7 @@ Port 4002 (SSE) should NOT be exposed — the reverse proxy handles it.
 | `-z` | SSE port for web viewer | disabled |
 | `-b` | Bind address | all interfaces |
 | `-A` | Require authorized keys (reject clients without `-a`) | off |
+| `-x` | Enable PROXY protocol (for use behind load balancers) | off |
 | `-V` | Print version and exit | — |
 | `-v` | Increase log verbosity | quiet |
 
@@ -294,7 +304,7 @@ cd tests && make all
 
 #### Integration tests
 
-Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, and more (30 tests).
+Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, viewer counts, and more (33 tests).
 
 **Build machine requirements** (where you run the tests):
 - `ssh`, `curl`

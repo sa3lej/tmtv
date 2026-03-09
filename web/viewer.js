@@ -20,8 +20,9 @@
   var OUT_HEADER      = 0;
   var OUT_SYNC_LAYOUT = 1;
   var OUT_PTY_DATA    = 2;
-  var OUT_STATUS      = 5;
-  var OUT_FIN         = 8;
+  var OUT_STATUS        = 5;
+  var OUT_FIN           = 8;
+  var OUT_VIEWER_COUNT  = 14;
 
   var FONT = '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace';
   var THEME = {
@@ -278,6 +279,7 @@
 
   var sessionStart = null;
   var paneCount = 0;
+  var webViewers = 0;
   var durationTimer = null;
 
   if (sessionToken) {
@@ -288,6 +290,7 @@
 
   function updateMeta() {
     var parts = [];
+    if (webViewers > 0) parts.push('W:' + webViewers);
     if (paneCount > 0) parts.push(paneCount + (paneCount === 1 ? ' pane' : ' panes'));
     if (sessionStart) {
       var elapsed = Math.floor((Date.now() - sessionStart) / 1000);
@@ -409,6 +412,12 @@
           var rightEl = document.getElementById('tmux-status-right');
           if (leftEl && inner[1]) leftEl.textContent = toStr(inner[1]);
           if (rightEl && inner[2]) rightEl.textContent = toStr(inner[2]);
+        }
+        break;
+      case OUT_VIEWER_COUNT:
+        if (inner.length >= 4) {
+          webViewers = inner[3];
+          updateMeta();
         }
         break;
       case OUT_FIN:
