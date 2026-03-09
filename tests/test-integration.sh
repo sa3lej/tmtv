@@ -311,6 +311,70 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: SSH RW — create pane via tmux split-window command
+# -------------------------------------------------------
+if [ -n "$RW_TOKEN" ]; then
+	# Record pane count before
+	PANES_BEFORE=$(remote_tmtv "list-panes -t main" 2>/dev/null | wc -l)
+
+	# Create a pane via SSH RW: type the tmtv split-window command
+	# inside the shared session shell
+	remote "cat > /tmp/tmtv-split.exp << 'EXPECT'
+set timeout 15
+spawn ssh -o StrictHostKeyChecking=no -p TMTV_PORT TOKEN@127.0.0.1
+sleep 5
+foreach c [split \"tmtv split-window -h\r\" {}] {
+    send -- \$c
+    after 50
+}
+sleep 3
+EXPECT
+sed -i \"s/TOKEN/$RW_TOKEN/;s/TMTV_PORT/$TMTV_PORT/\" /tmp/tmtv-split.exp
+expect /tmp/tmtv-split.exp >/dev/null 2>&1
+rm -f /tmp/tmtv-split.exp"
+	sleep 1
+
+	PANES_AFTER=$(remote_tmtv "list-panes -t main" 2>/dev/null | wc -l)
+	if [ "$PANES_AFTER" -gt "$PANES_BEFORE" ]; then
+		pass "SSH RW create pane (split-window)"
+	else
+		fail "SSH RW create pane (split-window)" \
+			"panes before=$PANES_BEFORE after=$PANES_AFTER"
+	fi
+
+	# Send text to the new pane and verify
+	SPLIT_MARKER="SPLIT_$$"
+	# The new pane is now active, send a marker via tmtv send-keys
+	remote_tmtv "send-keys 'echo $SPLIT_MARKER' Enter"
+	sleep 1
+	SPLIT_CAP=$(remote_tmtv "capture-pane -p" 2>/dev/null || echo "")
+	if echo "$SPLIT_CAP" | grep -q "$SPLIT_MARKER"; then
+		pass "SSH RW new pane accepts input"
+	else
+		fail "SSH RW new pane accepts input" "marker not in new pane"
+	fi
+
+	# Verify SSE still delivers data after pane operations
+	if [ -n "$TOKEN" ]; then
+		SSE_AFTER=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" \
+			2>/dev/null || echo "")
+		if echo "$SSE_AFTER" | grep -q "^data:"; then
+			pass "SSE streams after pane create"
+		else
+			fail "SSE streams after pane create" "no data after split"
+		fi
+	fi
+
+	# Clean up: close the extra pane to keep a predictable state
+	remote_tmtv "kill-pane"
+	sleep 0.5
+else
+	skip "SSH RW create pane (no RW token)"
+	skip "SSH RW new pane accepts input (no RW token)"
+	skip "SSE streams after pane create (no RW token)"
+fi
+
+# -------------------------------------------------------
 # Test: SSH RO — connect, verify can see output, verify read-only
 # -------------------------------------------------------
 RO_TOKEN="ro-$TESTID"
