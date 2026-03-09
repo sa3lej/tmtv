@@ -192,6 +192,37 @@ static void tmate_sync_window_panes(struct window *w,
 			window_remove_pane(w, wp);
 	}
 
+	/*
+	 * Rebuild layout tree so that wp->layout_cell is non-NULL for
+	 * every pane.  tty_write()'s set_client_cb checks layout_cell
+	 * and skips panes where it is NULL, which blocks all incremental
+	 * screen updates to attached clients.
+	 */
+	{
+		int pane_count = 0;
+		TAILQ_FOREACH(wp, &w->panes, entry)
+			pane_count++;
+
+		if (w->layout_root != NULL)
+			layout_free(w);
+
+		if (pane_count == 1) {
+			layout_init(w, TAILQ_FIRST(&w->panes));
+		} else if (pane_count > 1) {
+			struct layout_cell *root, *lc;
+			root = w->layout_root = layout_create_cell(NULL);
+			layout_set_size(root, w->sx, w->sy, 0, 0);
+			root->type = LAYOUT_LEFTRIGHT;
+			TAILQ_FOREACH(wp, &w->panes, entry) {
+				lc = layout_create_cell(root);
+				layout_set_size(lc, wp->sx, wp->sy,
+						wp->xoff, wp->yoff);
+				layout_make_leaf(lc, wp);
+				TAILQ_INSERT_TAIL(&root->cells, lc, entry);
+			}
+		}
+	}
+
 	active_pane_id = unpack_int(w_uk);
 	wp = window_pane_find_by_id(active_pane_id);
 	if (!wp || wp->window != w)
