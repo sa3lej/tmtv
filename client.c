@@ -64,7 +64,7 @@ static struct client_files client_files = RB_INITIALIZER(&client_files);
 static __dead void	 client_exec(const char *,const char *);
 static int		 client_get_lock(char *);
 static int		 client_connect(struct event_base *, const char *,
-			     uint64_t);
+			     uint64_t, int *);
 static void		 client_send_identify(const char *, const char *,
 			     char **, u_int, const char *, int);
 static void		 client_signal(int);
@@ -106,12 +106,15 @@ client_get_lock(char *lockfile)
 
 /* Connect client to server. */
 static int
-client_connect(struct event_base *base, const char *path, uint64_t flags)
+client_connect(struct event_base *base, const char *path, uint64_t flags,
+    int *server_started)
 {
 	struct sockaddr_un	sa;
 	size_t			size;
 	int			fd, lockfd = -1, locked = 0;
 	char		       *lockfile = NULL;
+
+	*server_started = 0;
 
 	memset(&sa, 0, sizeof sa);
 	sa.sun_family = AF_UNIX;
@@ -166,6 +169,7 @@ retry:
 			return (-1);
 		}
 		fd = server_start(client_proc, flags, base, lockfd, lockfile);
+		*server_started = 1;
 	}
 
 	if (locked && lockfd >= 0) {
@@ -238,7 +242,7 @@ client_main(struct event_base *base, int argc, char **argv, uint64_t flags,
 {
 	struct cmd_parse_result	*pr;
 	struct msg_command	*data;
-	int			 fd, i;
+	int			 fd, i, server_started = 0;
 	const char		*ttynam, *termname, *cwd;
 	pid_t			 ppid;
 	enum msgtype		 msg;
@@ -298,7 +302,7 @@ client_main(struct event_base *base, int argc, char **argv, uint64_t flags,
 		fd = server_start(client_proc, flags, base, 0, NULL);
 	} else
 #endif
-	fd = client_connect(base, socket_path, client_flags);
+	fd = client_connect(base, socket_path, client_flags, &server_started);
 	if (fd == -1) {
 		if (errno == ECONNREFUSED) {
 			fprintf(stderr, "no server running on %s\n",
@@ -309,7 +313,16 @@ client_main(struct event_base *base, int argc, char **argv, uint64_t flags,
 		}
 		return (1);
 	}
+#ifdef TMATE
+	/* Auto-attach to existing session when bare tmtv is run. */
+	if (argc == 0 && !server_started && msg == MSG_COMMAND) {
+		static char	*attach_argv[] = { "attach-session", NULL };
+		argc = 1;
+		argv = attach_argv;
 	}
+#endif
+	}
+
 	client_peer = proc_add_peer(client_proc, fd, client_dispatch, NULL);
 
 	/* Save these before pledge(). */

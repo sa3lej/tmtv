@@ -111,7 +111,7 @@ static void tmate_header(struct tmate_session *session,
 		session->client_version = xstrdup("unknown");
 	}
 
-	tmate_info("tmate version=%s, protocol=%d",
+	tmate_info("tmtv client version=%s, protocol=%d",
 		   session->client_version, session->client_protocol_version);
 
 	if (session->client_protocol_version < TMATE_PROTOCOL_VERSION) {
@@ -325,8 +325,6 @@ static void tmate_sync_layout(__unused struct tmate_session *session,
 
 	int sx = unpack_int(uk);
 	int sy = unpack_int(uk);
-
-	tmate_info("sync_layout: sx=%d sy=%d", sx, sy);
 
 	s = RB_MIN(sessions, &sessions);
 	if (!s) {

@@ -9,7 +9,7 @@ void tmate_write_header(void)
 	pack(array, 3);
 	pack(int, TMATE_OUT_HEADER);
 	pack(int, TMATE_PROTOCOL_VERSION);
-	pack(string, VERSION);
+	pack(string, TMTV_VERSION);
 }
 
 void tmate_write_uname(void)

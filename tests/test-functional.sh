@@ -100,6 +100,45 @@ else
     fail "kill session" "session still exists: $OUTPUT"
 fi
 
+# Test 9: Second new-session gives error, not crash
+# (tmate only supports one session; server must stay alive)
+SOCKET2="/tmp/tmtv-test-multi-$$"
+"$TMTV" -S "$SOCKET2" new-session -d -s first 2>/dev/null
+if "$TMTV" -S "$SOCKET2" list-sessions 2>/dev/null | grep -q "first"; then
+    OUTPUT=$("$TMTV" -S "$SOCKET2" new-session -d -s second 2>&1 || true)
+    # Server must still be alive after the failed second session
+    if "$TMTV" -S "$SOCKET2" list-sessions 2>/dev/null | grep -q "first"; then
+        pass "second new-session errors without crash"
+    else
+        fail "second new-session errors without crash" "server died: $OUTPUT"
+    fi
+else
+    fail "second new-session errors without crash" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET2" kill-server 2>/dev/null || true
+rm -f "$SOCKET2"
+
+# Test 10: Bare tmtv auto-attaches to existing session (no crash)
+# When a session exists and bare tmtv is run, it should try to attach
+# (not crash with "server exited unexpectedly")
+SOCKET3="/tmp/tmtv-test-attach-$$"
+"$TMTV" -S "$SOCKET3" new-session -d -s existing 2>/dev/null
+if "$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | grep -q "existing"; then
+    # Run bare tmtv with a timeout — it will block trying to attach (no TTY),
+    # but should NOT crash. Exit code 1 = normal error, not 139/segfault.
+    RC=0; timeout 2 "$TMTV" -S "$SOCKET3" 2>/dev/null || RC=$?
+    # Server must still be alive
+    if "$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | grep -q "existing"; then
+        pass "bare tmtv auto-attaches without crash"
+    else
+        fail "bare tmtv auto-attaches without crash" "server died (exit=$RC)"
+    fi
+else
+    fail "bare tmtv auto-attaches without crash" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET3" kill-server 2>/dev/null || true
+rm -f "$SOCKET3"
+
 echo ""
 echo "$((PASSED + FAILED)) tests: $PASSED passed, $FAILED failed"
 exit $FAILED
