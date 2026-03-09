@@ -32,7 +32,7 @@
     cursor: '#67b5ed',
     cursorAccent: '#191d27',
     selectionBackground: 'rgba(39, 61, 76, 0.75)',
-    black: '#35424c',
+    black: '#191d27',
     red: '#b45648',
     green: '#6caa71',
     yellow: '#c4ac62',
