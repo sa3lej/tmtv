@@ -299,7 +299,8 @@ jobs:
 
   deploy-web:
     name: Deploy web assets
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    needs: [deploy-server]
+    if: always() && !cancelled() && (needs.deploy-server.result == 'success' || needs.deploy-server.result == 'skipped') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
