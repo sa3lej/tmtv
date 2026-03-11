@@ -221,6 +221,14 @@ void tmate_session_start(void)
 			tmate_set_val("session_name", sname);
 	}
 
+	/* Send session password if configured */
+	{
+		const char *pw = options_get_string(global_options,
+						    "tmtv-session-password");
+		if (pw != NULL && *pw != '\0')
+			tmate_set_val("session_password", pw);
+	}
+
 	send_authorized_keys();
 	tmate_write_uname();
 	tmate_write_ready();

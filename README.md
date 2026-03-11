@@ -52,6 +52,21 @@ Your session is now at:
 
 Names must be 3-32 characters, alphanumeric and hyphens only.
 
+### Password-protected sessions
+
+Require a password for viewers to join:
+
+```sh
+tmtv -p secret
+```
+
+SSH viewers are prompted for the password automatically. Can also be set in config:
+
+```
+# In ~/.tmtv.conf
+set -g tmtv-session-password secret
+```
+
 ## How it works
 
 ```

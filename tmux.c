@@ -56,12 +56,13 @@ usage(int status)
 	fprintf(status ? stderr : stdout,
 	    "usage: %s [-2CDFhlNuVv] [-c shell-command] [-f file]\n"
 	    "            [-H server-host] [-k api-key] [-L socket-name]\n"
-	    "            [-P server-port] [-S socket-path] [-T features]\n"
-	    "            [command [flags]]\n"
+	    "            [-p password] [-P server-port] [-S socket-path]\n"
+	    "            [-T features] [command [flags]]\n"
 	    "\n"
 	    "tmtv options:\n"
 	    "  -F              foreground mode (remote access only, no local session)\n"
 	    "  -H server-host  server hostname to connect to\n"
+	    "  -p password     require password for SSH viewers to connect\n"
 	    "  -P server-port  server SSH port (default: 22)\n"
 	    "  -k api-key      API key for named sessions\n",
 	    getprogname());
@@ -215,7 +216,7 @@ make_label(const char *label, char **cause)
 		free(paths[i]);
 	free(paths);
 
-	xasprintf(&base, "%s/tmux-%ld", path, (long)uid);
+	xasprintf(&base, "%s/tmtv-%ld", path, (long)uid);
 	free(path);
 	if (mkdir(base, S_IRWXU) != 0 && errno != EEXIST) {
 		xasprintf(cause, "couldn't create directory %s (%s)", base,
@@ -368,6 +369,7 @@ main(int argc, char **argv)
 	const char				*s, *cwd;
 	const char				*cli_server_host = NULL;
 	const char				*cli_api_key = NULL;
+	const char				*cli_session_password = NULL;
 	int					 cli_server_port = 0;
 	int					 opt, keys, feat = 0, fflag = 0;
 	uint64_t				 flags = 0;
@@ -396,7 +398,7 @@ main(int argc, char **argv)
 		environ_set(global_environ, "PWD", 0, "%s", cwd);
 	expand_paths(TMUX_CONF, &cfg_files, &cfg_nfiles, 1);
 
-	while ((opt = getopt(argc, argv, "2c:CDdFf:hH:k:lL:NP:qS:T:uUvV")) != -1) {
+	while ((opt = getopt(argc, argv, "2c:CDdFf:hH:k:lL:Np:P:qS:T:uUvV")) != -1) {
 		switch (opt) {
 		case '2':
 			tty_add_features(&feat, "256", ":,");
@@ -454,6 +456,9 @@ main(int argc, char **argv)
 			break;
 		case 'N':
 			flags |= CLIENT_NOSTARTSERVER;
+			break;
+		case 'p':
+			cli_session_password = optarg;
 			break;
 		case 'q':
 			break;
@@ -532,6 +537,9 @@ main(int argc, char **argv)
 	if (cli_api_key != NULL)
 		options_set_string(global_options, "tmtv-api-key", 0,
 		    "%s", cli_api_key);
+	if (cli_session_password != NULL)
+		options_set_string(global_options, "tmtv-session-password", 0,
+		    "%s", cli_session_password);
 
 	/*
 	 * The default shell comes from SHELL or from the user's passwd entry

@@ -257,6 +257,15 @@ int main(int argc, char **argv, char **envp)
 		}
 	}
 
+	tmate_info("tmtv-server %s starting: ssh_port=%d sse_port=%d "
+		   "bind=%s proxy_protocol=%s authorized_keys_only=%s",
+		   TMTV_VERSION,
+		   tmate_settings->ssh_port,
+		   tmate_settings->websocket_port,
+		   tmate_settings->bind_addr ? tmate_settings->bind_addr : "*",
+		   tmate_settings->use_proxy_protocol ? "on" : "off",
+		   tmate_settings->authorized_keys_only ? "on" : "off");
+
 	tmate_ssh_server_main(tmate_session,
 			      tmate_settings->keys_dir, tmate_settings->bind_addr, tmate_settings->ssh_port);
 	return 0;

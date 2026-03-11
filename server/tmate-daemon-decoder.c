@@ -78,6 +78,11 @@ static void tmate_ready(struct tmate_session *session,
 		kill(getpid(), SIGTERM);
 	}
 
+	tmate_info("Session ready token=%s ip=%s version=%s",
+		   session->obfuscated_session_token,
+		   session->ssh_client.ip_address,
+		   session->client_version);
+
 	/*
 	 * Send URLs now — after all config (session_name, web_sharing,
 	 * authorized_keys) has been processed. This avoids sending
@@ -539,6 +544,7 @@ static void tmate_write_copy_mode(__unused struct tmate_session *session,
 static void tmate_fin(__unused struct tmate_session *session,
 		      __unused struct tmate_unpacker *uk)
 {
+	tmate_info("Client sent FIN (graceful disconnect)");
 	session->fin_received = true;
 	request_server_termination();
 }

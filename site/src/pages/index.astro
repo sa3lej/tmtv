@@ -2,7 +2,7 @@
 import Base from '../layouts/Base.astro';
 ---
 
-<Base title="tmtv — terminal sharing">
+<Base title="tmtv — SSH terminal sharing">
   <!-- Background gradients -->
   <div class="fixed inset-0 -z-10">
     <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_50%,rgba(40,20,80,0.3)_0%,transparent_60%)]"></div>
@@ -14,14 +14,35 @@ import Base from '../layouts/Base.astro';
     <h1 class="font-mono text-5xl sm:text-6xl font-bold tracking-tight mb-2 bg-gradient-to-br from-tmtv-blue via-tmtv-purple to-tmtv-green bg-clip-text text-transparent">
       tmtv
     </h1>
-    <p class="text-gray-400 text-sm tracking-wide font-light mb-12">
-      share your terminal, keep your tmux
+    <p class="text-gray-300 text-base tracking-wide font-normal mb-12">
+      share your terminal over SSH. that's it.
     </p>
 
-    <!-- Session card -->
-    <div class="bg-tmtv-surface border border-tmtv-border rounded-2xl p-10 w-[440px] max-w-[90vw] backdrop-blur-xl shadow-2xl">
-      <h2 class="text-base font-medium text-gray-300 mb-5">View a session</h2>
-      <form id="session-form" class="flex gap-2.5">
+    <!-- SSH quickstart -->
+    <div class="bg-tmtv-surface border border-tmtv-border rounded-2xl p-8 sm:p-10 w-[520px] max-w-[90vw] backdrop-blur-xl shadow-2xl">
+      <h2 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] mb-4">Get started</h2>
+      <div class="bg-black/40 rounded-xl p-4 font-mono text-sm flex items-center justify-between gap-4 mb-5">
+        <code class="text-tmtv-green whitespace-nowrap overflow-x-auto">curl -fsSL https://tmtv.se/install.sh | sh</code>
+        <button id="copy-btn" class="text-gray-400 hover:text-gray-300 transition-colors shrink-0 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded" aria-label="Copy install command">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+        </button>
+      </div>
+      <div class="bg-black/40 rounded-xl p-4 font-mono text-[13px] text-gray-300 leading-relaxed space-y-1">
+        <div><span class="text-gray-400 select-none">$</span> <span class="text-tmtv-green">tmtv</span></div>
+        <div><span class="text-gray-400 select-none">#</span> <span class="text-gray-400">share the SSH token with your pair</span></div>
+        <div><span class="text-gray-400 select-none">$</span> ssh <span class="text-tmtv-blue">TOKEN</span>@tmtv.se</div>
+      </div>
+      <p class="mt-3 text-xs text-gray-400">
+        Linux and macOS. Or <code class="font-mono bg-white/5 px-1.5 py-0.5 rounded text-[11px] text-gray-300">brew install sa3lej/tap/tmtv</code> on macOS.
+        Or build from <a href="https://github.com/sa3lej/tmtv" class="text-gray-300 hover:text-gray-200 transition-colors underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">source</a>.
+      </p>
+
+      <!-- Divider -->
+      <div class="border-t border-white/[0.06] my-6"></div>
+
+      <!-- View a session (secondary) -->
+      <h3 class="text-[11px] font-medium text-gray-400 tracking-wide mb-3">View a session in the browser</h3>
+      <form id="session-form" class="flex gap-2">
         <label for="token" class="sr-only">Session token</label>
         <input
           type="text"
@@ -29,18 +50,16 @@ import Base from '../layouts/Base.astro';
           placeholder="session token"
           autocomplete="off"
           spellcheck="false"
-          autofocus
-          class="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 font-mono text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-tmtv-blue/40 focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 transition-colors"
+          class="flex-1 bg-white/5 border border-white/[0.06] rounded-lg px-3 py-2.5 font-mono text-xs text-gray-200 placeholder:text-gray-400 outline-none focus:border-tmtv-blue/40 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 transition-colors"
         />
         <button
           type="submit"
-          class="bg-gradient-to-br from-tmtv-blue to-purple-500 rounded-xl px-6 py-3.5 text-sm font-semibold text-white hover:opacity-90 active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 focus-visible:ring-offset-2 focus-visible:ring-offset-tmtv-bg transition-all whitespace-nowrap"
+          class="bg-white/[0.06] border border-white/[0.08] rounded-lg px-4 py-2.5 text-xs font-medium text-gray-300 hover:bg-white/[0.1] active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 focus-visible:ring-offset-2 focus-visible:ring-offset-tmtv-bg transition-all whitespace-nowrap"
         >
           Watch
         </button>
       </form>
-      <p class="mt-4 text-xs text-gray-400 leading-relaxed">
-        Paste the session token from the session owner.<br>
+      <p class="mt-2.5 text-[11px] text-gray-400 leading-relaxed">
         Or open a direct link: <code class="font-mono bg-white/5 px-1.5 py-0.5 rounded text-[11px]">/s/TOKEN</code>
       </p>
     </div>
@@ -51,12 +70,12 @@ import Base from '../layouts/Base.astro';
     <div class="rounded-xl overflow-hidden border border-white/[0.06] shadow-2xl">
       <img
         src="/tmtv-demo.gif"
-        alt="tmtv web viewer showing a live terminal session with real-time output"
-        class="w-full motion-safe:block"
+        alt="tmtv terminal sharing session — SSH pair programming with optional web viewer"
+        class="w-full motion-safe:block motion-reduce:hidden"
       />
     </div>
     <p class="text-center text-[11px] text-gray-400 mt-3 motion-reduce:block hidden motion-reduce:visible">
-      <a href="/tmtv-demo.gif" class="underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 rounded">View demo animation</a>
+      <a href="/tmtv-demo.gif" class="underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">View demo animation</a>
     </p>
   </div>
 
@@ -71,22 +90,22 @@ import Base from '../layouts/Base.astro';
         <div class="font-mono text-2xl font-bold mb-3 bg-gradient-to-br from-tmtv-blue to-tmtv-purple bg-clip-text text-transparent" aria-hidden="true">1</div>
         <h3 class="text-sm font-semibold text-gray-300 mb-2">Share</h3>
         <p class="text-xs text-gray-400 leading-relaxed">
-          Run <code class="font-mono text-[11px] bg-tmtv-blue/10 text-tmtv-blue px-1.5 py-0.5 rounded">tmtv</code>
-          to start a session. Enable web sharing to get a viewer URL.
+          Run <code class="font-mono text-[11px] bg-tmtv-blue/10 text-tmtv-blue px-1.5 py-0.5 rounded">tmtv</code>.
+          You get two SSH tokens: read-write for your pair, read-only for spectators.
         </p>
       </div>
       <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 text-center">
         <div class="font-mono text-2xl font-bold mb-3 bg-gradient-to-br from-tmtv-blue to-tmtv-purple bg-clip-text text-transparent" aria-hidden="true">2</div>
         <h3 class="text-sm font-semibold text-gray-300 mb-2">Connect</h3>
         <p class="text-xs text-gray-400 leading-relaxed">
-          Viewers open the URL or paste the token above. No install needed for browser access.
+          Your pair runs <code class="font-mono text-[11px] bg-tmtv-blue/10 text-tmtv-blue px-1.5 py-0.5 rounded">ssh TOKEN@tmtv.se</code> and lands in your session. No plugins, no accounts, no browser.
         </p>
       </div>
       <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 text-center">
         <div class="font-mono text-2xl font-bold mb-3 bg-gradient-to-br from-tmtv-blue to-tmtv-purple bg-clip-text text-transparent" aria-hidden="true">3</div>
-        <h3 class="text-sm font-semibold text-gray-300 mb-2">Watch</h3>
+        <h3 class="text-sm font-semibold text-gray-300 mb-2">Or just watch</h3>
         <p class="text-xs text-gray-400 leading-relaxed">
-          See the terminal in real time. Full tmux rendering with xterm.js.
+          Open the web viewer if you don't have a terminal handy. Zero install.
         </p>
       </div>
     </div>
@@ -94,33 +113,17 @@ import Base from '../layouts/Base.astro';
     <!-- Feature badges -->
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
       <div class="text-center py-4">
-        <div class="text-[11px] font-medium text-gray-400 tracking-wide">SSH access</div>
+        <div class="text-[11px] font-medium text-gray-400 tracking-wide">SSH sharing</div>
         <div class="font-mono text-xs text-tmtv-green mt-1">read-write + read-only</div>
+      </div>
+      <div class="text-center py-4">
+        <div class="text-[11px] font-medium text-gray-400 tracking-wide">Built on</div>
+        <div class="font-mono text-xs text-tmtv-green mt-1">tmux 3.6a</div>
       </div>
       <div class="text-center py-4">
         <div class="text-[11px] font-medium text-gray-400 tracking-wide">Web viewer</div>
         <div class="font-mono text-xs text-tmtv-green mt-1">view-only, zero install</div>
       </div>
-      <div class="text-center py-4">
-        <div class="text-[11px] font-medium text-gray-400 tracking-wide">Based on</div>
-        <div class="font-mono text-xs text-tmtv-green mt-1">tmux 3.6a</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Install -->
-  <div class="max-w-2xl mx-auto px-5 pb-16">
-    <div class="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-8">
-      <h2 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] mb-4">Install</h2>
-      <div class="bg-black/40 rounded-xl p-4 font-mono text-sm flex items-center justify-between gap-4">
-        <code class="text-tmtv-green whitespace-nowrap overflow-x-auto">curl -fsSL https://tmtv.se/install.sh | sh</code>
-        <button id="copy-btn" class="text-gray-400 hover:text-gray-300 transition-colors shrink-0 focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 rounded" aria-label="Copy install command">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-        </button>
-      </div>
-      <p class="mt-3 text-xs text-gray-400">
-        Linux and macOS. Or build from <a href="https://github.com/sa3lej/tmtv" class="text-gray-300 hover:text-gray-200 transition-colors underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 rounded">source</a>.
-      </p>
     </div>
   </div>
 
@@ -132,15 +135,15 @@ import Base from '../layouts/Base.astro';
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div class="rounded-xl overflow-hidden border border-white/[0.06]">
         <img src="/screenshot-default.png" alt="tmtv default theme showing terminal output" class="w-full" loading="lazy" />
-        <div class="text-center text-[10px] text-gray-400 py-2">Default theme</div>
+        <div class="text-center text-[11px] text-gray-400 py-2">Default theme</div>
       </div>
       <div class="rounded-xl overflow-hidden border border-white/[0.06]">
         <img src="/screenshot-tmux.png" alt="tmtv viewer showing a normal tmux session with split panes" class="w-full" loading="lazy" />
-        <div class="text-center text-[10px] text-gray-400 py-2">Normal session</div>
+        <div class="text-center text-[11px] text-gray-400 py-2">Normal session</div>
       </div>
       <div class="rounded-xl overflow-hidden border border-white/[0.06]">
         <img src="/screenshot-tv.png" alt="tmtv TV theme with rounded corners and CRT effect" class="w-full" loading="lazy" />
-        <div class="text-center text-[10px] text-gray-400 py-2">TV theme</div>
+        <div class="text-center text-[11px] text-gray-400 py-2">TV theme</div>
       </div>
     </div>
     <p class="text-center text-[11px] text-gray-400 mt-3">
@@ -155,80 +158,65 @@ import Base from '../layouts/Base.astro';
     </h2>
     <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-8 text-sm text-gray-300 leading-relaxed space-y-3">
       <p>
-        I loved <a href="https://github.com/tmate-io/tmate" class="text-tmtv-blue hover:underline focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 rounded">tmate</a> but it was stuck on tmux 2.4 from 2017. Nine years of tmux improvements — popup menus, extended keys, sixel graphics — all missing.
+        I loved <a href="https://github.com/tmate-io/tmate" class="text-tmtv-blue hover:underline focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">tmate</a> but it was stuck on tmux 2.4 from 2017. Nine years of tmux improvements — popup menus, extended keys, sixel graphics — all missing.
       </p>
       <p>
-        So I rebased it on <strong class="text-gray-200">tmux 3.6a</strong>, added web sharing, and here we are. Same SSH-based sharing you know, now with a modern tmux and a browser viewer for anyone who just wants to watch. And there's more coming.
+        So I rebased it on <strong class="text-gray-200">tmux 3.6a</strong> and shipped it. Same SSH-based terminal sharing you know, with a modern tmux underneath. The web viewer is a bonus — handy when someone just wants to watch without opening a terminal.
+      </p>
+      <p>
+        No IDE plugins. No accounts. No Electron app. Just SSH.
       </p>
     </div>
   </div>
 
-  <!-- Changelog -->
+  <!-- What's new -->
   <div class="max-w-2xl mx-auto px-5 pb-16">
     <h2 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] text-center mb-6">
-      Recent updates
+      What's new
     </h2>
-    <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6">
-      <div class="flex items-baseline gap-3 py-2">
+    <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 space-y-1">
+      <div class="flex items-baseline gap-3 py-1.5">
+        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.6</span>
+        <span class="text-sm text-gray-300">Your terminal, your rules.</span>
+      </div>
+      <div class="flex items-baseline gap-3 py-1.5">
         <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.5</span>
-        <span class="font-mono text-[11px] text-gray-400 shrink-0">2026-03-09</span>
-        <span class="text-sm text-gray-300 leading-relaxed">Detach and come back. Running <code class="font-mono text-[11px] bg-white/5 px-1 rounded">tmtv</code> with a detached session now auto-attaches instead of crashing. Client reports its real version to the server &mdash; no more ghost 1.0.0 in the logs.</span>
+        <span class="text-sm text-gray-300">Detach and come back.</span>
       </div>
-      <div class="flex items-baseline gap-3 py-2 border-t border-white/[0.03]">
+      <div class="flex items-baseline gap-3 py-1.5">
         <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.4</span>
-        <span class="font-mono text-[11px] text-gray-400 shrink-0">2026-03-09</span>
-        <span class="text-sm text-gray-300 leading-relaxed">Refresh without regret. Fixed garbled screen dumps when reloading the web viewer mid-session &mdash; cursor addressing replaces autowrap for pixel-perfect reconnects.</span>
+        <span class="text-sm text-gray-300">Refresh without regret.</span>
       </div>
-      <div class="flex items-baseline gap-3 py-2 border-t border-white/[0.03]">
+      <div class="flex items-baseline gap-3 py-1.5">
         <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.3</span>
-        <span class="font-mono text-[11px] text-gray-400 shrink-0">2026-03-09</span>
-        <span class="text-sm text-gray-300 leading-relaxed">The viewer gets a makeover. New macOS Terminal.app-inspired dark palette, fixed black-on-black rendering, and leaner CI &mdash; builds only what each branch needs.</span>
+        <span class="text-sm text-gray-300">The viewer gets a makeover.</span>
       </div>
-      <div class="flex items-baseline gap-3 py-2 border-t border-white/[0.03]">
+      <div class="flex items-baseline gap-3 py-1.5">
         <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.2</span>
-        <span class="font-mono text-[11px] text-gray-400 shrink-0">2026-03-09</span>
-        <span class="text-sm text-gray-300 leading-relaxed">The status bar that keeps its promises. Live viewer counts now work in SSH viewer sessions &mdash; see <code class="font-mono text-[11px] bg-white/5 px-1 rounded">S:2 W:1</code> update in real time. Fully customizable via <code class="font-mono text-[11px] bg-white/5 px-1 rounded">status-right</code>, tmux-style.</span>
+        <span class="text-sm text-gray-300">The status bar that keeps its promises.</span>
       </div>
-      <div class="flex items-baseline gap-3 py-2 border-t border-white/[0.03]">
+      <div class="flex items-baseline gap-3 py-1.5">
         <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.1</span>
-        <span class="font-mono text-[11px] text-gray-400 shrink-0">2026-03-09</span>
-        <span class="text-sm text-gray-300 leading-relaxed">Your links now have faces. Session names appear in browser tabs and link previews (Slack, Discord, iMessage). Plus live viewer counts in the status bar &mdash; know who&rsquo;s watching.</span>
-      </div>
-      <div class="flex items-baseline gap-3 py-2 border-t border-white/[0.03]">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.0</span>
-        <span class="font-mono text-[11px] text-gray-400 shrink-0">2026-03-09</span>
-        <span class="text-sm text-gray-300 leading-relaxed">Binaries that actually work everywhere. Fully static Linux builds &mdash; no more missing libmsgpackc on Arch or friends. Plus WCAG 2.1 AA landing page for the accessibility-minded sysadmin.</span>
-      </div>
-      <div class="flex items-baseline gap-3 py-2 border-t border-white/[0.03]">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.1.1</span>
-        <span class="font-mono text-[11px] text-gray-400 shrink-0">2026-03-09</span>
-        <span class="text-sm text-gray-300 leading-relaxed">Your fish finally have the right colors. Fixed 256-color, RGB, and bright palette rendering in the web viewer.</span>
-      </div>
-      <div class="flex items-baseline gap-3 py-2 border-t border-white/[0.03]">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.1.0</span>
-        <span class="font-mono text-[11px] text-gray-400 shrink-0">2026-03-08</span>
-        <span class="text-sm text-gray-300 leading-relaxed">Named sessions so you can stop sharing random hex. Web sharing toggle &mdash; because sometimes you want an audience, sometimes you don't. Plus SSH read-only viewer.</span>
-      </div>
-      <div class="flex items-baseline gap-3 py-2 border-t border-white/[0.03]">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.0.0</span>
-        <span class="font-mono text-[11px] text-gray-400 shrink-0">2026-03-07</span>
-        <span class="text-sm text-gray-300 leading-relaxed">Hello, world. Terminal sharing over SSH and web, built on tmux 3.6a. Nine years of catching up, done in a weekend.</span>
+        <span class="text-sm text-gray-300">Your links now have faces.</span>
       </div>
     </div>
+    <p class="text-center text-xs text-gray-400 mt-4">
+      <a href="https://github.com/sa3lej/tmtv/releases" class="text-gray-300 hover:text-gray-200 transition-colors underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">Full changelog on GitHub</a>
+    </p>
   </div>
 
   <!-- About -->
   <div class="max-w-2xl mx-auto px-5 pb-16">
     <div class="text-center space-y-3">
       <p class="text-sm text-gray-300">
-        Built by <strong class="text-gray-200">Lars-Erik Jonsson</strong> (<a href="https://github.com/sa3lej" class="text-tmtv-blue hover:underline focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 rounded">SA3LEJ</a>) with <a href="https://claude.ai/code" class="text-tmtv-purple hover:underline focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 rounded">Claude Code</a>.
+        Built by <strong class="text-gray-200">Lars-Erik Jonsson</strong> (<a href="https://github.com/sa3lej" class="text-tmtv-blue hover:underline focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">SA3LEJ</a>) with <a href="https://claude.ai/code" class="text-tmtv-purple hover:underline focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">Claude Code</a>.
       </p>
       <div class="flex items-center justify-center gap-4">
-        <a href="https://github.com/sa3lej/tmtv" class="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-300 transition-colors focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 rounded">
+        <a href="https://github.com/sa3lej/tmtv" class="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-300 transition-colors focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
           GitHub
         </a>
-        <a href="https://buymeacoffee.com/lejo" class="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-300 transition-colors focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 rounded">
+        <a href="https://buymeacoffee.com/lejo" class="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-300 transition-colors focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" x2="6" y1="2" y2="4"/><line x1="10" x2="10" y1="2" y2="4"/><line x1="14" x2="14" y1="2" y2="4"/></svg>
           Buy me a coffee
         </a>
@@ -238,7 +226,7 @@ import Base from '../layouts/Base.astro';
 
   <!-- Footer -->
   <footer class="py-8 text-center text-[11px] text-gray-400 tracking-wide">
-    powered by <a href="https://github.com/sa3lej/tmtv" class="text-gray-300 hover:text-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-tmtv-blue/50 rounded">tmtv</a>
+    powered by <a href="https://github.com/sa3lej/tmtv" class="text-gray-300 hover:text-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">tmtv</a>
     &mdash; terminal sharing for IT professionals
   </footer>
 
