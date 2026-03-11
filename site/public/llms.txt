@@ -1,0 +1,104 @@
+tmtv — SSH terminal sharing, built on modern tmux.
+
+tmtv lets you share your terminal session instantly over SSH. Your pair
+runs one command and lands in your session. No plugins, no accounts, no
+browser required. It also offers an optional web viewer for read-only
+access from a browser.
+
+tmtv is a fork of tmate, rebased on tmux 3.6a, bringing nine years of
+tmux improvements that tmate never had: popup menus, extended keys, sixel
+graphics, and more.
+
+Current version: 1.2.5
+License: ISC (same as tmux)
+Author: Lars-Erik Jonsson (SA3LEJ)
+Repository: https://github.com/sa3lej/tmtv
+Website: https://tmtv.se
+Releases: https://github.com/sa3lej/tmtv/releases
+Homebrew: brew install sa3lej/tap/tmtv
+
+
+INSTALL
+
+  curl -fsSL https://tmtv.se/install.sh | sh
+
+Supported platforms: Linux (amd64, arm64, arm32v7, arm32v6, i386) and
+macOS (arm64, amd64). Linux binaries are fully static (musl, zero
+external dependencies). You can also build from source.
+
+
+USAGE
+
+  1. Run "tmtv" to start a shared session.
+  2. tmtv prints two SSH tokens:
+     - A read-write token for pair programming (full terminal access).
+     - A read-only token for observers (view only, no input).
+  3. Your pair connects with: ssh TOKEN@tmtv.se
+  4. A web viewer link is also provided for browser-based read-only
+     viewing at https://tmtv.se/TOKEN (no install needed for viewers).
+
+Named sessions:
+
+  tmtv new-session -s myproject
+  tmtv attach -t myproject
+
+Detach with the standard tmux prefix (Ctrl-B, then D). Reattach by
+running "tmtv" again — it auto-attaches to your detached session.
+
+
+KEY FEATURES
+
+- SSH terminal sharing with read-write and read-only access tokens
+- Built on tmux 3.6a — full modern tmux feature set
+- Named sessions for persistent, recognizable session names
+- Web viewer powered by xterm.js (SSE streaming, 256-color, RGB,
+  Unicode, multi-pane layout, themes)
+- Viewer counting in the status bar (SSH and web viewers separately)
+- Static Linux binaries with zero dependencies
+- One-line install via curl
+- Homebrew tap for macOS
+- Self-hostable server (tmtv-server)
+- ISC license (permissive, same as tmux)
+
+
+COMPARISON
+
+vs tmate: tmate is stuck on tmux 2.4 (2017) and no longer maintained.
+tmtv is rebased on tmux 3.6a with all modern features.
+
+vs VS Code Live Share: tmtv is terminal-native. No IDE required. Works
+with any editor, any workflow, any shell.
+
+vs Tuple/screen sharing: tmtv shares the terminal session itself, not
+pixels. Low bandwidth, low latency, works over SSH.
+
+
+BUILD FROM SOURCE
+
+Linux (Debian/Ubuntu):
+  sudo apt-get install build-essential autoconf automake pkg-config \
+    libevent-dev libncurses-dev libssh-dev libmsgpack-dev libbsd-dev \
+    bison libutf8proc-dev
+  sh autogen.sh && ./configure && make
+
+macOS:
+  brew install autoconf automake pkg-config libevent libssh msgpack-c \
+    bison utf8proc
+  sh autogen.sh && ./configure --enable-utf8proc && make
+
+
+SELF-HOSTING
+
+tmtv-server is the relay component. Build it alongside the client from
+the same source tree. The server handles SSH relay, authentication, SSE
+streaming for the web viewer, and session management. See the repository
+for deployment details and the Caddyfile for reverse proxy configuration.
+
+
+LINKS
+
+Homepage: https://tmtv.se
+Source code: https://github.com/sa3lej/tmtv
+Releases: https://github.com/sa3lej/tmtv/releases
+Install script: https://tmtv.se/install.sh
+Demo: https://tmtv.se/tmtv-demo.gif

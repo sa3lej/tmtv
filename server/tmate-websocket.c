@@ -16,6 +16,7 @@
 
 #include <sys/socket.h>
 #include <netinet/tcp.h>
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
@@ -43,6 +44,8 @@
 #define CONTROL_PROTOCOL_VERSION 2
 
 #define SSE_MAX_HEADER_SIZE 4096
+#define SSE_HANDSHAKE_TIMEOUT_SEC 5
+#define SSE_MAX_CLIENTS_PER_SESSION 50
 
 /* Forward declaration */
 static void sse_send_data(struct bufferevent *bev,
@@ -459,6 +462,8 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 	struct tmate_session *s = wc->session;
 	const char *token;
 	size_t tlen;
+	const char *query_start;
+	size_t token_only_len;
 
 	/* Strip leading slash: "/TOKEN" or "/ws/TOKEN" -> "TOKEN" */
 	if (path_len > 0 && path[0] == '/') {
@@ -474,29 +479,80 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 	if (path_len == 0)
 		return -1;
 
+	/* Separate token from query string (?password=...) */
+	query_start = memchr(path, '?', path_len);
+	token_only_len = query_start ? (size_t)(query_start - path) : path_len;
+
 	/* Check against all session tokens */
 	token = s->session_token;
 	if (token) {
 		tlen = strlen(token);
-		if (tlen == path_len && memcmp(path, token, tlen) == 0)
+		if (tlen == token_only_len && memcmp(path, token, tlen) == 0)
 			return 0;
 	}
 
 	token = s->session_token_ro;
 	if (token) {
 		tlen = strlen(token);
-		if (tlen == path_len && memcmp(path, token, tlen) == 0)
+		if (tlen == token_only_len && memcmp(path, token, tlen) == 0)
 			return 0;
 	}
 
 	token = s->session_token_named;
 	if (token) {
 		tlen = strlen(token);
-		if (tlen == path_len && memcmp(path, token, tlen) == 0)
+		if (tlen == token_only_len && memcmp(path, token, tlen) == 0)
 			return 0;
 	}
 
 	return -1;
+}
+
+/*
+ * Extract the "password" query parameter from a URI path.
+ * Returns a malloc'd string or NULL if not found.
+ * Caller must free the result.
+ */
+static char *sse_extract_password(const char *path, size_t path_len)
+{
+	const char *query_start;
+	const char *query_end;
+	const char *p, *key_start;
+
+	query_start = memchr(path, '?', path_len);
+	if (!query_start)
+		return NULL;
+
+	query_start++; /* skip '?' */
+	query_end = path + path_len;
+
+	/* Search for "password=" in query string */
+	p = query_start;
+	while (p < query_end) {
+		key_start = p;
+
+		/* Find '=' */
+		const char *eq = memchr(p, '=', query_end - p);
+		if (!eq)
+			break;
+
+		/* Find end of value (next '&' or end of string) */
+		const char *amp = memchr(eq + 1, '&', query_end - (eq + 1));
+		const char *val_end = amp ? amp : query_end;
+
+		if ((eq - key_start) == 8 &&
+		    memcmp(key_start, "password", 8) == 0) {
+			size_t val_len = val_end - (eq + 1);
+			char *val = xmalloc(val_len + 1);
+			memcpy(val, eq + 1, val_len);
+			val[val_len] = '\0';
+			return val;
+		}
+
+		p = amp ? amp + 1 : query_end;
+	}
+
+	return NULL;
 }
 
 static int sse_do_handshake(struct ws_client *wc)
@@ -524,19 +580,83 @@ static int sse_do_handshake(struct ws_client *wc)
 		"Connection: close\r\n"
 		"\r\n";
 
-	if (strncmp(data, "GET ", 4) == 0) {
+	static const char *reject_password =
+		"HTTP/1.1 403 Forbidden\r\n"
+		"Content-Type: text/plain\r\n"
+		"Content-Length: 17\r\n"
+		"Connection: close\r\n"
+		"\r\n"
+		"password_required";
+
+	static const char *reject_wrong_password =
+		"HTTP/1.1 403 Forbidden\r\n"
+		"Content-Type: text/plain\r\n"
+		"Content-Length: 14\r\n"
+		"Connection: close\r\n"
+		"\r\n"
+		"wrong_password";
+
+	/* Only accept GET requests — reject anything else */
+	if (strncmp(data, "GET ", 4) != 0) {
+		tmate_debug("SSE rejecting non-GET request");
+		evbuffer_drain(input, (header_end - data) + 4);
+		static const char *method_reject =
+			"HTTP/1.1 405 Method Not Allowed\r\n"
+			"Allow: GET\r\n"
+			"Content-Length: 0\r\n"
+			"Connection: close\r\n"
+			"\r\n";
+		bufferevent_write(wc->bev, method_reject,
+				  strlen(method_reject));
+		return -1;
+	}
+
+	{
 		const char *path_start = data + 4;
 		const char *path_end = memchr(path_start, ' ',
 					      header_end - path_start);
-		if (path_end) {
-			if (sse_validate_token(wc, path_start,
-					       path_end - path_start) < 0) {
-				tmate_debug("SSE token rejected");
-				evbuffer_drain(input, (header_end - data) + 4);
-				bufferevent_write(wc->bev, reject,
-						  strlen(reject));
+		if (!path_end) {
+			evbuffer_drain(input, (header_end - data) + 4);
+			bufferevent_write(wc->bev, reject, strlen(reject));
+			return -1;
+		}
+
+		size_t path_len = path_end - path_start;
+
+		if (sse_validate_token(wc, path_start, path_len) < 0) {
+			tmate_debug("SSE token rejected");
+			evbuffer_drain(input, (header_end - data) + 4);
+			bufferevent_write(wc->bev, reject, strlen(reject));
+			return -1;
+		}
+
+		/* Password gate: if the session has a password,
+		 * the SSE client must provide it as a query param */
+		if (tmate_has_session_password()) {
+			char *pw = sse_extract_password(
+				path_start, path_len);
+			if (!pw) {
+				tmate_debug("SSE password required "
+					    "but not provided");
+				evbuffer_drain(input,
+					(header_end - data) + 4);
+				bufferevent_write(wc->bev,
+					reject_password,
+					strlen(reject_password));
 				return -1;
 			}
+			if (!tmate_check_session_password(pw)) {
+				tmate_debug("SSE wrong password");
+				free(pw);
+				evbuffer_drain(input,
+					(header_end - data) + 4);
+				bufferevent_write(wc->bev,
+					reject_wrong_password,
+					strlen(reject_wrong_password));
+				return -1;
+			}
+			tmate_debug("SSE password accepted");
+			free(pw);
 		}
 	}
 
@@ -773,9 +893,34 @@ static void ws_client_free(struct ws_client *wc)
 		tmate_broadcast_viewer_count(session);
 }
 
+static void sse_send_fin(struct bufferevent *bev)
+{
+	msgpack_sbuffer sbuf;
+	msgpack_packer pk;
+
+	msgpack_sbuffer_init(&sbuf);
+	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+	msgpack_pack_array(&pk, 1);
+	msgpack_pack_int(&pk, TMATE_OUT_FIN);
+
+	sse_send_data(bev, (unsigned char *)sbuf.data, sbuf.size);
+	msgpack_sbuffer_destroy(&sbuf);
+}
+
 void tmate_disconnect_ws_clients(struct tmate_session *session)
 {
 	struct ws_client *wc, *tmp;
+
+	/* Send FIN to each client before disconnecting so the browser
+	 * can show "session ended" instead of retrying forever. */
+	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+		if (wc->handshake_done)
+			sse_send_fin(wc->bev);
+	}
+
 	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp)
 		ws_client_free(wc);
 	tmate_debug("All SSE clients disconnected (web sharing disabled)");
@@ -796,6 +941,8 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 			return; /* need more data */
 
 		wc->handshake_done = true;
+		/* Clear handshake timeout — connection is established */
+		bufferevent_set_timeouts(wc->bev, NULL, NULL);
 		tmate_info("SSE client connected");
 
 		/* Send layout sync so browser knows terminal size + window names */
@@ -823,16 +970,35 @@ static void on_ws_client_event(__unused struct bufferevent *bev,
 
 static void on_ws_accept(__unused struct evconnlistener *listener,
 			 evutil_socket_t fd,
-			 __unused struct sockaddr *addr,
+			 struct sockaddr *addr,
 			 __unused int socklen, void *arg)
 {
 	struct tmate_session *session = arg;
 	struct ws_client *wc;
 	int flag = 1;
+	char peer_ip[64] = "unknown";
+
+	if (addr->sa_family == AF_INET)
+		inet_ntop(AF_INET,
+			  &((struct sockaddr_in *)addr)->sin_addr,
+			  peer_ip, sizeof(peer_ip));
+	else if (addr->sa_family == AF_INET6)
+		inet_ntop(AF_INET6,
+			  &((struct sockaddr_in6 *)addr)->sin6_addr,
+			  peer_ip, sizeof(peer_ip));
+
+	tmate_info("SSE connection from ip=%s", peer_ip);
 
 	if (!session->web_sharing_enabled) {
 		close(fd);
 		tmate_debug("SSE connection rejected: web sharing is disabled");
+		return;
+	}
+
+	if (count_web_viewers(session) >= SSE_MAX_CLIENTS_PER_SESSION) {
+		close(fd);
+		tmate_info("SSE connection rejected: max clients (%d) reached",
+			   SSE_MAX_CLIENTS_PER_SESSION);
 		return;
 	}
 
@@ -849,12 +1015,111 @@ static void on_ws_accept(__unused struct evconnlistener *listener,
 		return;
 	}
 
+	/* Timeout for HTTP handshake — drop slow clients */
+	{
+		struct timeval tv = { SSE_HANDSHAKE_TIMEOUT_SEC, 0 };
+		bufferevent_set_timeouts(wc->bev, &tv, NULL);
+	}
+
 	bufferevent_setcb(wc->bev, on_ws_client_read, NULL,
 			  on_ws_client_event, wc);
 	bufferevent_enable(wc->bev, EV_READ | EV_WRITE);
 
 	TAILQ_INSERT_TAIL(&session->ws_clients, wc, entry);
 	tmate_debug("SSE connection accepted, awaiting HTTP request");
+}
+
+/* --- Accept an SSE client from a pre-connected fd (IPC path) --- */
+
+void tmate_websocket_accept_fd(struct tmate_session *session, int fd)
+{
+	struct ws_client *wc;
+	int flag = 1;
+
+	if (!session->web_sharing_enabled) {
+		close(fd);
+		tmate_debug("SSE connection rejected via IPC: web sharing disabled");
+		return;
+	}
+
+	if (count_web_viewers(session) >= SSE_MAX_CLIENTS_PER_SESSION) {
+		close(fd);
+		tmate_info("SSE connection rejected via IPC: max clients (%d)",
+			   SSE_MAX_CLIENTS_PER_SESSION);
+		return;
+	}
+
+	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+	evutil_make_socket_nonblocking(fd);
+
+	wc = xcalloc(1, sizeof(*wc));
+	wc->session = session;
+	wc->handshake_done = false;
+	wc->bev = bufferevent_socket_new(session->ev_base, fd,
+					 BEV_OPT_CLOSE_ON_FREE);
+	if (!wc->bev) {
+		free(wc);
+		close(fd);
+		return;
+	}
+
+	/* Timeout for HTTP handshake — drop slow clients */
+	{
+		struct timeval tv = { SSE_HANDSHAKE_TIMEOUT_SEC, 0 };
+		bufferevent_set_timeouts(wc->bev, &tv, NULL);
+	}
+
+	bufferevent_setcb(wc->bev, on_ws_client_read, NULL,
+			  on_ws_client_event, wc);
+	bufferevent_enable(wc->bev, EV_READ | EV_WRITE);
+
+	TAILQ_INSERT_TAIL(&session->ws_clients, wc, entry);
+	tmate_info("SSE connection accepted via IPC (fd=%d)", fd);
+}
+
+/* --- IPC fd receiver (daemon side) --- */
+
+static void on_ipc_read(__unused evutil_socket_t fd,
+			__unused short what, void *arg)
+{
+	struct tmate_session *session = arg;
+	int client_fd;
+
+	client_fd = sse_recv_fd(session->ipc_fd);
+	if (client_fd < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK)
+			return;
+		tmate_debug("IPC fd recv failed or closed");
+		/* IPC channel broken -- disable the event */
+		if (session->ev_ipc) {
+			event_del(session->ev_ipc);
+			event_free(session->ev_ipc);
+			session->ev_ipc = NULL;
+		}
+		return;
+	}
+
+	tmate_debug("Received SSE client fd=%d via IPC", client_fd);
+	tmate_websocket_accept_fd(session, client_fd);
+}
+
+void tmate_setup_ipc_receiver(struct tmate_session *session)
+{
+	if (session->ipc_fd < 0)
+		return;
+
+	evutil_make_socket_nonblocking(session->ipc_fd);
+
+	session->ev_ipc = event_new(session->ev_base, session->ipc_fd,
+				    EV_READ | EV_PERSIST,
+				    on_ipc_read, session);
+	if (!session->ev_ipc) {
+		tmate_info("Cannot create IPC event");
+		return;
+	}
+
+	event_add(session->ev_ipc, NULL);
+	tmate_info("IPC receiver registered on fd=%d", session->ipc_fd);
 }
 
 /* --- Encoder broadcast callback --- */
@@ -1094,6 +1359,7 @@ void tmate_init_websocket(struct tmate_session *session)
 	session->websocket_sx = -1;
 	session->websocket_sy = -1;
 	session->ws_listen_fd = -1;
+	session->ev_ipc = NULL;
 
 	TAILQ_INIT(&session->ws_clients);
 

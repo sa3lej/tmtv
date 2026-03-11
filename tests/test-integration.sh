@@ -3,58 +3,70 @@
 # Integration tests for tmtv.
 # Tests real SSH and SSE workflows against a running tmtv-server.
 #
-# Requirements on the BUILD machine (where this script runs):
-#   - ssh client (OpenSSH)
-#   - curl
-#   - npx + playwright (for visual tests): npm i -D playwright
-#     Install browsers: npx playwright install chromium
-#   - TEST_HOST env var set to IP/hostname of the test machine
+# Can run locally on the server (recommended) or remotely over SSH.
 #
-# Requirements on the TEST machine (TEST_HOST):
+# Local mode (on the staging/test server):
+#   sh test-integration.sh                    # auto-detects localhost
+#   sh test-integration.sh --quick            # skip slow tests
+#
+# Remote mode (from a different machine):
+#   TEST_HOST=staging.tmtv.se sh test-integration.sh
+#
+# Requirements:
 #   - tmtv-server running (systemd), listening on SSH port (default 2222)
 #     and SSE port (default 4002)
-#   - tmtv client binary at /root/tmtv (or REMOTE_TMTV path)
-#   - Caddy (or any web server) on port 8080 serving:
-#       /           -> landing page
-#       /s/<token>  -> viewer.html
+#   - tmtv client binary at /usr/local/bin/tmtv (or REMOTE_TMTV path)
+#   - Caddy (or any web server) on HTTPS (port 443) serving:
+#       /s/<token>  -> viewer.html (with Caddy templates)
 #       /ws/<token> -> reverse proxy to SSE port
-#   - SSH keys in /root/keys/ (or REMOTE_KEYS_DIR)
+#   - SSH keys in /etc/tmtv/keys (or REMOTE_KEYS_DIR)
 #   - expect (for SSH RW/RO text tests): apt install expect
-#   - SSH access as root on port 22 (or TEST_SSH_PORT)
+#   - curl
+#   - npx + playwright (optional, for visual tests)
 #
-# Usage:
-#   TEST_HOST=<ip> sh test-integration.sh
-#   TEST_HOST=<ip> sh test-integration.sh --quick   # skip slow tests
-#
-# Environment variables (all optional except TEST_HOST):
-#   TEST_HOST        - IP/hostname of test machine (REQUIRED)
-#   TEST_SSH_PORT    - SSH port for admin access (default: 22)
+# Environment variables (all optional):
+#   TEST_HOST        - IP/hostname of test machine (default: localhost)
+#   TEST_SSH_PORT    - SSH port for admin access (default: 22, remote mode only)
 #   TMTV_PORT        - tmtv-server SSH port (default: 2222)
 #   SSE_PORT         - tmtv-server SSE port (default: 4002)
-#   WEB_PORT         - web server port (default: 8080)
-#   REMOTE_TMTV      - path to tmtv client on remote (default: /root/tmtv)
-#   REMOTE_KEYS_DIR  - path to SSH keys on remote (default: /root/keys)
+#   WEB_PROTO        - web server protocol (default: https)
+#   WEB_PORT         - web server port (default: 443)
+#   REMOTE_TMTV      - path to tmtv binary (default: /usr/local/bin/tmtv)
+#   REMOTE_KEYS_DIR  - path to SSH keys (default: /etc/tmtv/keys)
 #
 
 set -e
 
-if [ -z "$TEST_HOST" ]; then
-	echo "ERROR: TEST_HOST is required (set to IP/hostname of test machine)" >&2
-	exit 1
-fi
+TEST_HOST="${TEST_HOST:-localhost}"
 TEST_SSH_PORT="${TEST_SSH_PORT:-22}"
 TMTV_PORT="${TMTV_PORT:-2222}"
 SSE_PORT="${SSE_PORT:-4002}"
-WEB_PORT="${WEB_PORT:-8080}"
-REMOTE_TMTV="${REMOTE_TMTV:-/root/tmtv}"
+WEB_PROTO="${WEB_PROTO:-https}"
+WEB_PORT="${WEB_PORT:-443}"
+REMOTE_TMTV="${REMOTE_TMTV:-/usr/local/bin/tmtv}"
 QUICK=false
 HAS_PLAYWRIGHT=false
+LOCAL=false
 
 for arg in "$@"; do
 	case "$arg" in
 		--quick) QUICK=true ;;
+		--local) LOCAL=true ;;
 	esac
 done
+
+# Auto-detect local mode
+if [ "$TEST_HOST" = "localhost" ] || [ "$TEST_HOST" = "127.0.0.1" ]; then
+	LOCAL=true
+fi
+
+# Convenience: full base URLs for web and SSE requests
+WEB_URL="${WEB_PROTO}://${TEST_HOST}:${WEB_PORT}"
+if [ "$LOCAL" = "true" ]; then
+	SSE_BASE="http://127.0.0.1:${SSE_PORT}"
+else
+	SSE_BASE="http://${TEST_HOST}:${SSE_PORT}"
+fi
 
 # Check for Playwright (optional — visual tests skipped without it)
 if command -v npx >/dev/null 2>&1 && npx playwright --version >/dev/null 2>&1; then
@@ -84,14 +96,17 @@ skip() {
 	printf "  %-55s SKIP\n" "$1"
 }
 
-# Run command on remote host
+# Run command on the test host (locally via sudo, or via SSH as root)
 remote() {
-	ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-		-p "$TEST_SSH_PORT" "root@$TEST_HOST" "$@" 2>/dev/null
+	if [ "$LOCAL" = "true" ]; then
+		sudo sh -c "$*" 2>/dev/null
+	else
+		ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+			-p "$TEST_SSH_PORT" "root@$TEST_HOST" "$@" 2>/dev/null
+	fi
 }
 
-# Run tmtv command on remote host (needs TERM)
-# Uses -S to target the test socket so commands hit the right server
+# Run tmtv command on test host (needs TERM)
 remote_tmtv() {
 	remote "TERM=xterm-256color $REMOTE_TMTV $*"
 }
@@ -99,7 +114,7 @@ remote_tmtv() {
 # Generate unique session name for this test run
 TESTID="t$$"
 
-REMOTE_CONF="/root/.tmtv-test-$TESTID.conf"
+REMOTE_CONF="/tmp/.tmtv-test-$TESTID.conf"
 
 cleanup() {
 	# Kill any test sessions
@@ -150,10 +165,10 @@ fi
 # Test: Start a tmtv session with web sharing + named session
 # -------------------------------------------------------
 # Derive key fingerprints from the server's keys directory
-KEYS_DIR="${REMOTE_KEYS_DIR:-/root/keys}"
-RSA_FP=$(remote "ssh-keygen -lf $KEYS_DIR/ssh_host_rsa_key -E sha256 2>/dev/null" \
+KEYS_DIR="${REMOTE_KEYS_DIR:-/etc/tmtv/keys}"
+RSA_FP=$(remote "ssh-keygen -lf $KEYS_DIR/ssh_host_rsa_key.pub -E sha256 2>/dev/null" \
 	| awk '{print $2}' || echo "")
-ED25519_FP=$(remote "ssh-keygen -lf $KEYS_DIR/ssh_host_ed25519_key -E sha256 2>/dev/null" \
+ED25519_FP=$(remote "ssh-keygen -lf $KEYS_DIR/ssh_host_ed25519_key.pub -E sha256 2>/dev/null" \
 	| awk '{print $2}' || echo "")
 
 if [ -z "$RSA_FP" ] && [ -z "$ED25519_FP" ]; then
@@ -239,7 +254,7 @@ fi
 if [ -n "$TOKEN" ]; then
 	# Test SSE endpoint returns event-stream content type
 	SSE_RESPONSE=$(curl -s -m 3 -o /dev/null -w "%{http_code}:%{content_type}" \
-		"http://$TEST_HOST:$SSE_PORT/$TOKEN" 2>/dev/null || echo "000:")
+		"$SSE_BASE/$TOKEN" 2>/dev/null || echo "000:")
 	HTTP_CODE=$(echo "$SSE_RESPONSE" | cut -d: -f1)
 	CTYPE=$(echo "$SSE_RESPONSE" | cut -d: -f2-)
 
@@ -250,7 +265,7 @@ if [ -n "$TOKEN" ]; then
 	fi
 
 	# Test SSE delivers data (capture first few events)
-	SSE_DATA=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" 2>/dev/null || echo "")
+	SSE_DATA=$(curl -s -m 3 "$SSE_BASE/$TOKEN" 2>/dev/null || echo "")
 	if echo "$SSE_DATA" | grep -q "^data:"; then
 		pass "SSE delivers terminal data"
 	else
@@ -265,7 +280,7 @@ fi
 # Test: Web viewer via nginx (named session)
 # -------------------------------------------------------
 WEB_RESPONSE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
-	"http://$TEST_HOST:$WEB_PORT/s/$TESTID" 2>/dev/null || echo "000")
+	"$WEB_URL/s/$TESTID" 2>/dev/null || echo "000")
 if [ "$WEB_RESPONSE" = "200" ]; then
 	pass "web viewer serves /s/<name>"
 else
@@ -275,7 +290,7 @@ fi
 # -------------------------------------------------------
 # Test: Web viewer title contains session name (Caddy templates)
 # -------------------------------------------------------
-VIEWER_HTML=$(curl -s -m 5 "http://$TEST_HOST:$WEB_PORT/s/$TESTID" 2>/dev/null || echo "")
+VIEWER_HTML=$(curl -s -m 5 "$WEB_URL/s/$TESTID" 2>/dev/null || echo "")
 if echo "$VIEWER_HTML" | grep -q "<title>tmtv.*$TESTID</title>"; then
 	pass "viewer <title> contains session name"
 else
@@ -297,7 +312,7 @@ if [ -n "$TOKEN" ]; then
 	# Capture SSE data for a few seconds — should contain viewer count
 	# VIEWER_COUNT is msgpack type 14, sent as base64. We verify we get
 	# data events (the count message is included in the stream).
-	SSE_VC=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" 2>/dev/null || echo "")
+	SSE_VC=$(curl -s -m 3 "$SSE_BASE/$TOKEN" 2>/dev/null || echo "")
 	VC_EVENTS=$(echo "$SSE_VC" | grep -c "^data:" || true)
 	if [ "$VC_EVENTS" -ge 1 ]; then
 		pass "SSE delivers viewer count events"
@@ -312,7 +327,7 @@ fi
 # Test: SSE via web proxy (named session)
 # -------------------------------------------------------
 WS_RESPONSE=$(curl -s -m 3 -o /dev/null -w "%{http_code}:%{content_type}" \
-	"http://$TEST_HOST:$WEB_PORT/ws/$TESTID" 2>/dev/null || echo "000:")
+	"$WEB_URL/ws/$TESTID" 2>/dev/null || echo "000:")
 WS_CODE=$(echo "$WS_RESPONSE" | cut -d: -f1)
 WS_CTYPE=$(echo "$WS_RESPONSE" | cut -d: -f2-)
 
@@ -457,7 +472,7 @@ rm -f /tmp/tmtv-split.exp"
 
 	# Verify SSE still delivers data after pane operations
 	if [ -n "$TOKEN" ]; then
-		SSE_AFTER=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" \
+		SSE_AFTER=$(curl -s -m 3 "$SSE_BASE/$TOKEN" \
 			2>/dev/null || echo "")
 		if echo "$SSE_AFTER" | grep -q "^data:"; then
 			pass "SSE streams after pane create"
@@ -557,7 +572,7 @@ if [ -n "$TOKEN" ]; then
 	fi
 
 	# Test web viewer count: connect SSE client, verify W:1 in SSH status bar
-	curl -s -m 15 -N "http://$TEST_HOST:$SSE_PORT/$TOKEN" > /dev/null 2>&1 &
+	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
 	WEB_CURL_PID=$!
 	sleep 3
 
@@ -649,7 +664,7 @@ if [ "$QUICK" = "false" ] && [ -n "$TOKEN" ]; then
 	sleep 2
 
 	# When web sharing is off, new SSE connections should get disconnected
-	SSE_CHECK=$(curl -s -m 2 "http://$TEST_HOST:$SSE_PORT/$TOKEN" 2>/dev/null || echo "")
+	SSE_CHECK=$(curl -s -m 2 "$SSE_BASE/$TOKEN" 2>/dev/null || echo "")
 	DATA_LINES=$(echo "$SSE_CHECK" | grep -c "^data:" || true)
 
 	# Re-enable for remaining tests
@@ -657,7 +672,7 @@ if [ "$QUICK" = "false" ] && [ -n "$TOKEN" ]; then
 	sleep 2
 
 	# After re-enable, SSE should work again
-	SSE_REENABLE=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" 2>/dev/null || echo "")
+	SSE_REENABLE=$(curl -s -m 3 "$SSE_BASE/$TOKEN" 2>/dev/null || echo "")
 	if echo "$SSE_REENABLE" | grep -q "^data:"; then
 		pass "web sharing toggle (off then on)"
 	else
@@ -678,7 +693,7 @@ if [ -n "$TOKEN" ]; then
 	# Capture SSE data — should contain layout sync with new dimensions
 	# The SSE stream sends binary msgpack; we check for non-empty data
 	# after resize, which includes the new SYNC_LAYOUT message
-	SSE_RESIZE=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" \
+	SSE_RESIZE=$(curl -s -m 3 "$SSE_BASE/$TOKEN" \
 		2>/dev/null || echo "")
 	if echo "$SSE_RESIZE" | grep -q "^data:"; then
 		pass "SSE delivers data after resize"
@@ -717,7 +732,7 @@ if [ -n "$TOKEN" ]; then
 	sleep 1
 
 	# Verify SSE still delivers data on the active window
-	SSE_WIN=$(curl -s -m 3 "http://$TEST_HOST:$SSE_PORT/$TOKEN" \
+	SSE_WIN=$(curl -s -m 3 "$SSE_BASE/$TOKEN" \
 		2>/dev/null || echo "")
 	if echo "$SSE_WIN" | grep -q "^data:"; then
 		pass "SSE streams after window switch"
@@ -751,7 +766,7 @@ if [ -n "$TOKEN" ]; then
 	sleep 1
 
 	# Connect a fresh SSE client — should get screen dump with marker
-	SSE_RECONNECT=$(curl -s -m 4 "http://$TEST_HOST:$SSE_PORT/$TOKEN" \
+	SSE_RECONNECT=$(curl -s -m 4 "$SSE_BASE/$TOKEN" \
 		2>/dev/null || echo "")
 	if echo "$SSE_RECONNECT" | grep -q "^data:"; then
 		pass "SSE reconnect delivers screen dump"
@@ -773,7 +788,7 @@ if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$QUICK" = "false" ]; then
 
 	SCREENSHOT="/tmp/tmtv-visual-$$.png"
 	if npx playwright screenshot --browser chromium \
-		"http://$TEST_HOST:$WEB_PORT/s/$TESTID" \
+		"$WEB_URL/s/$TESTID" \
 		"$SCREENSHOT" >/dev/null 2>&1; then
 
 		# Verify the screenshot file exists and is non-trivial (>10KB)

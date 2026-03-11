@@ -1,0 +1,28 @@
+staging.tmtv.se {
+    # Session viewer — Caddy templates inject session name into
+    # <title> and og:title for link previews (Slack, Discord, iMessage)
+    @viewer path_regexp viewer ^/s/([a-zA-Z0-9_-]+)$
+    handle @viewer {
+        root * /var/www/tmtv
+        templates
+        rewrite * /viewer.html
+        file_server
+    }
+
+    # SSE reverse proxy (token in path)
+    handle /ws/* {
+        reverse_proxy 127.0.0.1:4002 {
+            flush_interval -1
+            transport http {
+                read_timeout 0
+                write_timeout 0
+            }
+        }
+    }
+
+    # Static assets (viewer.js, etc.)
+    handle {
+        root * /var/www/tmtv
+        file_server
+    }
+}

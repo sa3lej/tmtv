@@ -173,7 +173,7 @@ void tmate_spawn_pty_client(struct tmate_session *session)
 
 	if (tmate_validate_session_token(token) < 0) {
 		ssh_echo(client, BAD_TOKEN_ERROR_STR);
-		tmate_fatal("Invalid token");
+		tmate_fatal("Invalid token ip=%s", client->ip_address);
 	}
 
 	set_session_token(session, token);
@@ -208,7 +208,7 @@ void tmate_spawn_pty_client(struct tmate_session *session)
 connect_failed:
 		random_sleep(); /* for making timing attacks harder */
 		ssh_echo(client, EXPIRED_TOKEN_ERROR_STR);
-		tmate_fatal("Expired token");
+		tmate_fatal("Expired token ip=%s", client->ip_address);
 	}
 connect_ok:
 

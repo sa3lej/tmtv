@@ -10,6 +10,7 @@
 #include <dirent.h>
 #include <stdio.h>
 #include <signal.h>
+#include <poll.h>
 #include <event2/event.h>
 #include <arpa/inet.h>
 #ifndef IPPROTO_TCP
@@ -235,6 +236,8 @@ static int auth_pubkey_cb(__unused ssh_session session,
 		free(b64_key);
 
 		if (!would_tmate_session_allow_auth(user, pubkey64)) {
+			tmate_info("Auth denied: ip=%s user=%s",
+				   client->ip_address, user);
 			free(pubkey64);
 			return SSH_AUTH_DENIED;
 		}
@@ -245,6 +248,8 @@ static int auth_pubkey_cb(__unused ssh_session session,
 	case SSH_PUBLICKEY_STATE_NONE:
 		return SSH_AUTH_SUCCESS;
 	default:
+		tmate_info("Auth denied: ip=%s user=%s state=%d",
+			   client->ip_address, user, signature_state);
 		return SSH_AUTH_DENIED;
 	}
 }
@@ -253,8 +258,36 @@ static int auth_none_cb(__unused ssh_session session, const char *user, void *us
 {
 	struct tmate_ssh_client *client = userdata;
 
-	if (!would_tmate_session_allow_auth(user, NULL))
+	/* If session has a password, deny none-auth to force password prompt */
+	if (tmate_session_requires_password(user)) {
+		tmate_debug("Auth denied (none): password required ip=%s user=%s",
+			    client->ip_address, user);
 		return SSH_AUTH_DENIED;
+	}
+
+	if (!would_tmate_session_allow_auth(user, NULL)) {
+		tmate_info("Auth denied (none): ip=%s user=%s",
+			   client->ip_address, user);
+		return SSH_AUTH_DENIED;
+	}
+
+	client->username = xstrdup(user);
+	client->pubkey = NULL;
+
+	return SSH_AUTH_SUCCESS;
+}
+
+static int auth_password_cb(__unused ssh_session session,
+			    const char *user,
+			    const char *password, void *userdata)
+{
+	struct tmate_ssh_client *client = userdata;
+
+	if (!would_tmate_session_allow_password(user, password)) {
+		tmate_info("Auth denied (password): ip=%s user=%s",
+			   client->ip_address, user);
+		return SSH_AUTH_DENIED;
+	}
 
 	client->username = xstrdup(user);
 	client->pubkey = NULL;
@@ -265,6 +298,7 @@ static int auth_none_cb(__unused ssh_session session, const char *user, void *us
 static struct ssh_server_callbacks_struct ssh_server_cb = {
 	.auth_pubkey_function = auth_pubkey_cb,
 	.auth_none_function = auth_none_cb,
+	.auth_password_function = auth_password_cb,
 	.channel_open_request_session_function = channel_open_request_cb,
 };
 
@@ -343,7 +377,8 @@ static void client_bootstrap(struct tmate_session *_session)
 	ssh_options_set(session, SSH_OPTIONS_HOSTKEYS, TMTV_SSH_HOSTKEYS);
 
 	ssh_set_auth_methods(client->session, SSH_AUTH_METHOD_NONE |
-					      SSH_AUTH_METHOD_PUBLICKEY);
+					      SSH_AUTH_METHOD_PUBLICKEY |
+					      SSH_AUTH_METHOD_PASSWORD);
 
 	tmate_info("Exchanging DH keys ip=%s", client->ip_address);
 	if (ssh_handle_key_exchange(session) < 0)
@@ -532,6 +567,11 @@ static ssh_bind prepare_ssh(const char *keys_dir, const char *bind_addr, int por
 static volatile sig_atomic_t pending_gc = 0;
 static volatile sig_atomic_t active_children = 0;
 
+/* Dead child pids collected in signal handler, processed in main loop */
+#define MAX_DEAD_PIDS 64
+static volatile pid_t dead_pids[MAX_DEAD_PIDS];
+static volatile sig_atomic_t dead_pid_count = 0;
+
 static void handle_sigchld(__unused int sig)
 {
 	int status;
@@ -540,6 +580,8 @@ static void handle_sigchld(__unused int sig)
 	while ((pid = waitpid(WAIT_ANY, &status, WNOHANG)) > 0) {
 		if (active_children > 0)
 			active_children--;
+		if (dead_pid_count < MAX_DEAD_PIDS)
+			dead_pids[dead_pid_count++] = pid;
 	}
 
 	/* Schedule GC for next iteration of accept loop */
@@ -629,6 +671,48 @@ static void gc_stale_sessions(void)
 		tmate_info("Session GC: removed %d stale entries", removed);
 }
 
+/*
+ * Process IPC registration messages from daemon children.
+ * Format: "REG <token1> <token2> ...\n"
+ * Each token is registered in the SSE registry for routing.
+ */
+static void handle_ipc_registrations(struct sse_registry *reg,
+				     int ipc_fd, pid_t pid)
+{
+	char buf[512];
+	int n;
+
+	n = sse_ipc_read_msg(ipc_fd, buf, sizeof(buf));
+	if (n <= 0) {
+		/* Daemon closed the IPC fd — clean up */
+		tmate_debug("IPC fd=%d closed by child", ipc_fd);
+		sse_registry_remove_by_fd(reg, ipc_fd);
+		close(ipc_fd);
+		return;
+	}
+
+	/* Parse "REG token1 token2 token3 ..." */
+	if (strncmp(buf, SSE_IPC_MSG_REGISTER " ", 4) == 0) {
+		char *saveptr;
+		char *tok = strtok_r(buf + 4, " \n", &saveptr);
+		while (tok) {
+			sse_registry_add(reg, tok, ipc_fd, pid);
+			tok = strtok_r(NULL, " \n", &saveptr);
+		}
+	}
+}
+
+/*
+ * IPC fd tracking: we need to map ipc_fds back to child pids for
+ * poll() and registration handling.
+ */
+struct ipc_child {
+	int   ipc_fd;
+	pid_t pid;
+};
+
+#define MAX_IPC_CHILDREN MAX_CHILDREN
+
 void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 			   const char *bind_addr, int port)
 {
@@ -636,10 +720,16 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 	ssh_bind bind;
 	pid_t pid;
 	int fd;
+	int sse_listen_fd = -1;
+	struct sse_registry sse_reg;
+	struct ipc_child ipc_children[MAX_IPC_CHILDREN];
+	int num_ipc_children = 0;
 
 	tmate_catch_sigsegv();
 
-	/* Use sigaction without SA_RESTART so accept() returns EINTR
+	sse_registry_init(&sse_reg);
+
+	/* Use sigaction without SA_RESTART so poll() returns EINTR
 	 * on SIGCHLD, giving us a chance to run GC. */
 	{
 		struct sigaction sa;
@@ -652,20 +742,112 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 
 	bind = prepare_ssh(keys_dir, bind_addr, port);
 
+	/* Bind SSE listener in main process (before any forks) */
+	if (tmate_has_websocket()) {
+		sse_listen_fd = sse_bind_listener(tmate_settings->websocket_port);
+		if (sse_listen_fd < 0)
+			tmate_info("SSE multiplexer disabled — web viewing unavailable");
+	}
+
 	client->session = ssh_new();
 	client->channel = NULL;
 	client->winsize_pty.ws_col = 80;
 	client->winsize_pty.ws_row = 24;
 	session->session_token = "init";
+	session->ipc_fd = -1;
+	session->ev_ipc = NULL;
 
 	if (!client->session)
 		tmate_fatal("Cannot initialize session");
 
 	for (;;) {
+		/* Handle dead children: clean up IPC fds and registry */
 		if (pending_gc) {
 			pending_gc = 0;
 			gc_stale_sessions();
+
+			/* Process dead pids collected in signal handler */
+			int ndead = dead_pid_count;
+			dead_pid_count = 0;
+			for (int d = 0; d < ndead; d++) {
+				pid_t dpid = dead_pids[d];
+				sse_registry_remove_by_pid(&sse_reg, dpid);
+				for (int i = 0; i < num_ipc_children; i++) {
+					if (ipc_children[i].pid == dpid) {
+						close(ipc_children[i].ipc_fd);
+						ipc_children[i] = ipc_children[num_ipc_children - 1];
+						num_ipc_children--;
+						break;
+					}
+				}
+			}
 		}
+
+		/*
+		 * Build poll set: SSH listener + SSE listener + IPC fds
+		 * Index 0: SSH listener
+		 * Index 1: SSE listener (if active)
+		 * Index 2..N: IPC fds from daemon children
+		 */
+		int nfds = 0;
+		struct pollfd pfds[2 + MAX_IPC_CHILDREN];
+
+		pfds[nfds].fd = ssh_bind_get_fd(bind);
+		pfds[nfds].events = POLLIN;
+		nfds++;
+
+		int sse_poll_idx = -1;
+		if (sse_listen_fd >= 0) {
+			sse_poll_idx = nfds;
+			pfds[nfds].fd = sse_listen_fd;
+			pfds[nfds].events = POLLIN;
+			nfds++;
+		}
+
+		int ipc_poll_start = nfds;
+		for (int i = 0; i < num_ipc_children; i++) {
+			pfds[nfds].fd = ipc_children[i].ipc_fd;
+			pfds[nfds].events = POLLIN;
+			nfds++;
+		}
+
+		int ret = poll(pfds, nfds, -1);
+		if (ret < 0) {
+			if (errno == EINTR)
+				continue;
+			tmate_fatal("Error in poll: %s", strerror(errno));
+		}
+
+		/* Check IPC fds for registration messages (process first
+		 * so tokens are available before SSE connections arrive) */
+		for (int i = 0; i < num_ipc_children; i++) {
+			int pidx = ipc_poll_start + i;
+			if (pfds[pidx].revents & (POLLIN | POLLHUP | POLLERR)) {
+				if (pfds[pidx].revents & POLLIN) {
+					handle_ipc_registrations(&sse_reg,
+						ipc_children[i].ipc_fd,
+						ipc_children[i].pid);
+				} else {
+					/* HUP/ERR: child gone */
+					sse_registry_remove_by_fd(&sse_reg,
+						ipc_children[i].ipc_fd);
+					close(ipc_children[i].ipc_fd);
+					ipc_children[i] = ipc_children[num_ipc_children - 1];
+					num_ipc_children--;
+					i--; /* re-check swapped entry */
+				}
+			}
+		}
+
+		/* Check SSE listener for incoming browser connections */
+		if (sse_poll_idx >= 0 &&
+		    (pfds[sse_poll_idx].revents & POLLIN)) {
+			sse_handle_connection(sse_listen_fd, &sse_reg);
+		}
+
+		/* Check SSH listener for incoming SSH connections */
+		if (!(pfds[0].revents & POLLIN))
+			continue;
 
 		fd = accept(ssh_bind_get_fd(bind), NULL, NULL);
 		if (fd < 0) {
@@ -693,9 +875,26 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 			}
 		}
 
+		/*
+		 * Create IPC socketpair for SSE fd passing.
+		 * parent keeps ipc_pair[0], child keeps ipc_pair[1].
+		 */
+		int ipc_pair[2] = { -1, -1 };
+		if (tmate_has_websocket() && sse_listen_fd >= 0) {
+			if (socketpair(AF_UNIX, SOCK_STREAM, 0, ipc_pair) < 0) {
+				tmate_info("Cannot create IPC socketpair: %s",
+					   strerror(errno));
+				/* Continue without SSE for this session */
+			}
+		}
+
 		if ((pid = fork()) < 0) {
 			tmate_info("Fork failed: %s", strerror(errno));
 			close(fd);
+			if (ipc_pair[0] >= 0) {
+				close(ipc_pair[0]);
+				close(ipc_pair[1]);
+			}
 			continue;
 		}
 
@@ -703,10 +902,36 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 			/* Parent process */
 			active_children++;
 			close(fd);
+
+			if (ipc_pair[0] >= 0) {
+				close(ipc_pair[1]); /* close child end */
+
+				if (num_ipc_children < MAX_IPC_CHILDREN) {
+					ipc_children[num_ipc_children].ipc_fd = ipc_pair[0];
+					ipc_children[num_ipc_children].pid = pid;
+					num_ipc_children++;
+				} else {
+					tmate_info("Too many IPC children, closing ipc_fd");
+					close(ipc_pair[0]);
+				}
+			}
 			continue;
 		}
 
 		/* Child process */
+
+		/* Close parent resources */
+		if (ipc_pair[0] >= 0)
+			close(ipc_pair[0]); /* close parent end */
+		if (sse_listen_fd >= 0)
+			close(sse_listen_fd); /* child doesn't own the listener */
+
+		/* Close all other IPC fds from parent's tracking */
+		for (int i = 0; i < num_ipc_children; i++)
+			close(ipc_children[i].ipc_fd);
+
+		/* Store child's IPC fd in session for later use */
+		session->ipc_fd = ipc_pair[1];
 
 		signal(SIGALRM, handle_sigalrm);
 		alarm(TMATE_SSH_GRACE_PERIOD);

@@ -32,3 +32,8 @@ tests/test-server-header
 site/node_modules/
 site/dist/
 site/.astro/
+.claude/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

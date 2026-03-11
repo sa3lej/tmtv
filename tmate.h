@@ -221,6 +221,8 @@ extern void tmate_format(struct format_tree *ft);
 #ifdef TMATE_SERVER_BUILD
 /* tmate-auth-keys.c (server build only) */
 extern bool tmate_allow_auth(const char *pubkey);
+extern bool tmate_check_session_password(const char *password);
+extern bool tmate_has_session_password(void);
 /* tmate-daemon-encoder.c: forward viewer input to tmate client */
 extern void tmate_client_pane_key(int pane_id, key_code key);
 extern void tmate_client_cmd(int client_id, struct cmd *cmd);

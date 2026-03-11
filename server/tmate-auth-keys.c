@@ -1,7 +1,34 @@
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <openssl/evp.h>
+#include <openssl/crypto.h>
 
 #include "tmate.h"
+
+#define TMATE_MAX_PASSWORD_LEN 128
+#define TMATE_PASSWORD_HASH_LEN 32  /* SHA-256 */
+
+/*
+ * Hash a password with SHA-256. Returns a malloc'd TMATE_PASSWORD_HASH_LEN
+ * byte buffer, or NULL on failure. Caller must free.
+ */
+static unsigned char *hash_password(const char *password)
+{
+	unsigned char *hash = xmalloc(TMATE_PASSWORD_HASH_LEN);
+	unsigned int len = 0;
+
+	EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+	if (!ctx ||
+	    !EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) ||
+	    !EVP_DigestUpdate(ctx, password, strlen(password)) ||
+	    !EVP_DigestFinal_ex(ctx, hash, &len)) {
+		EVP_MD_CTX_free(ctx);
+		free(hash);
+		return NULL;
+	}
+	EVP_MD_CTX_free(ctx);
+	return hash;
+}
 
 static void reset_and_enable_authorized_keys(void)
 {
@@ -84,7 +111,20 @@ static void tmate_set(char *key, char *value)
 {
 	if (!strcmp(key, "authorized_keys"))
 		append_authorized_key(value);
-	else if (!strcmp(key, "session_name")) {
+	else if (!strcmp(key, "session_password")) {
+		if (strlen(value) > TMATE_MAX_PASSWORD_LEN) {
+			tmate_info("Session password too long (max %d)",
+				   TMATE_MAX_PASSWORD_LEN);
+			return;
+		}
+		free(tmate_session->session_password_hash);
+		tmate_session->session_password_hash = hash_password(value);
+		if (!tmate_session->session_password_hash) {
+			tmate_info("Failed to hash session password");
+			return;
+		}
+		tmate_info("Session password set");
+	} else if (!strcmp(key, "session_name")) {
 		tmate_register_session_name(tmate_session, value);
 	} else if (!strcmp(key, "web_sharing")) {
 		bool enabled = !strcmp(value, "true") || !strcmp(value, "1") || !strcmp(value, "on");
@@ -143,6 +183,33 @@ bool tmate_allow_auth(const char *pubkey)
 	ssh_key_free(client_pkey);
 
 	return ret;
+}
+
+bool tmate_check_session_password(const char *password)
+{
+	unsigned char *candidate_hash;
+
+	if (tmate_session->session_password_hash == NULL)
+		return true;
+	if (password == NULL)
+		return false;
+	if (strlen(password) > TMATE_MAX_PASSWORD_LEN)
+		return false;
+
+	candidate_hash = hash_password(password);
+	if (!candidate_hash)
+		return false;
+
+	/* Constant-time comparison to prevent timing attacks */
+	int result = CRYPTO_memcmp(tmate_session->session_password_hash,
+				   candidate_hash, TMATE_PASSWORD_HASH_LEN);
+	free(candidate_hash);
+	return (result == 0);
+}
+
+bool tmate_has_session_password(void)
+{
+	return (tmate_session->session_password_hash != NULL);
 }
 
 static int write_all(int fd, const char *buf, size_t len)
@@ -235,6 +302,132 @@ bool would_tmate_session_allow_auth(const char *token, const char *pubkey)
 		ret = recv_msg.allow;
 
 	tmate_debug("(preauth) allow=%d", ret);
+
+out:
+	if (sock_fd != -1)
+		close(sock_fd);
+	return ret;
+}
+
+bool would_tmate_session_allow_password(const char *token, const char *password)
+{
+	/*
+	 * IPC to the daemon to check if the provided password matches
+	 * the session password. Same pattern as would_tmate_session_allow_auth().
+	 */
+	int sock_fd = -1;
+	int ret = false;
+	size_t pw_len;
+
+	if (tmate_validate_session_token(token) < 0)
+		goto out;
+
+	char *sock_path = get_socket_path(token);
+
+	struct sockaddr_un sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sun_family = AF_UNIX;
+	size_t size = strlcpy(sa.sun_path, sock_path, sizeof(sa.sun_path));
+	free(sock_path);
+	if (size >= sizeof sa.sun_path)
+		goto out;
+
+	sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (sock_fd < 0)
+		goto out;
+
+	if (connect(sock_fd, (struct sockaddr *)&sa, sizeof sa) == -1)
+		goto out;
+
+	pw_len = password ? strlen(password) + 1 : 0;
+
+	struct imsg_hdr hdr = {
+		.type = MSG_IDENTIFY_TMATE_AUTH_PASSWORD,
+		.len = IMSG_HEADER_SIZE + pw_len,
+		.peerid = PROTOCOL_VERSION,
+		.pid = -1,
+	};
+
+	if (write_all(sock_fd, (void *)&hdr, sizeof(hdr)) < 0)
+		goto out;
+
+	if (password) {
+		if (write_all(sock_fd, password, pw_len) < 0)
+			goto out;
+	}
+
+	struct {
+		struct imsg_hdr hdr;
+		bool allow;
+	} __packed recv_msg;
+
+	if (read_all(sock_fd, (void *)&recv_msg, sizeof(recv_msg)) < 0)
+		goto out;
+
+	if (recv_msg.hdr.type == MSG_TMATE_AUTH_STATUS &&
+	    recv_msg.hdr.len == sizeof(recv_msg))
+		ret = recv_msg.allow;
+
+	tmate_debug("(preauth-password) allow=%d", ret);
+
+out:
+	if (sock_fd != -1)
+		close(sock_fd);
+	return ret;
+}
+
+bool tmate_session_requires_password(const char *token)
+{
+	/*
+	 * IPC to the daemon to check if this session has a password set.
+	 * Returns true if a password is required.
+	 */
+	int sock_fd = -1;
+	bool ret = false;
+
+	if (tmate_validate_session_token(token) < 0)
+		goto out;
+
+	char *sock_path = get_socket_path(token);
+
+	struct sockaddr_un sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sun_family = AF_UNIX;
+	size_t size = strlcpy(sa.sun_path, sock_path, sizeof(sa.sun_path));
+	free(sock_path);
+	if (size >= sizeof sa.sun_path)
+		goto out;
+
+	sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (sock_fd < 0)
+		goto out;
+
+	if (connect(sock_fd, (struct sockaddr *)&sa, sizeof sa) == -1)
+		goto out;
+
+	struct imsg_hdr hdr = {
+		.type = MSG_IDENTIFY_TMATE_HAS_PASSWORD,
+		.len = IMSG_HEADER_SIZE,
+		.peerid = PROTOCOL_VERSION,
+		.pid = -1,
+	};
+
+	if (write_all(sock_fd, (void *)&hdr, sizeof(hdr)) < 0)
+		goto out;
+
+	struct {
+		struct imsg_hdr hdr;
+		bool allow;
+	} __packed recv_msg;
+
+	if (read_all(sock_fd, (void *)&recv_msg, sizeof(recv_msg)) < 0)
+		goto out;
+
+	if (recv_msg.hdr.type == MSG_TMATE_AUTH_STATUS &&
+	    recv_msg.hdr.len == sizeof(recv_msg))
+		ret = recv_msg.allow;
+
+	tmate_debug("(has-password) has_password=%d", ret);
 
 out:
 	if (sock_fd != -1)
