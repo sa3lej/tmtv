@@ -1120,6 +1120,13 @@ const struct options_table_entry options_table[] = {
 	  .text = "Named session token for tmtv."
 	},
 
+	{ .name = "tmtv-session-password",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "Password required for SSH viewers to connect."
+	},
+
 	{ .name = "tmtv-session-name-ro",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,

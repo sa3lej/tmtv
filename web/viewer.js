@@ -307,24 +307,103 @@
   var maxReconnect = 5;
   var sessionEnded = false;
   var everConnected = false;
+  var sessionPassword = sessionStorage.getItem('tmtv_pw_' + (sessionToken || '')) || '';
 
-  function showErrorOverlay(msg) {
+  function showPasswordPrompt(isRetry) {
+    var overlay = document.getElementById('password-overlay');
+    var errEl = document.getElementById('password-error');
+    var input = document.getElementById('password-input');
+    if (overlay) overlay.classList.remove('hidden');
+    if (errEl) {
+      if (isRetry) errEl.classList.remove('hidden');
+      else errEl.classList.add('hidden');
+    }
+    if (input) { input.value = ''; input.focus(); }
+
+    var form = document.getElementById('password-form');
+    if (form && !form._bound) {
+      form._bound = true;
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        var pw = document.getElementById('password-input').value;
+        if (!pw) return;
+        sessionPassword = pw;
+        sessionStorage.setItem('tmtv_pw_' + (sessionToken || ''), pw);
+        overlay.classList.add('hidden');
+        reconnectAttempts = 0;
+        connect();
+      });
+    }
+  }
+
+  function hidePasswordPrompt() {
+    var overlay = document.getElementById('password-overlay');
+    if (overlay) overlay.classList.add('hidden');
+  }
+
+  function showErrorOverlay(msg, isSessionEnd) {
     var overlay = document.getElementById('error-overlay');
     var msgEl = document.getElementById('error-msg');
+    var titleEl = document.getElementById('error-title');
+    var iconEl = document.getElementById('error-icon');
     if (overlay) overlay.classList.remove('hidden');
     if (msgEl && msg) msgEl.textContent = msg;
-    var wrap = document.getElementById('terminal-wrap');
-    if (wrap) wrap.style.display = 'none';
+    if (titleEl) titleEl.textContent = isSessionEnd ? 'Session ended' : 'Session unavailable';
+    if (iconEl) {
+      iconEl.innerHTML = isSessionEnd
+        ? '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>'
+        : '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/><line x1="12" x2="12" y1="15" y2="17"/></svg>';
+    }
+  }
+
+  function buildSseUrl() {
+    if (sessionPassword) {
+      var sep = sseUrl.indexOf('?') >= 0 ? '&' : '?';
+      return sseUrl + sep + 'password=' + encodeURIComponent(sessionPassword);
+    }
+    return sseUrl;
   }
 
   function connect() {
     setStatus('Connecting...');
-    var es = new EventSource(sseUrl);
+
+    /* Probe the SSE endpoint with fetch first to detect password gates.
+     * EventSource does not expose HTTP status codes, so we cannot
+     * distinguish a 403 from a network error without this probe. */
+    fetch(buildSseUrl(), { method: 'GET' }).then(function(resp) {
+      if (resp.status === 403) {
+        resp.text().then(function(body) {
+          if (body === 'password_required') {
+            showPasswordPrompt(false);
+          } else if (body === 'wrong_password') {
+            sessionPassword = '';
+            sessionStorage.removeItem('tmtv_pw_' + (sessionToken || ''));
+            showPasswordPrompt(true);
+          } else {
+            showErrorOverlay('Access denied.', false);
+          }
+        });
+        return;
+      }
+      /* Token is valid and no password gate (or password accepted).
+       * The fetch consumed the connection, so open a fresh EventSource. */
+      connectEventSource();
+    }).catch(function() {
+      /* fetch itself failed (network error) — fall through to EventSource
+       * which has its own retry logic */
+      connectEventSource();
+    });
+  }
+
+  function connectEventSource() {
+    var url = buildSseUrl();
+    var es = new EventSource(url);
 
     es.onopen = function() {
       setStatus('Connected', 'connected');
       reconnectAttempts = 0;
       everConnected = true;
+      hidePasswordPrompt();
       if (!sessionStart) {
         sessionStart = Date.now();
         durationTimer = setInterval(updateMeta, 1000);
@@ -350,7 +429,7 @@
       if (sessionEnded) {
         setStatus('Session ended', 'error');
         if (durationTimer) clearInterval(durationTimer);
-        showErrorOverlay('This session has ended.');
+        showErrorOverlay('The host ended this terminal session.', true);
         return;
       }
       if (reconnectAttempts < maxReconnect) {
@@ -362,9 +441,9 @@
         setStatus('Connection lost', 'error');
         if (durationTimer) clearInterval(durationTimer);
         if (!everConnected) {
-          showErrorOverlay('This session may have ended or the token is invalid.');
+          showErrorOverlay('This session may have ended or the token is invalid.', false);
         } else {
-          showErrorOverlay('Connection lost. The session may no longer be available.');
+          showErrorOverlay('Connection lost. The session may no longer be available.', false);
         }
       }
     };
@@ -431,7 +510,7 @@
         sessionEnded = true;
         setStatus('Session ended', 'error');
         if (durationTimer) clearInterval(durationTimer);
-        showErrorOverlay('This session has ended.');
+        showErrorOverlay('The host ended this terminal session.', true);
         break;
     }
   }

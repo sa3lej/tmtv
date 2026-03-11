@@ -32,6 +32,10 @@ struct tmate_session;
 extern void tmate_hook_set_option_auth(const char *name, const char *val);
 extern bool tmate_allow_auth(const char *pubkey);
 extern bool would_tmate_session_allow_auth(const char *token, const char *pubkey);
+extern bool would_tmate_session_allow_password(const char *token, const char *password);
+extern bool tmate_session_requires_password(const char *token);
+extern bool tmate_check_session_password(const char *password);
+extern bool tmate_has_session_password(void);
 extern int get_num_authorized_keys(ssh_key *keys);
 
 /* tmate-msgpack.c */
@@ -151,7 +155,7 @@ extern int tmate_validate_session_token(const char *token);
 /* tmate-ssh-server.c */
 
 #define TMATE_SSH_BANNER "tmtv"
-#define TMATE_SSH_KEEPALIVE_SEC 300
+#define TMATE_SSH_KEEPALIVE_SEC 30
 
 #define TMATE_ROLE_DAEMON	1
 #define TMATE_ROLE_PTY_CLIENT	2
@@ -239,6 +243,7 @@ struct tmate_session {
 
 	/* only for role daemon */
 	ssh_key *authorized_keys; /* array with NULL as last element */
+	unsigned char *session_password_hash; /* SHA-256 hash, NULL if unset */
 
 	const char *session_token;
 	const char *session_token_ro;
@@ -260,6 +265,8 @@ struct tmate_session {
 	TAILQ_HEAD(, ws_client) ws_clients;
 	struct evconnlistener *ws_listener;
 	int ws_listen_fd; /* pre-bound socket, created before jail */
+	int ipc_fd;      /* child-side IPC fd for receiving SSE fds from main */
+	struct event *ev_ipc; /* libevent2: monitors ipc_fd for incoming fds */
 	struct event *ev_ws_snapshot; /* periodic snapshot timer */
 	bool web_sharing_enabled; /* client-controlled web sharing toggle */
 	bool urls_sent;           /* true after initial URLs sent in tmate_ready */
@@ -312,11 +319,59 @@ extern void tmate_send_websocket_header(struct tmate_session *session);
 extern void tmate_init_websocket(struct tmate_session *session);
 extern void tmate_bind_websocket_socket(struct tmate_session *session);
 extern void tmate_start_websocket_listener(struct tmate_session *session);
+extern void tmate_websocket_accept_fd(struct tmate_session *session, int fd);
+extern void tmate_setup_ipc_receiver(struct tmate_session *session);
 
 static inline bool tmate_has_websocket(void)
 {
 	return tmate_settings->websocket_port > 0;
 }
+
+/* tmate-sse-mux.c — SSE multiplexing (main process side) */
+
+/*
+ * IPC message types between main process and daemon children.
+ * Messages are sent over the Unix socketpair as newline-delimited text.
+ */
+#define SSE_IPC_MSG_REGISTER   "REG"   /* daemon -> main: register tokens */
+#define SSE_IPC_MSG_UNREGISTER "UNREG" /* daemon -> main: unregister (cleanup) */
+
+/*
+ * Session registry: maps tokens to the IPC fd for the owning daemon.
+ * Main process uses this to route incoming SSE connections.
+ */
+#define SSE_REGISTRY_MAX 100
+#define SSE_TOKEN_MAX    64
+
+struct sse_registry_entry {
+	char token[SSE_TOKEN_MAX];
+	int  ipc_fd;   /* main-side fd of the socketpair to this daemon */
+	pid_t pid;     /* daemon pid, for cleanup on SIGCHLD */
+};
+
+struct sse_registry {
+	struct sse_registry_entry entries[SSE_REGISTRY_MAX * 4]; /* up to 4 tokens per session */
+	int count;
+};
+
+extern void sse_registry_init(struct sse_registry *reg);
+extern void sse_registry_add(struct sse_registry *reg,
+			     const char *token, int ipc_fd, pid_t pid);
+extern int  sse_registry_lookup(struct sse_registry *reg, const char *token);
+extern void sse_registry_remove_by_pid(struct sse_registry *reg, pid_t pid);
+extern void sse_registry_remove_by_fd(struct sse_registry *reg, int ipc_fd);
+
+/* fd passing over Unix socket (SCM_RIGHTS) */
+extern int  sse_send_fd(int ipc_fd, int fd_to_pass);
+extern int  sse_recv_fd(int ipc_fd);
+
+/* IPC message helpers */
+extern int  sse_ipc_send_msg(int ipc_fd, const char *msg);
+extern int  sse_ipc_read_msg(int ipc_fd, char *buf, size_t len);
+
+/* Main process SSE listener */
+extern int  sse_bind_listener(int port);
+extern void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg);
 
 /* tmate-debug.c */
 

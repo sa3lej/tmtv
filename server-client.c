@@ -3409,6 +3409,48 @@ server_client_dispatch(struct imsg *imsg, void *arg)
 			    -1, &reply.allow, sizeof(reply.allow));
 		break;
 	}
+	case MSG_IDENTIFY_TMATE_AUTH_PASSWORD: {
+		/*
+		 * SSH server password auth check: viewer provided a
+		 * password. Compare with session_password.
+		 */
+		const char *password = NULL;
+		if (datalen > 0)
+			password = (const char *)imsg->data;
+		struct {
+			struct imsg_hdr hdr;
+			bool allow;
+		} __packed pw_reply;
+		memset(&pw_reply, 0, sizeof(pw_reply));
+		pw_reply.hdr.type = MSG_TMATE_AUTH_STATUS;
+		pw_reply.hdr.len = sizeof(pw_reply);
+		pw_reply.hdr.peerid = PROTOCOL_VERSION;
+		pw_reply.hdr.pid = -1;
+		pw_reply.allow = tmate_check_session_password(password);
+		if (c->peer != NULL)
+			proc_send(c->peer, MSG_TMATE_AUTH_STATUS,
+			    -1, &pw_reply.allow, sizeof(pw_reply.allow));
+		break;
+	}
+	case MSG_IDENTIFY_TMATE_HAS_PASSWORD: {
+		/*
+		 * SSH server asks whether this session has a password set.
+		 */
+		struct {
+			struct imsg_hdr hdr;
+			bool allow;
+		} __packed hp_reply;
+		memset(&hp_reply, 0, sizeof(hp_reply));
+		hp_reply.hdr.type = MSG_TMATE_AUTH_STATUS;
+		hp_reply.hdr.len = sizeof(hp_reply);
+		hp_reply.hdr.peerid = PROTOCOL_VERSION;
+		hp_reply.hdr.pid = -1;
+		hp_reply.allow = tmate_has_session_password();
+		if (c->peer != NULL)
+			proc_send(c->peer, MSG_TMATE_AUTH_STATUS,
+			    -1, &hp_reply.allow, sizeof(hp_reply.allow));
+		break;
+	}
 #endif
 	case MSG_COMMAND:
 		if (server_client_dispatch_command(c, imsg) != 0)

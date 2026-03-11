@@ -177,6 +177,31 @@ static void create_session_ro_symlink(struct tmate_session *session)
 
 extern int server_fd;
 
+/*
+ * Register session tokens with the main process via the IPC socketpair.
+ * The main process uses these to route incoming SSE connections.
+ */
+static void register_tokens_with_main(struct tmate_session *session)
+{
+	char msg[512];
+	int n;
+
+	if (session->ipc_fd < 0)
+		return;
+
+	n = snprintf(msg, sizeof(msg), "%s %s",
+		     SSE_IPC_MSG_REGISTER, session->session_token);
+
+	if (session->session_token_ro)
+		n += snprintf(msg + n, sizeof(msg) - n, " %s",
+			      session->session_token_ro);
+
+	/* Named tokens are registered later via tmate_register_session_name */
+
+	sse_ipc_send_msg(session->ipc_fd, msg);
+	tmate_info("Registered tokens with main process via IPC");
+}
+
 void tmate_spawn_daemon(struct tmate_session *session)
 {
 	struct tmate_ssh_client *client = &session->ssh_client;
@@ -223,22 +248,29 @@ void tmate_spawn_daemon(struct tmate_session *session)
 
 	tmate_daemon_init(session);
 
-	/* Bind SSE socket before jail (CLONE_NEWNET isolates network) */
-	tmate_bind_websocket_socket(session);
+	/*
+	 * SSE multiplexing: the main process owns port 4002 and passes
+	 * accepted SSE fds to us via the IPC socketpair. We register our
+	 * tokens so the main process knows how to route connections.
+	 *
+	 * No need to call tmate_bind_websocket_socket() — the daemon
+	 * no longer binds the SSE port directly.
+	 */
+	register_tokens_with_main(session);
 
 	/* Open sessions dir fd before jail for post-jail named session symlinks */
 	session->sessions_dir_fd = open(TMATE_WORKDIR "/sessions",
 					O_RDONLY | O_DIRECTORY);
 
 	{
-		int keep_fds[6];
+		int keep_fds[7];
 		int nfds = 0;
 		keep_fds[nfds++] = session->tmux_socket_fd;
 		keep_fds[nfds++] = ssh_get_fd(session->ssh_client.session);
 		keep_fds[nfds++] = STDERR_FILENO;
 		keep_fds[nfds++] = tmate_get_urandom_fd();
-		if (session->ws_listen_fd >= 0)
-			keep_fds[nfds++] = session->ws_listen_fd;
+		if (session->ipc_fd >= 0)
+			keep_fds[nfds++] = session->ipc_fd;
 		if (session->sessions_dir_fd >= 0)
 			keep_fds[nfds++] = session->sessions_dir_fd;
 		close_fds_except(keep_fds, nfds);
@@ -256,8 +288,8 @@ void tmate_spawn_daemon(struct tmate_session *session)
 	if (tmate_has_websocket())
 		tmate_encoder_rebind(&session->websocket_encoder, session->ev_base);
 
-	/* Start WebSocket listener after event_reinit (correct base) */
-	tmate_start_websocket_listener(session);
+	/* Set up IPC receiver to accept SSE fds from main process */
+	tmate_setup_ipc_receiver(session);
 
 	signal(SIGTERM, handle_sigterm);
 
@@ -354,6 +386,14 @@ void tmate_register_session_name(struct tmate_session *session,
 	tmate_info("Named session registered: %s -> %s",
 		   name, session->obfuscated_session_token);
 
+	/* Register named tokens with main process for SSE routing */
+	if (session->ipc_fd >= 0) {
+		char msg[256];
+		snprintf(msg, sizeof(msg), "%s %s %s %s",
+			 SSE_IPC_MSG_REGISTER, name, rw_named, ro_named);
+		sse_ipc_send_msg(session->ipc_fd, msg);
+	}
+
 	tmate_set_env("tmtv_session_name", name);
 
 	/*
@@ -395,6 +435,7 @@ static void handle_web_sharing_option(const char *name, const char *val)
 
 	bool enabled = val && (!strcmp(val, "on") || !strcmp(val, "1"));
 	tmate_session->web_sharing_enabled = enabled;
+	tmate_info("Web sharing toggled: %s", enabled ? "on" : "off");
 	if (enabled) {
 		if (tmate_session->urls_sent)
 			tmate_send_web_url(tmate_session);

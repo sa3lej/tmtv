@@ -48,8 +48,11 @@ static void on_keepalive_timer(__unused evutil_socket_t fd,
 	if (ssh_version(SSH_VERSION_INT(0,8,4)) && !ssh_version(SSH_VERSION_INT(0,8,7)))
 		return;
 
-	if (ssh_send_keepalive(client->session) == SSH_ERROR)
+	if (ssh_send_keepalive(client->session) == SSH_ERROR) {
+		tmate_info("SSH keepalive failed, terminating session");
+		request_server_termination();
 		return;
+	}
 
 	start_keepalive_timer(client, client->keepalive_interval_ms);
 }

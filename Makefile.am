@@ -375,6 +375,7 @@ dist_tmtv_server_SOURCES = \
 	server/tmate-ssh-exec.c \
 	server/tmate-ssh-latency.c \
 	server/tmate-ssh-server.c \
+	server/tmate-sse-mux.c \
 	server/tmate-websocket.c \
 	server/tmate-client-stubs.c
 nodist_tmtv_server_SOURCES = osdep-@PLATFORM@.c
