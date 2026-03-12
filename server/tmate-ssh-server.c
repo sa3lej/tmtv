@@ -223,6 +223,14 @@ static int auth_pubkey_cb(__unused ssh_session session,
 
 	switch (signature_state) {
 	case SSH_PUBLICKEY_STATE_VALID:
+		/* If session requires a password, deny pubkey auth —
+		 * force the client to use password authentication */
+		if (tmate_session_requires_password(user)) {
+			tmate_debug("Auth denied (pubkey): password required "
+				    "ip=%s user=%s", client->ip_address, user);
+			return SSH_AUTH_DENIED;
+		}
+
 		client->username = xstrdup(user);
 
 		const char *key_type = ssh_key_type_to_char(ssh_key_type(pubkey));

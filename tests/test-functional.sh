@@ -118,23 +118,22 @@ fi
 "$TMTV" -S "$SOCKET2" kill-server 2>/dev/null || true
 rm -f "$SOCKET2"
 
-# Test 10: Bare tmtv auto-attaches to existing session (no crash)
-# When a session exists and bare tmtv is run, it should try to attach
-# (not crash with "server exited unexpectedly")
-SOCKET3="/tmp/tmtv-test-attach-$$"
+# Test 10: Bare tmtv does not auto-attach (creates new session like tmux)
+# With auto-attach removed, bare tmtv against an existing socket should NOT
+# silently attach — it tries new-session which errors, but server stays alive.
+SOCKET3="/tmp/tmtv-test-noattach-$$"
 "$TMTV" -S "$SOCKET3" new-session -d -s existing 2>/dev/null
 if "$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | grep -q "existing"; then
-    # Run bare tmtv with a timeout — it will block trying to attach (no TTY),
-    # but should NOT crash. Exit code 1 = normal error, not 139/segfault.
+    # Bare tmtv against existing socket — should NOT auto-attach
     RC=0; timeout 2 "$TMTV" -S "$SOCKET3" 2>/dev/null || RC=$?
-    # Server must still be alive
+    # Server must still be alive after the attempt
     if "$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | grep -q "existing"; then
-        pass "bare tmtv auto-attaches without crash"
+        pass "bare tmtv does not auto-attach (server alive, exit=$RC)"
     else
-        fail "bare tmtv auto-attaches without crash" "server died (exit=$RC)"
+        fail "bare tmtv does not auto-attach" "server died (exit=$RC)"
     fi
 else
-    fail "bare tmtv auto-attaches without crash" "could not create test session"
+    fail "bare tmtv does not auto-attach" "could not create test session"
 fi
 "$TMTV" -S "$SOCKET3" kill-server 2>/dev/null || true
 rm -f "$SOCKET3"

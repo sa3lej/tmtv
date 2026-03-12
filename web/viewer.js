@@ -386,7 +386,11 @@
         return;
       }
       /* Token is valid and no password gate (or password accepted).
-       * The fetch consumed the connection, so open a fresh EventSource. */
+       * Cancel the probe response body so it doesn't linger as a ghost
+       * SSE connection that inflates the web viewer count. */
+      if (resp.body && resp.body.cancel) {
+        resp.body.cancel();
+      }
       connectEventSource();
     }).catch(function() {
       /* fetch itself failed (network error) — fall through to EventSource

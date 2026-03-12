@@ -313,14 +313,6 @@ client_main(struct event_base *base, int argc, char **argv, uint64_t flags,
 		}
 		return (1);
 	}
-#ifdef TMATE
-	/* Auto-attach to existing session when bare tmtv is run. */
-	if (argc == 0 && !server_started && msg == MSG_COMMAND) {
-		static char	*attach_argv[] = { "attach-session", NULL };
-		argc = 1;
-		argv = attach_argv;
-	}
-#endif
 	}
 
 	client_peer = proc_add_peer(client_proc, fd, client_dispatch, NULL);
