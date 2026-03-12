@@ -28,7 +28,7 @@ if (!url) {
   const page = await browser.newPage();
 
   try {
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
     // --- Step 1: /j/ URL connects to the terminal ---
     const terminal = page.locator('.xterm-screen, #terminal-wrap canvas');
