@@ -226,6 +226,8 @@ struct tmate_settings {
 	const char *bind_addr;
 	int log_level;
 	bool use_proxy_protocol;
+	int idle_timeout;	/* seconds, 0 = disabled */
+	int max_lifetime;	/* seconds, 0 = unlimited */
 };
 extern struct tmate_settings *tmate_settings;
 
@@ -275,6 +277,11 @@ struct tmate_session {
 	time_t post_rate_window;  /* start of current rate-limit window */
 	int post_rate_count;      /* POST requests in current window */
 	bool urls_sent;           /* true after initial URLs sent in tmate_ready */
+
+	/* idle / lifetime timeout (daemon role) */
+	time_t last_pty_activity; /* time of last PTY data from host client */
+	time_t session_start;     /* time the daemon session started */
+	struct event *ev_idle_timer; /* periodic timer for idle/lifetime checks */
 
 	/* only for role client-pty */
 	int pty;
@@ -331,6 +338,10 @@ static inline bool tmate_has_websocket(void)
 {
 	return tmate_settings->websocket_port > 0;
 }
+
+/* tmate-ssh-server.c — server status accessors */
+extern int   tmate_server_get_active_sessions(void);
+extern time_t tmate_server_get_start_time(void);
 
 /* tmate-sse-mux.c — SSE multiplexing (main process side) */
 

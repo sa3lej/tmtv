@@ -34,6 +34,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <poll.h>
+#include <stdio.h>
+#include <time.h>
 
 #include "tmate.h"
 
@@ -339,6 +341,45 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 		(void)write(client_fd, cors, strlen(cors));
 		close(client_fd);
 		return;
+	}
+
+	/* Handle health check endpoint directly — no daemon needed */
+	if (n >= 4 && strncmp(buf, "GET ", 4) == 0) {
+		const char *path = buf + 4;
+		const char *path_end = memchr(path, ' ', n - 4);
+		size_t path_len = path_end ? (size_t)(path_end - path) : 0;
+
+		if (path_len == 8 && memcmp(path, "/healthz", 8) == 0) {
+			/* Consume the peeked data */
+			(void)recv(client_fd, buf, sizeof(buf) - 1, 0);
+
+			time_t now = time(NULL);
+			time_t start = tmate_server_get_start_time();
+			long uptime = (long)(now - start);
+			int sessions = tmate_server_get_active_sessions();
+
+			char body[256];
+			int body_len = snprintf(body, sizeof(body),
+				"{\"status\":\"ok\","
+				"\"version\":\"%s\","
+				"\"uptime_seconds\":%ld,"
+				"\"active_sessions\":%d}",
+				TMTV_VERSION, uptime, sessions);
+
+			char resp[512];
+			int resp_len = snprintf(resp, sizeof(resp),
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: application/json\r\n"
+				"Access-Control-Allow-Origin: *\r\n"
+				"Content-Length: %d\r\n"
+				"Connection: close\r\n"
+				"\r\n"
+				"%s", body_len, body);
+
+			(void)write(client_fd, resp, resp_len);
+			close(client_fd);
+			return;
+		}
 	}
 
 	if (extract_token_from_http(buf, n, token, sizeof(token)) < 0) {

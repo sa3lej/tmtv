@@ -282,6 +282,7 @@ environ_for_session(struct session *s, int no_TERM)
 		idx = -1;
 	environ_set(env, "TMUX", 0, "%s,%ld,%d", socket_path, (long)getpid(),
 	    idx);
+	environ_set(env, "TMUX_PROGRAM", 0, "%s", "tmtv");
 
 	return (env);
 }
