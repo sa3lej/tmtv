@@ -1708,12 +1708,42 @@ else
 fi
 
 if [ "$QUICK" = "false" ]; then
+	# Playwright: /j/ URL connection + TTL expiry in the web viewer
+	if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$HAS_WEB" = "true" ]; then
+		TTL_SCREENSHOT_DIR="/tmp/tmtv-ttl-screenshots-$$"
+		mkdir -p "$TTL_SCREENSHOT_DIR"
+		TTL_TEST_SCRIPT="$(dirname "$0")/test-ttl-viewer.js"
+		TTL_PW_EXIT=0
+		TTL_PW_OUTPUT=$(NODE_PATH="$PW_NODE_PATH" PLAYWRIGHT_BROWSERS_PATH="$PW_BROWSERS_PATH" \
+			node "$TTL_TEST_SCRIPT" \
+			"$WEB_URL/j/$TTL_SESSNAME" "$TTL_SCREENSHOT_DIR" "60" 2>&1) || TTL_PW_EXIT=$?
+		if [ $TTL_PW_EXIT -eq 0 ]; then
+			echo "$TTL_PW_OUTPUT" | grep "PASS step 1" >/dev/null && pass "/j/ URL connects to terminal in web viewer"
+			echo "$TTL_PW_OUTPUT" | grep "PASS step 2" >/dev/null && pass "TTL expiry shows 'Session ended' overlay"
+		elif echo "$TTL_PW_OUTPUT" | grep -q "MODULE_NOT_FOUND"; then
+			skip "/j/ URL connects (playwright module not installed)"
+			skip "TTL expiry overlay (playwright module not installed)"
+		else
+			fail "TTL viewer test" "$TTL_PW_OUTPUT"
+		fi
+		rm -rf "$TTL_SCREENSHOT_DIR"
+	else
+		if [ "$HAS_PLAYWRIGHT" != "true" ]; then
+			skip "/j/ URL connects (playwright not installed)"
+			skip "TTL expiry overlay (playwright not installed)"
+		else
+			skip "/j/ URL connects (web not available)"
+			skip "TTL expiry overlay (web not available)"
+		fi
+	fi
+
 	# Wait for TTL to expire (10s total + 30s timer interval + margin)
 	# Timer checks every IDLE_CHECK_INTERVAL_SEC (30s). After the TTL
 	# elapses, the server terminates the session on the next timer tick.
 	# The client may auto-reconnect, creating a new session with a new
 	# random token. We verify expiry by checking the original token is
 	# gone AND the server logged the expiry message.
+	# If Playwright already waited ~45s, the session is likely expired.
 	sleep 35
 
 	# The original random token should no longer have a socket (even if
@@ -1734,6 +1764,8 @@ if [ "$QUICK" = "false" ]; then
 else
 	skip "TTL original token removed after expiry" "quick mode"
 	skip "TTL expiry server log" "quick mode"
+	skip "/j/ URL connects (quick mode)"
+	skip "TTL expiry overlay (quick mode)"
 fi
 
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true

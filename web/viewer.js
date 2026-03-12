@@ -280,7 +280,7 @@
     if (leftEl && parts.length > 0) leftEl.textContent = '[0] ' + parts.join(' ');
   }
 
-  var pathMatch = location.pathname.match(/^\/s\/([^\/]+)/);
+  var pathMatch = location.pathname.match(/^\/[sj]\/([^\/]+)/);
   var sessionToken = pathMatch ? pathMatch[1] : null;
 
   var ssePort = params.get('port');

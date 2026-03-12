@@ -37,17 +37,14 @@ void tmate_send_web_url(struct tmate_session *session)
 	const char *url_token = session->session_token_named ?
 				session->session_token_named :
 				session->session_token;
-	char *web_url, *short_url;
-	xasprintf(&web_url, "https://%s/s/%s",
+	const char *path = session->link_ttl > 0 ? "j" : "s";
+	char *url;
+	xasprintf(&url, "https://%s/%s/%s",
 		  tmate_settings->tmate_host,
-		  url_token);
-	xasprintf(&short_url, "https://%s/j/%s",
-		  tmate_settings->tmate_host,
-		  url_token);
-	tmate_notify("web session: %s", short_url);
-	tmate_set_env("tmtv_web", short_url);
-	free(web_url);
-	free(short_url);
+		  path, url_token);
+	tmate_notify("web session: %s", url);
+	tmate_set_env("tmtv_web", url);
+	free(url);
 }
 
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_1 "Server requires authorized_keys but none are given."
