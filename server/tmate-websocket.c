@@ -1087,7 +1087,7 @@ void tmate_disconnect_ws_clients(struct tmate_session *session)
  */
 #define POST_INPUT_MAX_BODY 1024
 
-#define POST_RATE_LIMIT    20  /* max POST requests per window */
+#define POST_RATE_LIMIT    60  /* max POST requests per window */
 #define POST_RATE_WINDOW   1   /* window size in seconds */
 
 static void handle_post_input(struct ws_client *wc)
@@ -1152,9 +1152,39 @@ static void handle_post_input(struct ws_client *wc)
 		return;
 	}
 
-	/* Forward each byte as a key to the active pane */
-	for (i = 0; i < len; i++)
-		tmate_client_pane_key(-1, (key_code)data[i]);
+	/* Forward input as keys, decoding UTF-8 into codepoints */
+	for (i = 0; i < len; ) {
+		unsigned char c = data[i];
+		key_code cp;
+		int seqlen;
+
+		if (c < 0x80) {
+			cp = c;
+			seqlen = 1;
+		} else if ((c & 0xE0) == 0xC0 && i + 1 < len) {
+			cp = (c & 0x1F) << 6 |
+			     (data[i+1] & 0x3F);
+			seqlen = 2;
+		} else if ((c & 0xF0) == 0xE0 && i + 2 < len) {
+			cp = (c & 0x0F) << 12 |
+			     (data[i+1] & 0x3F) << 6 |
+			     (data[i+2] & 0x3F);
+			seqlen = 3;
+		} else if ((c & 0xF8) == 0xF0 && i + 3 < len) {
+			cp = (c & 0x07) << 18 |
+			     (data[i+1] & 0x3F) << 12 |
+			     (data[i+2] & 0x3F) << 6 |
+			     (data[i+3] & 0x3F);
+			seqlen = 4;
+		} else {
+			/* Invalid or incomplete UTF-8, send byte as-is */
+			cp = c;
+			seqlen = 1;
+		}
+
+		tmate_client_pane_key(-1, cp);
+		i += seqlen;
+	}
 
 	tmate_debug("POST input: forwarded %zu bytes", len);
 
@@ -1461,11 +1491,40 @@ static void ctl_pane_keys(struct tmate_session *session,
 		return;
 	}
 
-	/* Forward each byte as a key to the tmux client */
-	for (i = 0; str[i]; i++)
-		tmate_client_pane_key(pane_id, (key_code)(unsigned char)str[i]);
+	/* Forward input as keys, decoding UTF-8 into codepoints */
+	for (i = 0; str[i]; ) {
+		unsigned char c = (unsigned char)str[i];
+		key_code cp;
+		int seqlen;
 
-	tmate_debug("Forwarded %zu keys from websocket to pane %d", i, pane_id);
+		if (c < 0x80) {
+			cp = c;
+			seqlen = 1;
+		} else if ((c & 0xE0) == 0xC0 && str[i+1]) {
+			cp = (c & 0x1F) << 6 |
+			     ((unsigned char)str[i+1] & 0x3F);
+			seqlen = 2;
+		} else if ((c & 0xF0) == 0xE0 && str[i+1] && str[i+2]) {
+			cp = (c & 0x0F) << 12 |
+			     ((unsigned char)str[i+1] & 0x3F) << 6 |
+			     ((unsigned char)str[i+2] & 0x3F);
+			seqlen = 3;
+		} else if ((c & 0xF8) == 0xF0 && str[i+1] && str[i+2] && str[i+3]) {
+			cp = (c & 0x07) << 18 |
+			     ((unsigned char)str[i+1] & 0x3F) << 12 |
+			     ((unsigned char)str[i+2] & 0x3F) << 6 |
+			     ((unsigned char)str[i+3] & 0x3F);
+			seqlen = 4;
+		} else {
+			cp = c;
+			seqlen = 1;
+		}
+
+		tmate_client_pane_key(pane_id, cp);
+		i += seqlen;
+	}
+
+	tmate_debug("Forwarded UTF-8 keys from websocket to pane %d", pane_id);
 	free(str);
 }
 
