@@ -992,6 +992,29 @@ if [ -n "$PW_TOKEN" ]; then
 	else
 		fail "password session accepts correct SSE password" "got HTTP $SSE_RIGHT_CODE"
 	fi
+	# Playwright: password prompt appears in web viewer
+	if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$QUICK" = "false" ]; then
+		PW_SCREENSHOT="/tmp/tmtv-pw-prompt-$$.png"
+		if npx playwright screenshot --browser chromium \
+			"$WEB_URL/s/$PW_SESSNAME" \
+			"$PW_SCREENSHOT" >/dev/null 2>&1; then
+			FSIZE=$(stat -c%s "$PW_SCREENSHOT" 2>/dev/null || echo "0")
+			if [ "$FSIZE" -gt 5000 ]; then
+				pass "password prompt visible in web viewer (${FSIZE}B)"
+			else
+				fail "password prompt visible in web viewer" "screenshot too small: ${FSIZE}B"
+			fi
+			rm -f "$PW_SCREENSHOT"
+		else
+			fail "password prompt visible in web viewer" "playwright screenshot failed"
+		fi
+	else
+		if [ "$HAS_PLAYWRIGHT" != "true" ]; then
+			skip "password prompt visible (playwright not installed)"
+		else
+			skip "password prompt visible (--quick)"
+		fi
+	fi
 else
 	skip "password session tests" "could not create password-protected session"
 fi

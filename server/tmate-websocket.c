@@ -878,6 +878,8 @@ void tmate_broadcast_viewer_count(struct tmate_session *session)
 
 /* --- Client management --- */
 
+static void on_ws_client_flush(__unused struct bufferevent *bev, void *arg);
+
 static void ws_client_free(struct ws_client *wc)
 {
 	struct tmate_session *session = wc->session;
@@ -891,6 +893,22 @@ static void ws_client_free(struct ws_client *wc)
 
 	if (was_connected)
 		tmate_broadcast_viewer_count(session);
+}
+
+/* Deferred free: flush the write buffer (e.g. a 403 response) before
+ * closing the connection.  Without this, bufferevent_free() destroys
+ * the socket before the response reaches the client. */
+static void on_ws_client_flush(__unused struct bufferevent *bev, void *arg)
+{
+	struct ws_client *wc = arg;
+	ws_client_free(wc);
+}
+
+static void ws_client_free_after_flush(struct ws_client *wc)
+{
+	/* Disable read callback, set write callback to free after flush */
+	bufferevent_setcb(wc->bev, NULL, on_ws_client_flush, NULL, wc);
+	bufferevent_enable(wc->bev, EV_WRITE);
 }
 
 static void sse_send_fin(struct bufferevent *bev)
@@ -934,7 +952,7 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		int ret = sse_do_handshake(wc);
 		if (ret < 0) {
 			tmate_info("SSE handshake failed");
-			ws_client_free(wc);
+			ws_client_free_after_flush(wc);
 			return;
 		}
 		if (ret == 0)
