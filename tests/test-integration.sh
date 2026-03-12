@@ -992,22 +992,18 @@ if [ -n "$PW_TOKEN" ]; then
 	else
 		fail "password session accepts correct SSE password" "got HTTP $SSE_RIGHT_CODE"
 	fi
-	# Playwright: password prompt appears in web viewer
+	# Playwright: password prompt appears in web viewer (visual verification)
 	if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$QUICK" = "false" ]; then
 		PW_SCREENSHOT="/tmp/tmtv-pw-prompt-$$.png"
-		if npx playwright screenshot --browser chromium \
-			"$WEB_URL/s/$PW_SESSNAME" \
-			"$PW_SCREENSHOT" >/dev/null 2>&1; then
-			FSIZE=$(stat -c%s "$PW_SCREENSHOT" 2>/dev/null || echo "0")
-			if [ "$FSIZE" -gt 5000 ]; then
-				pass "password prompt visible in web viewer (${FSIZE}B)"
-			else
-				fail "password prompt visible in web viewer" "screenshot too small: ${FSIZE}B"
-			fi
-			rm -f "$PW_SCREENSHOT"
+		PW_TEST_SCRIPT="$(dirname "$0")/test-password-prompt.js"
+		PW_OUTPUT=$(node "$PW_TEST_SCRIPT" "$WEB_URL/s/$PW_SESSNAME" "$PW_SCREENSHOT" 2>&1)
+		PW_EXIT=$?
+		if [ $PW_EXIT -eq 0 ]; then
+			pass "password prompt visible in web viewer"
 		else
-			fail "password prompt visible in web viewer" "playwright screenshot failed"
+			fail "password prompt visible in web viewer" "$PW_OUTPUT"
 		fi
+		rm -f "$PW_SCREENSHOT"
 	else
 		if [ "$HAS_PLAYWRIGHT" != "true" ]; then
 			skip "password prompt visible (playwright not installed)"
