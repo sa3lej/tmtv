@@ -1,0 +1,22 @@
+{$TMTV_DOMAIN:localhost} {
+    # SSE reverse proxy (web viewer connections)
+    handle /ws/* {
+        reverse_proxy tmtv-server:4002 {
+            flush_interval -1
+            transport http {
+                read_timeout 0
+                write_timeout 0
+            }
+        }
+    }
+
+    # Health check (proxied from internal SSE port)
+    handle /healthz {
+        reverse_proxy tmtv-server:4002
+    }
+
+    # Respond with connection info on root
+    handle / {
+        respond "tmtv server running. Connect with: tmtv -F {$TMTV_DOMAIN:localhost}" 200
+    }
+}

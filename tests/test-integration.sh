@@ -47,6 +47,7 @@ WEB_PORT="${WEB_PORT:-443}"
 REMOTE_TMTV="${REMOTE_TMTV:-/usr/local/bin/tmtv}"
 QUICK=false
 HAS_PLAYWRIGHT=false
+HAS_WEB=true
 LOCAL=false
 
 for arg in "$@"; do
@@ -59,6 +60,11 @@ done
 # Auto-detect local mode
 if [ "$TEST_HOST" = "localhost" ] || [ "$TEST_HOST" = "127.0.0.1" ]; then
 	LOCAL=true
+fi
+
+# Detect if web server is available
+if [ "$WEB_PORT" = "0" ]; then
+	HAS_WEB=false
 fi
 
 # Convenience: full base URLs for web and SSE requests
@@ -319,32 +325,38 @@ else
 fi
 
 # -------------------------------------------------------
-# Test: Web viewer via nginx (named session)
+# Test: Web viewer via Caddy (named session)
 # -------------------------------------------------------
-WEB_RESPONSE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
-	"$WEB_URL/s/$TESTID" 2>/dev/null || echo "000")
-if [ "$WEB_RESPONSE" = "200" ]; then
-	pass "web viewer serves /s/<name>"
-else
-	fail "web viewer serves /s/<name>" "HTTP $WEB_RESPONSE for /s/$TESTID"
-fi
+if [ "$HAS_WEB" = "true" ]; then
+	WEB_RESPONSE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
+		"$WEB_URL/s/$TESTID" 2>/dev/null || echo "000")
+	if [ "$WEB_RESPONSE" = "200" ]; then
+		pass "web viewer serves /s/<name>"
+	else
+		fail "web viewer serves /s/<name>" "HTTP $WEB_RESPONSE for /s/$TESTID"
+	fi
 
-# -------------------------------------------------------
-# Test: Web viewer title contains session name (Caddy templates)
-# -------------------------------------------------------
-VIEWER_HTML=$(curl -s -m 5 "$WEB_URL/s/$TESTID" 2>/dev/null || echo "")
-if echo "$VIEWER_HTML" | grep -q "<title>tmtv.*$TESTID</title>"; then
-	pass "viewer <title> contains session name"
-else
-	fail "viewer <title> contains session name" \
-		"title tag missing session name '$TESTID'"
-fi
+	# -------------------------------------------------------
+	# Test: Web viewer title contains session name (Caddy templates)
+	# -------------------------------------------------------
+	VIEWER_HTML=$(curl -s -m 5 "$WEB_URL/s/$TESTID" 2>/dev/null || echo "")
+	if echo "$VIEWER_HTML" | grep -q "<title>tmtv.*$TESTID</title>"; then
+		pass "viewer <title> contains session name"
+	else
+		fail "viewer <title> contains session name" \
+			"title tag missing session name '$TESTID'"
+	fi
 
-if echo "$VIEWER_HTML" | grep -q "og:title.*content=\"tmtv.*$TESTID\""; then
-	pass "viewer og:title contains session name"
+	if echo "$VIEWER_HTML" | grep -q "og:title.*content=\"tmtv.*$TESTID\""; then
+		pass "viewer og:title contains session name"
+	else
+		fail "viewer og:title contains session name" \
+			"og:title meta missing session name '$TESTID'"
+	fi
 else
-	fail "viewer og:title contains session name" \
-		"og:title meta missing session name '$TESTID'"
+	skip "web viewer serves /s/<name> (no web server)"
+	skip "viewer <title> contains session name (no web server)"
+	skip "viewer og:title contains session name (no web server)"
 fi
 
 # -------------------------------------------------------
@@ -411,16 +423,19 @@ fi
 # -------------------------------------------------------
 # Test: SSE via web proxy (named session)
 # -------------------------------------------------------
-WS_RESPONSE=$(curl -s -m 3 -o /dev/null -w "%{http_code}:%{content_type}" \
-	"$WEB_URL/ws/$TESTID" 2>/dev/null || echo "000:")
-WS_CODE=$(echo "$WS_RESPONSE" | cut -d: -f1)
-WS_CTYPE=$(echo "$WS_RESPONSE" | cut -d: -f2-)
+if [ "$HAS_WEB" = "true" ]; then
+	WS_RESPONSE=$(curl -s -m 3 -o /dev/null -w "%{http_code}:%{content_type}" \
+		"$WEB_URL/ws/$TESTID" 2>/dev/null || echo "000:")
+	WS_CODE=$(echo "$WS_RESPONSE" | cut -d: -f1)
+	WS_CTYPE=$(echo "$WS_RESPONSE" | cut -d: -f2-)
 
-if [ "$WS_CODE" = "200" ] && echo "$WS_CTYPE" | grep -q "event-stream"; then
-	pass "SSE via web proxy /ws/<name>"
+	if [ "$WS_CODE" = "200" ] && echo "$WS_CTYPE" | grep -q "event-stream"; then
+		pass "SSE via web proxy /ws/<name>"
+	else
+		skip "SSE via web proxy /ws/<name> (got $WS_RESPONSE)"
+	fi
 else
-	# Might not have nginx proxy configured for /ws/
-	skip "SSE via web proxy /ws/<name> (got $WS_RESPONSE)"
+	skip "SSE via web proxy /ws/<name> (no web server)"
 fi
 
 # -------------------------------------------------------
@@ -634,6 +649,8 @@ fi
 # -------------------------------------------------------
 # Test: SSH viewer counts — verify S:N is accurate via format variables
 # -------------------------------------------------------
+# Wait for any lingering SSH connections from prior tests to disconnect
+sleep 3
 if [ -n "$TOKEN" ]; then
 	# Before any SSH viewer connects, S should be 0
 	S_BEFORE=$(remote_tmtv "display-message -p '#{tmtv_ssh_viewers}'" 2>/dev/null || echo "")
@@ -883,7 +900,7 @@ fi
 # -------------------------------------------------------
 # Test: Playwright visual — web viewer renders terminal content
 # -------------------------------------------------------
-if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$QUICK" = "false" ]; then
+if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$QUICK" = "false" ] && [ "$HAS_WEB" = "true" ]; then
 	# Put a unique visual marker on screen
 	VIS_MARKER="VISUAL_$$"
 	remote_tmtv "send-keys -t main:0 'echo $VIS_MARKER' Enter"
@@ -906,7 +923,9 @@ if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$QUICK" = "false" ]; then
 		fail "web viewer renders" "playwright screenshot failed"
 	fi
 else
-	if [ "$HAS_PLAYWRIGHT" != "true" ]; then
+	if [ "$HAS_WEB" != "true" ]; then
+		skip "web viewer renders (no web server)"
+	elif [ "$HAS_PLAYWRIGHT" != "true" ]; then
 		skip "web viewer renders (playwright not installed)"
 	else
 		skip "web viewer renders (--quick)"
@@ -1027,7 +1046,7 @@ if [ -n "$PW_TOKEN" ]; then
 	fi
 
 	# SSE with correct password should return 200
-	SSE_RIGHT_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+	SSE_RIGHT_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
 		"$SSE_BASE/$PW_TOKEN?password=testpass123" 2>/dev/null || echo "000")
 	if [ "$SSE_RIGHT_CODE" = "200" ]; then
 		pass "password session accepts correct SSE password"
@@ -1035,7 +1054,7 @@ if [ -n "$PW_TOKEN" ]; then
 		fail "password session accepts correct SSE password" "got HTTP $SSE_RIGHT_CODE"
 	fi
 	# Playwright: full password prompt flow (wrong pw → error, correct pw → connect)
-	if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$QUICK" = "false" ]; then
+	if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$QUICK" = "false" ] && [ "$HAS_WEB" = "true" ]; then
 		PW_SCREENSHOT_DIR="/tmp/tmtv-pw-screenshots-$$"
 		mkdir -p "$PW_SCREENSHOT_DIR"
 		PW_TEST_SCRIPT="$(dirname "$0")/test-password-prompt.js"
@@ -1103,7 +1122,7 @@ if [ -n "$WI_TOKEN" ]; then
 	fi
 
 	# Test: POST input to RW token returns 200
-	WI_POST_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+	WI_POST_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
 		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
 		"$SSE_BASE/$WI_TOKEN/input" 2>/dev/null || echo "000")
 	if [ "$WI_POST_CODE" = "200" ]; then

@@ -1,0 +1,49 @@
+# tmtv self-hosting — one command to run your own terminal sharing server.
+#
+# Quick start:
+#   docker compose up -d
+#
+# With TLS (recommended for production):
+#   TMTV_DOMAIN=share.example.com docker compose --profile tls up -d
+#
+# SSH host keys and Caddy TLS certs persist in Docker volumes.
+
+services:
+  tmtv-server:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${TMTV_SSH_PORT:-2222}:2222"
+    expose:
+      - "4002"
+    environment:
+      - TMTV_HOSTNAME=${TMTV_DOMAIN:-localhost}
+      - TMTV_SSH_PORT=2222
+      - TMTV_SSE_PORT=4002
+      - TMTV_IDLE_TIMEOUT=${TMTV_IDLE_TIMEOUT:-3600}
+      - TMTV_MAX_LIFETIME=${TMTV_MAX_LIFETIME:-86400}
+      - TMTV_LOG_LEVEL=${TMTV_LOG_LEVEL:-0}
+    volumes:
+      - tmtv-keys:/data/keys
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles:
+      - tls
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile.selfhost:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      - TMTV_DOMAIN=${TMTV_DOMAIN:-localhost}
+    depends_on:
+      - tmtv-server
+
+volumes:
+  tmtv-keys:
+  caddy-data:
+  caddy-config:

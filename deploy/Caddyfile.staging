@@ -9,6 +9,11 @@ staging.tmtv.se {
         file_server
     }
 
+    # Health check endpoint
+    handle /healthz {
+        reverse_proxy 127.0.0.1:4002
+    }
+
     # SSE reverse proxy (token in path)
     handle /ws/* {
         reverse_proxy 127.0.0.1:4002 {
