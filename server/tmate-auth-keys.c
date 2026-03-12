@@ -136,6 +136,14 @@ static void tmate_set(char *key, char *value)
 			tmate_notify("Web sharing disabled");
 			tmate_disconnect_ws_clients(tmate_session);
 		}
+	} else if (!strcmp(key, "web_input")) {
+		bool enabled = !strcmp(value, "true") || !strcmp(value, "1") || !strcmp(value, "on");
+		tmate_session->web_input_enabled = enabled;
+		tmate_info("Web input toggled: %s", enabled ? "on" : "off");
+		if (enabled)
+			tmate_notify("Web input enabled — RW web viewers can type");
+		else
+			tmate_notify("Web input disabled");
 	}
 }
 
