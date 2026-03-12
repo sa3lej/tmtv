@@ -79,6 +79,27 @@ Can also be set in config:
 set -g tmtv-session-password secret
 ```
 
+## GitHub Action
+
+Debug CI failures by SSH-ing into your runner. Drop-in replacement for `action-tmate`:
+
+```yaml
+- name: Debug via tmtv
+  if: failure()
+  uses: sa3lej/action-tmtv@v1
+  with:
+    limit-access-to-actor: true
+```
+
+Migrating from action-tmate? One-line diff:
+
+```diff
+- uses: mxschmitt/action-tmate@v3
++ uses: sa3lej/action-tmtv@v1
+```
+
+See [action-tmtv](https://github.com/sa3lej/action-tmtv) for full docs.
+
 ## How it works
 
 ```
