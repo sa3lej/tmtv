@@ -242,6 +242,35 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 		else
 			tmate_set_val("web_input", value ? value : "off");
 	}
+	if (strcmp(name, "tmtv-recording") == 0) {
+		int want_on = !args_has(args, 'u') && value &&
+			      strcmp(value, "on") == 0;
+		if (want_on && !tmtv_recording_active()) {
+			struct session *s;
+			u_int w = 80, h = 24;
+			const char *tok;
+
+			s = RB_MIN(sessions, &sessions);
+			if (s && s->curw && s->curw->window) {
+				w = s->curw->window->sx;
+				h = s->curw->window->sy;
+			}
+			tok = options_get_string(global_options,
+						 "tmtv-session-name");
+			if (!tok || !*tok)
+				tok = "session";
+			tmtv_recording_start(tok, w, h);
+		} else if (!want_on && tmtv_recording_active()) {
+			tmtv_recording_stop();
+		}
+	}
+	if (strcmp(name, "tmtv-link-ttl") == 0) {
+		extern void tmate_set_val(const char *, const char *);
+		if (args_has(args, 'u'))
+			tmate_set_val("link_ttl", "0");
+		else
+			tmate_set_val("link_ttl", value ? value : "0");
+	}
 #else
 	/* Server side: process option hooks */
 	{

@@ -144,6 +144,15 @@ static void tmate_set(char *key, char *value)
 			tmate_notify("Web input enabled — RW web viewers can type");
 		else
 			tmate_notify("Web input disabled");
+	} else if (!strcmp(key, "link_ttl")) {
+		int ttl = atoi(value);
+		tmate_session->link_ttl = ttl > 0 ? ttl : 0;
+		if (ttl > 0) {
+			tmate_info("Session TTL set: %d seconds", ttl);
+			tmate_ensure_idle_timer(tmate_session);
+		} else {
+			tmate_info("Session TTL cleared");
+		}
 	}
 }
 

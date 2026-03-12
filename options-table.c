@@ -338,7 +338,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "default-client-command",
 	  .type = OPTIONS_TABLE_COMMAND,
 	  .scope = OPTIONS_TABLE_SERVER,
-	  .default_str = "new-session",
+	  .default_str = "new-session -A",
 	  .text = "Default command to run when tmux is run without a command."
 	},
 
@@ -1127,6 +1127,13 @@ const struct options_table_entry options_table[] = {
 	  .text = "Password required for SSH viewers to connect."
 	},
 
+	{ .name = "tmtv-recording",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_num = 0,
+	  .text = "Record terminal output to an asciinema .cast file."
+	},
+
 	{ .name = "tmtv-web-input",
   .type = OPTIONS_TABLE_FLAG,
   .scope = OPTIONS_TABLE_SERVER,
@@ -1139,6 +1146,13 @@ const struct options_table_entry options_table[] = {
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",
 	  .text = "Read-only named session token for tmtv."
+	},
+
+	{ .name = "tmtv-link-ttl",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_str = "",
+	  .text = "Session lifetime in seconds. Empty or 0 means no limit."
 	},
 
 	/* Window options. */

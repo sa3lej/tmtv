@@ -9,7 +9,7 @@ tmtv is a fork of tmate, rebased on tmux 3.6a, bringing nine years of
 tmux improvements that tmate never had: popup menus, extended keys, sixel
 graphics, and more.
 
-Current version: 1.3.4
+Current version: 1.3.5
 License: ISC (same as tmux)
 Author: Lars-Erik Jonsson (SA3LEJ)
 Repository: https://github.com/sa3lej/tmtv

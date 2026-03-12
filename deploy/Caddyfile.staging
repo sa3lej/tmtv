@@ -9,6 +9,15 @@ staging.tmtv.se {
         file_server
     }
 
+    # Short URL alias for easy sharing (/j/<token> → same viewer)
+    @shorturl path_regexp viewer ^/j/([a-zA-Z0-9_-]+)$
+    handle @shorturl {
+        root * /var/www/tmtv
+        templates
+        rewrite * /viewer.html
+        file_server
+    }
+
     # Health check endpoint
     handle /healthz {
         reverse_proxy 127.0.0.1:4002

@@ -202,6 +202,13 @@ extern void tmate_session_init(struct event_base *base);
 extern void tmate_session_start(void);
 extern void tmate_reconnect_session(struct tmate_session *session, const char *message);
 
+/* tmate-recording.c */
+extern void tmtv_recording_start(const char *token, u_int width, u_int height);
+extern void tmtv_recording_write(const char *buf, size_t len);
+extern void tmtv_recording_resize(u_int width, u_int height);
+extern void tmtv_recording_stop(void);
+extern int  tmtv_recording_active(void);
+
 /* tmate-debug.c */
 extern void tmate_print_stack_trace(void);
 extern void tmate_catch_sigsegv(void);

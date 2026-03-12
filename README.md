@@ -79,6 +79,40 @@ Can also be set in config:
 set -g tmtv-session-password secret
 ```
 
+### Session recording
+
+Record your terminal session to an [asciinema](https://asciinema.org) `.cast` file:
+
+```sh
+tmtv set -g tmtv-recording on
+```
+
+Recordings are saved to `~/.tmtv/recordings/`. Play them back with `asciinema play`:
+
+```sh
+asciinema play ~/.tmtv/recordings/demo-1741737600.cast
+```
+
+Add a toggle keybinding to start/stop recording with `prefix + R`:
+
+```
+# In ~/.tmtv.conf
+bind R if -F '#{==:#{tmtv-recording},1}' \
+  'set -g tmtv-recording off; display "Recording stopped"' \
+  'set -g tmtv-recording on; display "Recording started"'
+```
+
+### Session expiry
+
+Set a time-to-live for your session:
+
+```
+# In ~/.tmtv.conf
+set -g tmtv-link-ttl 3600    # expire after 1 hour
+```
+
+The session auto-terminates after the TTL. Viewers see the countdown in the session notification.
+
 ### All sharing options
 
 Here's every sharing option in one place:
@@ -97,12 +131,18 @@ set -g tmtv-session-name demo
 
 # Password — required for all viewers (SSH and web)
 set -g tmtv-session-password secret
+
+# Record terminal to asciinema .cast file
+set -g tmtv-recording on
+
+# Session lifetime in seconds (0 = no limit)
+set -g tmtv-link-ttl 3600
 ```
 
 All options can be combined freely. A named session with password and web input gives you:
 - `ssh 12345-demo@tmtv.se` — SSH read-write (password required)
 - `ssh ro-demo@tmtv.se` — SSH read-only (password required)
-- `https://tmtv.se/s/demo` — web viewer with typing enabled (password prompt shown)
+- `https://tmtv.se/j/demo` — web viewer with typing enabled (password prompt shown)
 
 Options can also be toggled at runtime:
 

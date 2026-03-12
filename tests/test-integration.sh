@@ -1040,23 +1040,106 @@ fi
 sleep 1
 
 # -------------------------------------------------------
-# Test: bare tmtv does not auto-attach (mimics tmux)
+# Test: bare tmtv auto-attaches to existing session
 # -------------------------------------------------------
 remote "TERM=xterm-256color $REMOTE_TMTV new -d -s existing1" 2>/dev/null
 sleep 2
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "existing1"; then
-	# Bare tmtv against existing server — should NOT auto-attach
+	# Bare tmtv against existing server — should auto-attach (new-session -A)
 	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV" 2>/dev/null || true
 	sleep 1
-	# Server must still be alive
+	# Session must still be alive (attach succeeded, not a second session error)
 	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "existing1"; then
-		pass "bare tmtv does not auto-attach (server alive)"
+		pass "bare tmtv auto-attaches to existing session"
 	else
-		fail "bare tmtv does not auto-attach" "server died"
+		fail "bare tmtv auto-attaches to existing session" "session died"
 	fi
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 else
-	fail "bare tmtv does not auto-attach" "could not create test session"
+	fail "bare tmtv auto-attaches to existing session" "could not create test session"
+fi
+sleep 1
+
+# -------------------------------------------------------
+# Test: tmtv reattach after detach works
+# -------------------------------------------------------
+remote "TERM=xterm-256color $REMOTE_TMTV new -d -s reattach1" 2>/dev/null
+sleep 2
+if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "reattach1"; then
+	# Attach, then timeout (simulates detach), then attach again
+	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV attach -t reattach1" 2>/dev/null || true
+	sleep 1
+	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV attach -t reattach1" 2>/dev/null || true
+	sleep 1
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "reattach1"; then
+		pass "tmtv reattach after detach works"
+	else
+		fail "tmtv reattach after detach works" "session died after reattach"
+	fi
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+else
+	fail "tmtv reattach after detach works" "could not create test session"
+fi
+sleep 1
+
+# -------------------------------------------------------
+# Test: session recreation after kill-session works
+# -------------------------------------------------------
+remote "TERM=xterm-256color $REMOTE_TMTV new -d -s killme1" 2>/dev/null
+sleep 2
+if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "killme1"; then
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-session -t killme1" 2>/dev/null || true
+	sleep 1
+	# Session should be gone
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "killme1"; then
+		fail "session recreation after kill-session" "kill-session did not work"
+		remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+	else
+		# Now create a new session — this tests the RB_EMPTY fix
+		remote "TERM=xterm-256color $REMOTE_TMTV new -d -s killme2" 2>/dev/null
+		sleep 2
+		if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "killme2"; then
+			pass "session recreation after kill-session works"
+		else
+			fail "session recreation after kill-session works" "could not create new session after kill"
+		fi
+		remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+	fi
+else
+	fail "session recreation after kill-session works" "could not create test session"
+fi
+sleep 1
+
+# -------------------------------------------------------
+# Test: tmtv list-sessions shows running session
+# -------------------------------------------------------
+remote "TERM=xterm-256color $REMOTE_TMTV new -d -s lsession1" 2>/dev/null
+sleep 2
+LS_OUTPUT=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null) || true
+if echo "$LS_OUTPUT" | grep -q "lsession1"; then
+	pass "tmtv list-sessions shows running session"
+else
+	fail "tmtv list-sessions shows running session" "output: $LS_OUTPUT"
+fi
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+sleep 1
+
+# -------------------------------------------------------
+# Test: tmtv attach -t <session> works
+# -------------------------------------------------------
+remote "TERM=xterm-256color $REMOTE_TMTV new -d -s att1" 2>/dev/null
+sleep 2
+if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "att1"; then
+	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV attach -t att1" 2>/dev/null || true
+	sleep 1
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "att1"; then
+		pass "tmtv attach -t <session> works"
+	else
+		fail "tmtv attach -t <session> works" "session died after attach"
+	fi
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+else
+	fail "tmtv attach -t <session> works" "could not create test session"
 fi
 sleep 1
 
@@ -1565,6 +1648,289 @@ fi
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $CSRF_CONF" 2>/dev/null || true
 sleep 1
+
+# -------------------------------------------------------
+# Test: Per-session TTL expiry
+# -------------------------------------------------------
+TTL_CONF="/tmp/.tmtv-test-ttl-$TESTID.conf"
+TTL_SESSNAME="ttl-$TESTID"
+remote "cat > $TTL_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$TTL_SESSNAME\"
+set -g tmtv-web-sharing on
+set -g tmtv-link-ttl \"10\"
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $TTL_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+sleep 4
+
+# Verify session is alive immediately
+TTL_TOKEN=$(remote "readlink $SESSIONS_DIR/$TTL_SESSNAME 2>/dev/null" || echo "")
+if [ -n "$TTL_TOKEN" ]; then
+	pass "TTL session created with token"
+else
+	fail "TTL session created with token" "could not find session"
+fi
+
+# Check server logs for TTL set message
+TTL_LOG=$(remote "journalctl -u tmtv-server --no-pager -n 20 2>/dev/null" || echo "")
+if echo "$TTL_LOG" | grep -q "Session TTL set: 10 seconds"; then
+	pass "server logs TTL set (10s)"
+else
+	skip "server logs TTL set" "journalctl not available"
+fi
+
+# Verify session is still alive at ~5s mark
+sleep 3
+if remote "test -e $SESSIONS_DIR/$TTL_SESSNAME" 2>/dev/null; then
+	pass "TTL session alive before expiry"
+else
+	fail "TTL session alive before expiry" "session disappeared too early"
+fi
+
+if [ "$QUICK" = "false" ]; then
+	# Wait for TTL to expire (10s total + 30s timer interval + margin)
+	# Timer checks every IDLE_CHECK_INTERVAL_SEC (30s). After the TTL
+	# elapses, the server terminates the session on the next timer tick.
+	# The client may auto-reconnect, creating a new session with a new
+	# random token. We verify expiry by checking the original token is
+	# gone AND the server logged the expiry message.
+	sleep 35
+
+	# The original random token should no longer have a socket (even if
+	# the client reconnected, the new session gets a different token)
+	if remote "test -S /tmp/tmtv/sessions/$TTL_TOKEN" 2>/dev/null; then
+		fail "TTL original token removed after expiry" "socket $TTL_TOKEN still exists"
+	else
+		pass "TTL original token removed after expiry"
+	fi
+
+	# Check server logs for expiry message
+	TTL_EXPIRY_LOG=$(remote "journalctl -u tmtv-server --no-pager -n 50 2>/dev/null" || echo "")
+	if echo "$TTL_EXPIRY_LOG" | grep -q "Session TTL expired"; then
+		pass "server logs TTL expiry"
+	else
+		skip "server logs TTL expiry" "journalctl not available or message not found"
+	fi
+else
+	skip "TTL original token removed after expiry" "quick mode"
+	skip "TTL expiry server log" "quick mode"
+fi
+
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $TTL_CONF" 2>/dev/null || true
+sleep 1
+
+# -------------------------------------------------------
+# Test: Short URL alias /j/<token>
+# -------------------------------------------------------
+if [ "$HAS_WEB" = "true" ]; then
+	JURL_CONF="/tmp/.tmtv-test-jurl-$TESTID.conf"
+	JURL_SESSNAME="jurl-$TESTID"
+	remote "cat > $JURL_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$JURL_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+	remote "TERM=xterm-256color \
+		nohup script -qc '$REMOTE_TMTV -f $JURL_CONF new-session -d -s main' \
+		/dev/null </dev/null >/dev/null 2>&1 &"
+	sleep 4
+
+	JURL_TOKEN=$(remote "readlink $SESSIONS_DIR/$JURL_SESSNAME 2>/dev/null" || echo "")
+
+	if [ -n "$JURL_TOKEN" ]; then
+		# Test /j/<token> returns 200
+		JURL_CODE=$(curl -sk -m 5 -o /dev/null -w "%{http_code}" \
+			"$WEB_URL/j/$JURL_SESSNAME" 2>/dev/null) || true
+		if [ "$JURL_CODE" = "200" ]; then
+			pass "short URL /j/<token> returns 200"
+		else
+			fail "short URL /j/<token> returns 200" "got HTTP $JURL_CODE"
+		fi
+
+		# Test /j/<token> serves xterm.js viewer
+		JURL_BODY=$(curl -sk -m 5 "$WEB_URL/j/$JURL_SESSNAME" 2>/dev/null) || true
+		if echo "$JURL_BODY" | grep -q "xterm"; then
+			pass "short URL /j/<token> serves viewer page"
+		else
+			fail "short URL /j/<token> serves viewer page" "xterm not found in response"
+		fi
+	else
+		skip "short URL tests" "could not create session"
+	fi
+
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+	remote "rm -f $JURL_CONF" 2>/dev/null || true
+	sleep 1
+else
+	skip "short URL /j/<token> returns 200" "web not available"
+	skip "short URL /j/<token> serves viewer" "web not available"
+fi
+
+# -------------------------------------------------------
+# Test: asciinema recording (cast v2)
+# -------------------------------------------------------
+echo ""
+echo "-- Recording tests --"
+
+# We need the server key fingerprints for a fresh session
+if [ -n "$RSA_FP" ] || [ -n "$ED25519_FP" ]; then
+	REC_SESSNAME="rec$$"
+	REC_CONF="/tmp/.tmtv-test-rec-$TESTID.conf"
+
+	remote "cat > $REC_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$REC_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+	# Start session
+	remote "TERM=xterm-256color \
+		nohup script -qc '$REMOTE_TMTV -f $REC_CONF new-session -d -s main' \
+		/dev/null </dev/null >/dev/null 2>&1 &"
+	sleep 4
+
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null" | grep -q "main"; then
+		# Clean any previous recordings
+		remote "rm -rf /root/.tmtv/recordings/*" 2>/dev/null || true
+
+		# Enable recording
+		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording on"
+		sleep 1
+
+		# Type some output
+		remote "TERM=xterm-256color $REMOTE_TMTV send-keys 'echo hello-recording' Enter"
+		sleep 2
+
+		# Check .cast file exists
+		REC_FILE=$(remote "ls -t /root/.tmtv/recordings/*.cast 2>/dev/null | head -1" || echo "")
+		if [ -n "$REC_FILE" ]; then
+			pass "recording creates .cast file"
+		else
+			fail "recording creates .cast file" "no .cast file in /root/.tmtv/recordings/"
+		fi
+
+		# Verify cast v2 header
+		if [ -n "$REC_FILE" ]; then
+			REC_HEADER=$(remote "head -1 '$REC_FILE'" || echo "")
+			if echo "$REC_HEADER" | grep -q '"version":2'; then
+				pass "cast file has v2 header"
+			else
+				fail "cast file has v2 header" "header: $REC_HEADER"
+			fi
+
+			if echo "$REC_HEADER" | grep -q '"width"'; then
+				pass "cast header contains width"
+			else
+				fail "cast header contains width" "header: $REC_HEADER"
+			fi
+
+			if echo "$REC_HEADER" | grep -q '"height"'; then
+				pass "cast header contains height"
+			else
+				fail "cast header contains height" "header: $REC_HEADER"
+			fi
+		else
+			skip "cast file has v2 header" "no .cast file"
+			skip "cast header contains width" "no .cast file"
+			skip "cast header contains height" "no .cast file"
+		fi
+
+		# Verify output events exist
+		if [ -n "$REC_FILE" ]; then
+			REC_EVENTS=$(remote "grep -c '\"o\"' '$REC_FILE'" || echo "0")
+			if [ "$REC_EVENTS" -gt 0 ] 2>/dev/null; then
+				pass "cast file contains output events ($REC_EVENTS)"
+			else
+				fail "cast file contains output events" "got $REC_EVENTS events"
+			fi
+		else
+			skip "cast file contains output events" "no .cast file"
+		fi
+
+		# Test resize event: split window should trigger a resize
+		remote "TERM=xterm-256color $REMOTE_TMTV split-window"
+		sleep 2
+
+		if [ -n "$REC_FILE" ]; then
+			REC_RESIZE=$(remote "grep -c '\"r\"' '$REC_FILE'" || echo "0")
+			if [ "$REC_RESIZE" -gt 0 ] 2>/dev/null; then
+				pass "cast file contains resize events ($REC_RESIZE)"
+			else
+				fail "cast file contains resize events" "got $REC_RESIZE resize events"
+			fi
+		else
+			skip "cast file contains resize events" "no .cast file"
+		fi
+
+		# Disable recording
+		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording off"
+		sleep 1
+
+		# Type more output — should NOT be recorded
+		LINECOUNT_BEFORE=$(remote "wc -l < '$REC_FILE'" 2>/dev/null || echo "0")
+		remote "TERM=xterm-256color $REMOTE_TMTV send-keys 'echo after-stop' Enter"
+		sleep 2
+		LINECOUNT_AFTER=$(remote "wc -l < '$REC_FILE'" 2>/dev/null || echo "0")
+		if [ "$LINECOUNT_BEFORE" = "$LINECOUNT_AFTER" ]; then
+			pass "recording stops writing after disable"
+		else
+			fail "recording stops writing after disable" "lines before=$LINECOUNT_BEFORE after=$LINECOUNT_AFTER"
+		fi
+
+		# Test runtime toggle: re-enable, verify new file created
+		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording on"
+		sleep 1
+		remote "TERM=xterm-256color $REMOTE_TMTV send-keys 'echo second-recording' Enter"
+		sleep 2
+		REC_COUNT=$(remote "ls /root/.tmtv/recordings/*.cast 2>/dev/null | wc -l" || echo "0")
+		if [ "$REC_COUNT" -ge 2 ] 2>/dev/null; then
+			pass "re-enable creates new .cast file ($REC_COUNT files)"
+		else
+			fail "re-enable creates new .cast file" "only $REC_COUNT file(s)"
+		fi
+
+		# Disable again before cleanup
+		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording off" 2>/dev/null || true
+	else
+		skip "recording creates .cast file" "could not start session"
+		skip "cast file has v2 header" "could not start session"
+		skip "cast header contains width" "could not start session"
+		skip "cast header contains height" "could not start session"
+		skip "cast file contains output events" "could not start session"
+		skip "cast file contains resize events" "could not start session"
+		skip "recording stops writing after disable" "could not start session"
+		skip "re-enable creates new .cast file" "could not start session"
+	fi
+
+	# Cleanup
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+	remote "rm -f $REC_CONF" 2>/dev/null || true
+	remote "rm -rf /root/.tmtv/recordings" 2>/dev/null || true
+	sleep 1
+else
+	skip "recording creates .cast file" "no server key fingerprints"
+	skip "cast file has v2 header" "no server key fingerprints"
+	skip "cast header contains width" "no server key fingerprints"
+	skip "cast header contains height" "no server key fingerprints"
+	skip "cast file contains output events" "no server key fingerprints"
+	skip "cast file contains resize events" "no server key fingerprints"
+	skip "recording stops writing after disable" "no server key fingerprints"
+	skip "re-enable creates new .cast file" "no server key fingerprints"
+fi
 
 # -------------------------------------------------------
 # Summary

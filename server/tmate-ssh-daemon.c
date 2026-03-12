@@ -219,7 +219,18 @@ static void on_idle_timer(__unused evutil_socket_t fd,
 	int max_lifetime = tmate_settings->max_lifetime;
 	int idle_timeout = tmate_settings->idle_timeout;
 
-	/* Check max lifetime first — unconditional */
+	/* Check per-session TTL first (client-controlled) */
+	if (session->link_ttl > 0 &&
+	    now - session->session_start >= session->link_ttl) {
+		tmate_info("Session TTL expired (%d seconds)",
+			   session->link_ttl);
+		tmate_notify("Session expired (TTL: %ds)",
+			     session->link_ttl);
+		request_server_termination();
+		return;
+	}
+
+	/* Check max lifetime (server-controlled) */
 	if (max_lifetime > 0 &&
 	    now - session->session_start >= max_lifetime) {
 		tmate_info("Session exceeded max lifetime (%ds), terminating",
@@ -243,6 +254,29 @@ static void on_idle_timer(__unused evutil_socket_t fd,
 	}
 }
 
+static void start_idle_timer_event(struct tmate_session *session)
+{
+	if (session->ev_idle_timer)
+		return; /* already running */
+
+	if (session->session_start == 0) {
+		session->session_start = time(NULL);
+		session->last_pty_activity = session->session_start;
+	}
+
+	struct timeval tv = { IDLE_CHECK_INTERVAL_SEC, 0 };
+	session->ev_idle_timer = event_new(session->ev_base, -1,
+					   EV_PERSIST, on_idle_timer,
+					   session);
+	if (session->ev_idle_timer) {
+		event_add(session->ev_idle_timer, &tv);
+		tmate_info("Idle timer started (idle=%ds, lifetime=%ds, ttl=%ds)",
+			   tmate_settings->idle_timeout,
+			   tmate_settings->max_lifetime,
+			   session->link_ttl);
+	}
+}
+
 static void setup_idle_timer(struct tmate_session *session)
 {
 	if (tmate_settings->idle_timeout <= 0 &&
@@ -252,16 +286,17 @@ static void setup_idle_timer(struct tmate_session *session)
 	session->session_start = time(NULL);
 	session->last_pty_activity = session->session_start;
 
-	struct timeval tv = { IDLE_CHECK_INTERVAL_SEC, 0 };
-	session->ev_idle_timer = event_new(session->ev_base, -1,
-					   EV_PERSIST, on_idle_timer,
-					   session);
-	if (session->ev_idle_timer) {
-		event_add(session->ev_idle_timer, &tv);
-		tmate_info("Idle timer started (idle=%ds, lifetime=%ds)",
-			   tmate_settings->idle_timeout,
-			   tmate_settings->max_lifetime);
-	}
+	start_idle_timer_event(session);
+}
+
+/*
+ * Ensure the idle timer is running. Called when per-session TTL
+ * is set after session creation (the timer may not have been
+ * started if the server has no global idle_timeout/max_lifetime).
+ */
+void tmate_ensure_idle_timer(struct tmate_session *session)
+{
+	start_idle_timer_event(session);
 }
 
 extern int server_fd;
@@ -551,10 +586,26 @@ static void handle_web_input_option(const char *name, const char *val)
 		tmate_notify("Web input disabled");
 }
 
+static void handle_link_ttl_option(const char *name, const char *val)
+{
+	if (strcmp(name, "tmtv-link-ttl") != 0)
+		return;
+
+	int ttl = val ? atoi(val) : 0;
+	tmate_session->link_ttl = ttl > 0 ? ttl : 0;
+	if (ttl > 0) {
+		tmate_info("Session TTL set via set-option: %d seconds", ttl);
+		tmate_ensure_idle_timer(tmate_session);
+	} else {
+		tmate_info("Session TTL cleared via set-option");
+	}
+}
+
 void tmate_hook_set_option(const char *name, const char *val)
 {
 	tmate_hook_set_option_auth(name, val);
 	handle_session_name_options(name, val);
 	handle_web_sharing_option(name, val);
 	handle_web_input_option(name, val);
+	handle_link_ttl_option(name, val);
 }
