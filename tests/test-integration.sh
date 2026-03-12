@@ -1824,161 +1824,6 @@ else
 fi
 
 # -------------------------------------------------------
-# Test: asciinema recording (cast v2)
-# -------------------------------------------------------
-echo ""
-echo "-- Recording tests --"
-
-# We need the server key fingerprints for a fresh session
-if [ -n "$RSA_FP" ] || [ -n "$ED25519_FP" ]; then
-	REC_SESSNAME="rec$$"
-	REC_CONF="/tmp/.tmtv-test-rec-$TESTID.conf"
-
-	remote "cat > $REC_CONF << CONF
-set -g tmtv-server-host \"127.0.0.1\"
-set -g tmtv-server-port $TMTV_PORT
-set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
-set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
-set -g tmtv-session-name \"$REC_SESSNAME\"
-set -g tmtv-web-sharing on
-CONF"
-
-	# Start session
-	remote "TERM=xterm-256color \
-		nohup script -qc '$REMOTE_TMTV -f $REC_CONF new-session -d -s main' \
-		/dev/null </dev/null >/dev/null 2>&1 &"
-	sleep 4
-
-	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null" | grep -q "main"; then
-		# Clean any previous recordings
-		remote "rm -rf /root/.tmtv/recordings/*" 2>/dev/null || true
-
-		# Enable recording
-		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording on"
-		sleep 1
-
-		# Type some output
-		remote "TERM=xterm-256color $REMOTE_TMTV send-keys 'echo hello-recording' Enter"
-		sleep 2
-
-		# Check .cast file exists
-		REC_FILE=$(remote "ls -t /root/.tmtv/recordings/*.cast 2>/dev/null | head -1" || echo "")
-		if [ -n "$REC_FILE" ]; then
-			pass "recording creates .cast file"
-		else
-			fail "recording creates .cast file" "no .cast file in /root/.tmtv/recordings/"
-		fi
-
-		# Verify cast v2 header
-		if [ -n "$REC_FILE" ]; then
-			REC_HEADER=$(remote "head -1 '$REC_FILE'" || echo "")
-			if echo "$REC_HEADER" | grep -q '"version":2'; then
-				pass "cast file has v2 header"
-			else
-				fail "cast file has v2 header" "header: $REC_HEADER"
-			fi
-
-			if echo "$REC_HEADER" | grep -q '"width"'; then
-				pass "cast header contains width"
-			else
-				fail "cast header contains width" "header: $REC_HEADER"
-			fi
-
-			if echo "$REC_HEADER" | grep -q '"height"'; then
-				pass "cast header contains height"
-			else
-				fail "cast header contains height" "header: $REC_HEADER"
-			fi
-		else
-			skip "cast file has v2 header" "no .cast file"
-			skip "cast header contains width" "no .cast file"
-			skip "cast header contains height" "no .cast file"
-		fi
-
-		# Verify output events exist
-		if [ -n "$REC_FILE" ]; then
-			REC_EVENTS=$(remote "grep -c '\"o\"' '$REC_FILE'" || echo "0")
-			if [ "$REC_EVENTS" -gt 0 ] 2>/dev/null; then
-				pass "cast file contains output events ($REC_EVENTS)"
-			else
-				fail "cast file contains output events" "got $REC_EVENTS events"
-			fi
-		else
-			skip "cast file contains output events" "no .cast file"
-		fi
-
-		# Test resize event: split window should trigger a resize
-		remote "TERM=xterm-256color $REMOTE_TMTV split-window"
-		sleep 2
-
-		if [ -n "$REC_FILE" ]; then
-			REC_RESIZE=$(remote "grep -c '\"r\"' '$REC_FILE'" || echo "0")
-			if [ "$REC_RESIZE" -gt 0 ] 2>/dev/null; then
-				pass "cast file contains resize events ($REC_RESIZE)"
-			else
-				fail "cast file contains resize events" "got $REC_RESIZE resize events"
-			fi
-		else
-			skip "cast file contains resize events" "no .cast file"
-		fi
-
-		# Disable recording
-		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording off"
-		sleep 1
-
-		# Type more output — should NOT be recorded
-		LINECOUNT_BEFORE=$(remote "wc -l < '$REC_FILE'" 2>/dev/null || echo "0")
-		remote "TERM=xterm-256color $REMOTE_TMTV send-keys 'echo after-stop' Enter"
-		sleep 2
-		LINECOUNT_AFTER=$(remote "wc -l < '$REC_FILE'" 2>/dev/null || echo "0")
-		if [ "$LINECOUNT_BEFORE" = "$LINECOUNT_AFTER" ]; then
-			pass "recording stops writing after disable"
-		else
-			fail "recording stops writing after disable" "lines before=$LINECOUNT_BEFORE after=$LINECOUNT_AFTER"
-		fi
-
-		# Test runtime toggle: re-enable, verify new file created
-		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording on"
-		sleep 1
-		remote "TERM=xterm-256color $REMOTE_TMTV send-keys 'echo second-recording' Enter"
-		sleep 2
-		REC_COUNT=$(remote "ls /root/.tmtv/recordings/*.cast 2>/dev/null | wc -l" || echo "0")
-		if [ "$REC_COUNT" -ge 2 ] 2>/dev/null; then
-			pass "re-enable creates new .cast file ($REC_COUNT files)"
-		else
-			fail "re-enable creates new .cast file" "only $REC_COUNT file(s)"
-		fi
-
-		# Disable again before cleanup
-		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording off" 2>/dev/null || true
-	else
-		skip "recording creates .cast file" "could not start session"
-		skip "cast file has v2 header" "could not start session"
-		skip "cast header contains width" "could not start session"
-		skip "cast header contains height" "could not start session"
-		skip "cast file contains output events" "could not start session"
-		skip "cast file contains resize events" "could not start session"
-		skip "recording stops writing after disable" "could not start session"
-		skip "re-enable creates new .cast file" "could not start session"
-	fi
-
-	# Cleanup
-	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
-	remote "rm -f $REC_CONF" 2>/dev/null || true
-	remote "rm -rf /root/.tmtv/recordings" 2>/dev/null || true
-	sleep 1
-else
-	skip "recording creates .cast file" "no server key fingerprints"
-	skip "cast file has v2 header" "no server key fingerprints"
-	skip "cast header contains width" "no server key fingerprints"
-	skip "cast header contains height" "no server key fingerprints"
-	skip "cast file contains output events" "no server key fingerprints"
-	skip "cast file contains resize events" "no server key fingerprints"
-	skip "recording stops writing after disable" "no server key fingerprints"
-	skip "re-enable creates new .cast file" "no server key fingerprints"
-fi
-
-# -------------------------------------------------------
 # Test: SSE OUT_STATUS contains non-empty left and right
 # -------------------------------------------------------
 # OUT_STATUS (type 5) is sent by the client when the status bar
@@ -2131,6 +1976,161 @@ else:
 else
 	skip "SSE OUT_STATUS has non-empty left and right (no token)"
 	skip "SSE OUT_STATUS right contains custom text (no token)"
+fi
+
+# -------------------------------------------------------
+# Test: asciinema recording (cast v2)
+# -------------------------------------------------------
+echo ""
+echo "-- Recording tests --"
+
+# We need the server key fingerprints for a fresh session
+if [ -n "$RSA_FP" ] || [ -n "$ED25519_FP" ]; then
+	REC_SESSNAME="rec$$"
+	REC_CONF="/tmp/.tmtv-test-rec-$TESTID.conf"
+
+	remote "cat > $REC_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$REC_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+	# Start session
+	remote "TERM=xterm-256color \
+		nohup script -qc '$REMOTE_TMTV -f $REC_CONF new-session -d -s main' \
+		/dev/null </dev/null >/dev/null 2>&1 &"
+	sleep 4
+
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null" | grep -q "main"; then
+		# Clean any previous recordings
+		remote "rm -rf /root/.tmtv/recordings/*" 2>/dev/null || true
+
+		# Enable recording
+		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording on"
+		sleep 1
+
+		# Type some output
+		remote "TERM=xterm-256color $REMOTE_TMTV send-keys 'echo hello-recording' Enter"
+		sleep 2
+
+		# Check .cast file exists
+		REC_FILE=$(remote "ls -t /root/.tmtv/recordings/*.cast 2>/dev/null | head -1" || echo "")
+		if [ -n "$REC_FILE" ]; then
+			pass "recording creates .cast file"
+		else
+			fail "recording creates .cast file" "no .cast file in /root/.tmtv/recordings/"
+		fi
+
+		# Verify cast v2 header
+		if [ -n "$REC_FILE" ]; then
+			REC_HEADER=$(remote "head -1 '$REC_FILE'" || echo "")
+			if echo "$REC_HEADER" | grep -q '"version":2'; then
+				pass "cast file has v2 header"
+			else
+				fail "cast file has v2 header" "header: $REC_HEADER"
+			fi
+
+			if echo "$REC_HEADER" | grep -q '"width"'; then
+				pass "cast header contains width"
+			else
+				fail "cast header contains width" "header: $REC_HEADER"
+			fi
+
+			if echo "$REC_HEADER" | grep -q '"height"'; then
+				pass "cast header contains height"
+			else
+				fail "cast header contains height" "header: $REC_HEADER"
+			fi
+		else
+			skip "cast file has v2 header" "no .cast file"
+			skip "cast header contains width" "no .cast file"
+			skip "cast header contains height" "no .cast file"
+		fi
+
+		# Verify output events exist
+		if [ -n "$REC_FILE" ]; then
+			REC_EVENTS=$(remote "grep -c '\"o\"' '$REC_FILE'" || echo "0")
+			if [ "$REC_EVENTS" -gt 0 ] 2>/dev/null; then
+				pass "cast file contains output events ($REC_EVENTS)"
+			else
+				fail "cast file contains output events" "got $REC_EVENTS events"
+			fi
+		else
+			skip "cast file contains output events" "no .cast file"
+		fi
+
+		# Test resize event: split window should trigger a resize
+		remote "TERM=xterm-256color $REMOTE_TMTV split-window"
+		sleep 2
+
+		if [ -n "$REC_FILE" ]; then
+			REC_RESIZE=$(remote "grep -c '\"r\"' '$REC_FILE'" || echo "0")
+			if [ "$REC_RESIZE" -gt 0 ] 2>/dev/null; then
+				pass "cast file contains resize events ($REC_RESIZE)"
+			else
+				fail "cast file contains resize events" "got $REC_RESIZE resize events"
+			fi
+		else
+			skip "cast file contains resize events" "no .cast file"
+		fi
+
+		# Disable recording
+		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording off"
+		sleep 1
+
+		# Type more output — should NOT be recorded
+		LINECOUNT_BEFORE=$(remote "wc -l < '$REC_FILE'" 2>/dev/null || echo "0")
+		remote "TERM=xterm-256color $REMOTE_TMTV send-keys 'echo after-stop' Enter"
+		sleep 2
+		LINECOUNT_AFTER=$(remote "wc -l < '$REC_FILE'" 2>/dev/null || echo "0")
+		if [ "$LINECOUNT_BEFORE" = "$LINECOUNT_AFTER" ]; then
+			pass "recording stops writing after disable"
+		else
+			fail "recording stops writing after disable" "lines before=$LINECOUNT_BEFORE after=$LINECOUNT_AFTER"
+		fi
+
+		# Test runtime toggle: re-enable, verify new file created
+		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording on"
+		sleep 1
+		remote "TERM=xterm-256color $REMOTE_TMTV send-keys 'echo second-recording' Enter"
+		sleep 2
+		REC_COUNT=$(remote "ls /root/.tmtv/recordings/*.cast 2>/dev/null | wc -l" || echo "0")
+		if [ "$REC_COUNT" -ge 2 ] 2>/dev/null; then
+			pass "re-enable creates new .cast file ($REC_COUNT files)"
+		else
+			fail "re-enable creates new .cast file" "only $REC_COUNT file(s)"
+		fi
+
+		# Disable again before cleanup
+		remote "TERM=xterm-256color $REMOTE_TMTV set-option -g tmtv-recording off" 2>/dev/null || true
+	else
+		skip "recording creates .cast file" "could not start session"
+		skip "cast file has v2 header" "could not start session"
+		skip "cast header contains width" "could not start session"
+		skip "cast header contains height" "could not start session"
+		skip "cast file contains output events" "could not start session"
+		skip "cast file contains resize events" "could not start session"
+		skip "recording stops writing after disable" "could not start session"
+		skip "re-enable creates new .cast file" "could not start session"
+	fi
+
+	# Cleanup
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+	remote "rm -f $REC_CONF" 2>/dev/null || true
+	remote "rm -rf /root/.tmtv/recordings" 2>/dev/null || true
+	sleep 1
+else
+	skip "recording creates .cast file" "no server key fingerprints"
+	skip "cast file has v2 header" "no server key fingerprints"
+	skip "cast header contains width" "no server key fingerprints"
+	skip "cast header contains height" "no server key fingerprints"
+	skip "cast file contains output events" "no server key fingerprints"
+	skip "cast file contains resize events" "no server key fingerprints"
+	skip "recording stops writing after disable" "no server key fingerprints"
+	skip "re-enable creates new .cast file" "no server key fingerprints"
 fi
 
 # -------------------------------------------------------
