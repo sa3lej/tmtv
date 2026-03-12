@@ -1318,6 +1318,20 @@ if [ -n "$ANON_TOKEN" ]; then
 	else
 		fail "anon session: web input reaches SSH (web → SSH)" "marker not in capture"
 	fi
+
+	# UTF-8 web input: POST non-ASCII characters, verify they arrive intact
+	UTF8_MARKER="UTF8_öäå_${TESTID}"
+	curl -s -m 3 -X POST -H "Content-Type: text/plain; charset=utf-8" -H "X-Tmtv-Input: 1" \
+		--data-binary "echo ${UTF8_MARKER}" "$SSE_BASE/$ANON_TOKEN/input" >/dev/null 2>&1
+	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		--data-binary @- "$SSE_BASE/$ANON_TOKEN/input" >/dev/null 2>&1
+	sleep 2
+	UTF8_CAP=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
+	if echo "$UTF8_CAP" | grep -q "$UTF8_MARKER"; then
+		pass "anon session: UTF-8 web input reaches SSH (öäå)"
+	else
+		fail "anon session: UTF-8 web input reaches SSH (öäå)" "marker not in capture"
+	fi
 else
 	skip "anon session web input tests" "could not find session token"
 fi

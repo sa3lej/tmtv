@@ -17,7 +17,7 @@ MSGPACK_LIBS := $(shell pkg-config --libs msgpack-c 2>/dev/null || pkg-config --
 LIBSSH_CFLAGS := $(shell pkg-config --cflags libssh 2>/dev/null)
 LIBEVENT_CFLAGS := $(shell pkg-config --cflags libevent 2>/dev/null)
 
-UNIT_TESTS = test-msgpack
+UNIT_TESTS = test-msgpack test-version-compare
 SERVER_TESTS = test-server-header
 TMTV ?= ../tmtv
 
@@ -37,6 +37,9 @@ server-unit: $(SERVER_TESTS)
 
 test-msgpack: test-msgpack.c test-harness.h
 	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) -o $@ $< $(LDFLAGS) $(MSGPACK_LIBS)
+
+test-version-compare: test-version-compare.c test-harness.h
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 # Extract DEFS and CPPFLAGS from parent Makefile (configure-generated flags)
 PARENT_DEFS := $(shell $(MAKE) -C .. -n -p 2>/dev/null | grep '^DEFS = ' | head -1 | sed 's/^DEFS = //')

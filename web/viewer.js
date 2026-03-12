@@ -343,7 +343,7 @@
       inputBatchTimer = setTimeout(function() {
         inputBatchTimer = null;
         sendInputBatch();
-      }, 30);
+      }, 5);
     }
   }
 
