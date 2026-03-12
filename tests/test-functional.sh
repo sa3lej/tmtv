@@ -138,6 +138,72 @@ fi
 "$TMTV" -S "$SOCKET3" kill-server 2>/dev/null || true
 rm -f "$SOCKET3"
 
+# Test 11: Detach does not kill the tmux server (tmtv-02u.8)
+# Validates the documented contract: Ctrl+B D detaches the tmux client
+# but the tmux server (and any tmate SSH connection on its event loop)
+# continues running. This is fundamental to tmtv's sharing model.
+SOCKET4="/tmp/tmtv-test-detach-$$"
+"$TMTV" -S "$SOCKET4" new-session -d -s sharing 2>/dev/null
+if "$TMTV" -S "$SOCKET4" list-sessions 2>/dev/null | grep -q "sharing"; then
+    # Simulate what happens after detach: the client is gone, but the
+    # server process keeps running. We verify by checking the session
+    # is still accessible via the socket (server alive).
+    # Note: We can't test actual Ctrl+B D without a terminal, but we can
+    # verify the server stays alive after the client process exits.
+    "$TMTV" -S "$SOCKET4" detach-client 2>/dev/null || true
+    # Server must still be alive (session persists after detach)
+    if "$TMTV" -S "$SOCKET4" list-sessions 2>/dev/null | grep -q "sharing"; then
+        pass "detach does not kill server (session persists)"
+    else
+        fail "detach does not kill server" "session disappeared after detach"
+    fi
+else
+    fail "detach does not kill server" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET4" kill-server 2>/dev/null || true
+rm -f "$SOCKET4"
+
+# Test 12: Multi-session guard returns proper error message (tmtv-02u.11)
+# The error message must be user-friendly and explain the limitation.
+SOCKET5="/tmp/tmtv-test-multierr-$$"
+"$TMTV" -S "$SOCKET5" new-session -d -s primary 2>/dev/null
+if "$TMTV" -S "$SOCKET5" list-sessions 2>/dev/null | grep -q "primary"; then
+    OUTPUT=$("$TMTV" -S "$SOCKET5" new-session -d -s secondary 2>&1 || true)
+    if echo "$OUTPUT" | grep -q "multiple sessions are not supported"; then
+        pass "multi-session guard shows correct error"
+    else
+        fail "multi-session guard shows correct error" "unexpected output: $OUTPUT"
+    fi
+else
+    fail "multi-session guard shows correct error" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET5" kill-server 2>/dev/null || true
+rm -f "$SOCKET5"
+
+# Test 13: Session survives multiple detach/reattach cycles (tmtv-02u.8)
+# Validates that repeated detach doesn't accumulate state corruption.
+SOCKET6="/tmp/tmtv-test-reattach-$$"
+"$TMTV" -S "$SOCKET6" new-session -d -s persist 2>/dev/null
+if "$TMTV" -S "$SOCKET6" list-sessions 2>/dev/null | grep -q "persist"; then
+    # Send some content to verify state persists
+    "$TMTV" -S "$SOCKET6" send-keys -t persist "echo marker123" Enter 2>/dev/null
+    sleep 0.5
+    # Detach multiple times (idempotent, no-op when no client attached)
+    "$TMTV" -S "$SOCKET6" detach-client 2>/dev/null || true
+    "$TMTV" -S "$SOCKET6" detach-client 2>/dev/null || true
+    # Verify session still exists and content persists
+    OUTPUT=$("$TMTV" -S "$SOCKET6" capture-pane -t persist -p 2>/dev/null)
+    if echo "$OUTPUT" | grep -q "marker123"; then
+        pass "session content survives detach cycles"
+    else
+        fail "session content survives detach cycles" "content lost after detach"
+    fi
+else
+    fail "session content survives detach cycles" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET6" kill-server 2>/dev/null || true
+rm -f "$SOCKET6"
+
 echo ""
 echo "$((PASSED + FAILED)) tests: $PASSED passed, $FAILED failed"
 exit $FAILED

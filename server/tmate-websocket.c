@@ -1143,7 +1143,17 @@ tmate_web_input_key(int pane_id, key_code key)
 		if (c->flags & CLIENT_READONLY)
 			continue;
 
-		/* Found a suitable client — inject through tmux key handler */
+		/*
+		 * Don't inject keys through a client that has an active
+		 * overlay (popup, menu, display-panes) —
+		 * server_client_handle_key would dismiss it.
+		 */
+		if (c->overlay_draw != NULL) {
+			tmate_client_pane_key(pane_id, key);
+			return;
+		}
+
+		/* Inject through tmux key handler for binding support */
 		struct key_event *event = xcalloc(1, sizeof *event);
 		event->key = key;
 		if (!server_client_handle_key(c, event)) {
