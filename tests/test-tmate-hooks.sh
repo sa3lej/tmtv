@@ -140,6 +140,38 @@ else
     pass "binary embeds version string ($EMBEDDED_VER)"
 fi
 
+# Test 13: tmate_expand_status symbol linked (detached status fix)
+if nm "$TMTV" 2>/dev/null | grep -q "tmate_expand_status"; then
+    pass "tmate_expand_status symbol linked"
+else
+    fail "tmate_expand_status symbol linked" "symbol not found in binary"
+fi
+
+# Test 14: tmate_start_status_timer symbol linked (detached status fix)
+if nm "$TMTV" 2>/dev/null | grep -q "tmate_start_status_timer"; then
+    pass "tmate_start_status_timer symbol linked"
+else
+    fail "tmate_start_status_timer symbol linked" "symbol not found in binary"
+fi
+
+# Test 15: status-left is readable in detached session (core scenario)
+# This validates that detached sessions have status options available
+# for the periodic timer to expand
+OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g status-left 2>/dev/null || echo "MISSING")
+if echo "$OUTPUT" | grep -q "status-left"; then
+    pass "status-left option accessible in detached session"
+else
+    fail "status-left option accessible in detached session" "got: $OUTPUT"
+fi
+
+# Test 16: status-right is readable in detached session
+OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g status-right 2>/dev/null || echo "MISSING")
+if echo "$OUTPUT" | grep -q "status-right"; then
+    pass "status-right option accessible in detached session"
+else
+    fail "status-right option accessible in detached session" "got: $OUTPUT"
+fi
+
 # Cleanup
 "$TMTV" -S "$SOCKET" kill-server 2>/dev/null || true
 

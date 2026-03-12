@@ -241,6 +241,9 @@ void tmate_session_start(void)
 	tmate_write_uname();
 	tmate_write_ready();
 	lookup_and_connect();
+
+	/* Start periodic status timer for detached sessions */
+	tmate_start_status_timer(&tmate_session);
 }
 
 static void on_reconnect_retry(__unused evutil_socket_t fd, __unused short what, void *arg)

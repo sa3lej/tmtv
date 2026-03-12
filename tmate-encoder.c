@@ -299,6 +299,64 @@ void tmate_status(const char *left, const char *right)
 	old_right = xstrdup(right);
 }
 
+/*
+ * Expand status-left and status-right without requiring an attached client.
+ * This is the mechanism that ensures detached sessions (new-session -d)
+ * still send OUT_STATUS to the server for web viewers and SSH viewers.
+ */
+void tmate_expand_status(void)
+{
+	struct session		*s;
+	struct format_tree	*ft;
+	char			*left, *right;
+
+	s = RB_MIN(sessions, &sessions);
+	if (s == NULL)
+		return;
+
+	ft = format_create(NULL, NULL, FORMAT_NONE, FORMAT_STATUS);
+	format_defaults(ft, NULL, s, NULL, NULL);
+
+	left = format_expand_time(ft, options_get_string(s->options,
+	    "status-left"));
+	right = format_expand_time(ft, options_get_string(s->options,
+	    "status-right"));
+
+	tmate_status(left, right);
+
+	free(right);
+	free(left);
+	format_free(ft);
+}
+
+#define TMATE_STATUS_INTERVAL 2  /* seconds */
+
+static void on_status_timer(__unused evutil_socket_t fd, __unused short what,
+			    void *arg)
+{
+	struct tmate_session *session = arg;
+	struct timeval tv = { .tv_sec = TMATE_STATUS_INTERVAL, .tv_usec = 0 };
+
+	tmate_expand_status();
+
+	/* Re-arm the timer */
+	evtimer_add(session->ev_status_timer, &tv);
+}
+
+void tmate_start_status_timer(struct tmate_session *session)
+{
+	struct timeval tv = { .tv_sec = TMATE_STATUS_INTERVAL, .tv_usec = 0 };
+
+	if (session->ev_status_timer != NULL)
+		return;
+
+	session->ev_status_timer = evtimer_new(session->ev_base,
+	    on_status_timer, session);
+	if (session->ev_status_timer == NULL)
+		tmate_fatal("out of memory");
+	evtimer_add(session->ev_status_timer, &tv);
+}
+
 void tmate_sync_copy_mode(struct window_pane *wp)
 {
 	struct window_mode_entry *wme;
@@ -475,4 +533,7 @@ void tmate_send_reconnection_state(struct tmate_session *session)
 
 	tmate_sync_layout();
 	tmate_send_session_snapshot(RECONNECTION_MAX_HISTORY_LINE);
+
+	/* Send current status so late-joining viewers get it immediately */
+	tmate_expand_status();
 }

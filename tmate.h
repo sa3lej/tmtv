@@ -92,6 +92,8 @@ extern void tmate_exec_cmd_args(int argc, const char **argv);
 extern void tmate_exec_cmd(struct cmd *cmd);
 extern void tmate_failed_cmd(int client_id, const char *cause);
 extern void tmate_status(const char *left, const char *right);
+extern void tmate_expand_status(void);
+extern void tmate_start_status_timer(struct tmate_session *session);
 extern void tmate_sync_copy_mode(struct window_pane *wp);
 extern void tmate_write_copy_mode(struct window_pane *wp, const char *str);
 extern void tmate_write_fin(void);
@@ -179,6 +181,7 @@ struct tmate_session {
 
 	bool reconnected;
 	struct event *ev_connection_retry;
+	struct event *ev_status_timer;
 	char *last_server_ip;
 	char *reconnection_data;
 	/*
