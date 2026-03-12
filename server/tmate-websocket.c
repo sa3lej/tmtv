@@ -1152,38 +1152,33 @@ static void handle_post_input(struct ws_client *wc)
 		return;
 	}
 
-	/* Forward input as keys, decoding UTF-8 into codepoints */
+	/* Forward input as keys, building tmux utf8_char for multibyte */
 	for (i = 0; i < len; ) {
 		unsigned char c = data[i];
-		key_code cp;
-		int seqlen;
 
 		if (c < 0x80) {
-			cp = c;
-			seqlen = 1;
-		} else if ((c & 0xE0) == 0xC0 && i + 1 < len) {
-			cp = (c & 0x1F) << 6 |
-			     (data[i+1] & 0x3F);
-			seqlen = 2;
-		} else if ((c & 0xF0) == 0xE0 && i + 2 < len) {
-			cp = (c & 0x0F) << 12 |
-			     (data[i+1] & 0x3F) << 6 |
-			     (data[i+2] & 0x3F);
-			seqlen = 3;
-		} else if ((c & 0xF8) == 0xF0 && i + 3 < len) {
-			cp = (c & 0x07) << 18 |
-			     (data[i+1] & 0x3F) << 12 |
-			     (data[i+2] & 0x3F) << 6 |
-			     (data[i+3] & 0x3F);
-			seqlen = 4;
+			/* ASCII byte — send directly */
+			tmate_client_pane_key(-1, (key_code)c);
+			i++;
 		} else {
-			/* Invalid or incomplete UTF-8, send byte as-is */
-			cp = c;
-			seqlen = 1;
-		}
+			struct utf8_data ud;
+			utf8_char uc;
+			enum utf8_state more;
 
-		tmate_client_pane_key(-1, cp);
-		i += seqlen;
+			more = utf8_open(&ud, c);
+			i++;
+			while (i < len && more == UTF8_MORE)
+				more = utf8_append(&ud, data[i++]);
+
+			if (more == UTF8_DONE &&
+			    utf8_from_data(&ud, &uc) == UTF8_DONE) {
+				tmate_client_pane_key(-1, (key_code)uc);
+			} else {
+				/* Invalid UTF-8 — skip */
+				tmate_debug("POST input: skipping "
+				    "invalid UTF-8 at offset %zu", i);
+			}
+		}
 	}
 
 	tmate_debug("POST input: forwarded %zu bytes", len);
@@ -1491,40 +1486,35 @@ static void ctl_pane_keys(struct tmate_session *session,
 		return;
 	}
 
-	/* Forward input as keys, decoding UTF-8 into codepoints */
+	/* Forward input as keys, building tmux utf8_char for multibyte */
 	for (i = 0; str[i]; ) {
 		unsigned char c = (unsigned char)str[i];
-		key_code cp;
-		int seqlen;
 
 		if (c < 0x80) {
-			cp = c;
-			seqlen = 1;
-		} else if ((c & 0xE0) == 0xC0 && str[i+1]) {
-			cp = (c & 0x1F) << 6 |
-			     ((unsigned char)str[i+1] & 0x3F);
-			seqlen = 2;
-		} else if ((c & 0xF0) == 0xE0 && str[i+1] && str[i+2]) {
-			cp = (c & 0x0F) << 12 |
-			     ((unsigned char)str[i+1] & 0x3F) << 6 |
-			     ((unsigned char)str[i+2] & 0x3F);
-			seqlen = 3;
-		} else if ((c & 0xF8) == 0xF0 && str[i+1] && str[i+2] && str[i+3]) {
-			cp = (c & 0x07) << 18 |
-			     ((unsigned char)str[i+1] & 0x3F) << 12 |
-			     ((unsigned char)str[i+2] & 0x3F) << 6 |
-			     ((unsigned char)str[i+3] & 0x3F);
-			seqlen = 4;
+			tmate_client_pane_key(pane_id, (key_code)c);
+			i++;
 		} else {
-			cp = c;
-			seqlen = 1;
-		}
+			struct utf8_data ud;
+			utf8_char uc;
+			enum utf8_state more;
 
-		tmate_client_pane_key(pane_id, cp);
-		i += seqlen;
+			more = utf8_open(&ud, c);
+			i++;
+			while (str[i] && more == UTF8_MORE)
+				more = utf8_append(&ud,
+				    (unsigned char)str[i++]);
+
+			if (more == UTF8_DONE &&
+			    utf8_from_data(&ud, &uc) == UTF8_DONE) {
+				tmate_client_pane_key(pane_id, (key_code)uc);
+			} else {
+				tmate_debug("ws input: skipping "
+				    "invalid UTF-8 at offset %zu", i);
+			}
+		}
 	}
 
-	tmate_debug("Forwarded UTF-8 keys from websocket to pane %d", pane_id);
+	tmate_debug("Forwarded keys from websocket to pane %d", pane_id);
 	free(str);
 }
 
