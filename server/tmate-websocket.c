@@ -1079,26 +1079,41 @@ void tmate_send_fin_to_ws_clients(struct tmate_session *session)
 {
 	struct ws_client *wc;
 	int fd;
+	msgpack_sbuffer sbuf;
+	msgpack_packer pk;
+	int b64_len;
+	unsigned char *b64;
+	char sse_buf[256];
+	int sse_len;
 
+	/* Build the FIN msgpack payload once */
+	msgpack_sbuffer_init(&sbuf);
+	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+	msgpack_pack_array(&pk, 1);
+	msgpack_pack_int(&pk, TMATE_OUT_FIN);
+
+	/* Base64-encode it */
+	b64_len = 4 * ((sbuf.size + 2) / 3);
+	b64 = xmalloc(b64_len + 1);
+	EVP_EncodeBlock(b64, (unsigned char *)sbuf.data, sbuf.size);
+
+	/* Format as SSE event */
+	sse_len = snprintf(sse_buf, sizeof(sse_buf), "data: %s\n\n", b64);
+
+	free(b64);
+	msgpack_sbuffer_destroy(&sbuf);
+
+	/* Write directly to each client's socket fd — bypasses
+	 * bufferevent entirely so the data reaches the kernel
+	 * send buffer before SIGTERM kills the process. */
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
 		if (!wc->handshake_done || wc->is_post)
 			continue;
-		sse_send_fin(wc->bev);
-		/* Flush the FIN to the kernel socket buffer so it survives
-		 * process exit.  bufferevent_flush() pushes the write buffer
-		 * into the fd via the underlying evbuffer. */
 		fd = bufferevent_getfd(wc->bev);
-		if (fd >= 0) {
-			struct evbuffer *out = bufferevent_get_output(wc->bev);
-			if (out && evbuffer_get_length(out) > 0) {
-				/* Write directly to the fd to bypass event loop */
-				unsigned char *data;
-				size_t len = evbuffer_get_length(out);
-				data = evbuffer_pullup(out, len);
-				if (data)
-					write(fd, data, len);
-			}
-		}
+		if (fd >= 0)
+			write(fd, sse_buf, sse_len);
 	}
 }
 
