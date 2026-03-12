@@ -1192,12 +1192,12 @@ if [ -n "$WI_TOKEN" ]; then
 	fi
 
 	# Test: POST input to RO token returns 403
-	WI_RO_TOKEN=$(remote "readlink $SESSIONS_DIR/ro-$WI_SESSNAME 2>/dev/null || \
-		ls $SESSIONS_DIR/ 2>/dev/null | grep '^ro-'" || echo "")
-	if [ -n "$WI_RO_TOKEN" ]; then
+	# Use the named RO token directly (ro-SESSNAME), not readlink (which
+	# gives the RW token the symlink points to)
+	if remote "test -L $SESSIONS_DIR/ro-$WI_SESSNAME"; then
 		WI_RO_POST_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
 			-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
-			"$SSE_BASE/$WI_RO_TOKEN/input" 2>/dev/null || echo "000")
+			"$SSE_BASE/ro-$WI_SESSNAME/input" 2>/dev/null || echo "000")
 		if [ "$WI_RO_POST_CODE" = "403" ]; then
 			pass "POST input to RO token returns 403"
 		else
@@ -1258,7 +1258,7 @@ if [ -n "$WI_TOKEN" ]; then
 	fi
 
 	# Test: Disable web input, POST should return 403
-	remote_tmtv "set-option -t main tmtv-set tmtv-web-input=off"
+	remote_tmtv "set-option -g tmtv-web-input off"
 	sleep 1
 	WI_OFF_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
 		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "blocked" \
