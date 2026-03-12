@@ -115,7 +115,7 @@ session_create(const char *prefix, const char *name, const char *cwd,
 	struct session	*s;
 
 #ifdef TMATE
-	if (next_session_id != 0) {
+	if (!RB_EMPTY(&sessions)) {
 		tmate_info("multi sessions is not supported with tmtv");
 		return (NULL);
 	}
@@ -237,6 +237,8 @@ session_destroy(struct session *s, int notify, const char *from)
 	session_remove_ref(s, __func__);
 
 #ifdef TMATE
+	if (tmtv_recording_active())
+		tmtv_recording_stop();
 	tmate_info("Session closed");
 	tmate_write_fin();
 #endif

@@ -142,6 +142,7 @@ extern void tmate_dispatch_daemon_message(struct tmate_session *session,
 
 extern void tmate_spawn_daemon(struct tmate_session *session);
 extern void tmate_hook_set_option(const char *name, const char *val);
+extern void tmate_ensure_idle_timer(struct tmate_session *session);
 
 /* tmate-ssh-exec.c */
 extern void tmate_spawn_exec(struct tmate_session *session);
@@ -282,6 +283,7 @@ struct tmate_session {
 	time_t last_pty_activity; /* time of last PTY data from host client */
 	time_t session_start;     /* time the daemon session started */
 	struct event *ev_idle_timer; /* periodic timer for idle/lifetime checks */
+	int link_ttl;             /* per-session TTL in seconds, 0 = no limit */
 
 	/* only for role client-pty */
 	int pty;

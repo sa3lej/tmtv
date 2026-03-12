@@ -37,6 +37,7 @@ site/node_modules/
 site/dist/
 site/.astro/
 .claude/
+STAGING.md
 
 # Dolt database files (added by bd init)
 .dolt/

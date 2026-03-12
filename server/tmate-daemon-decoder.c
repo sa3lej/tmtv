@@ -14,13 +14,17 @@ void tmate_send_web_url(struct tmate_session *session)
 	const char *url_token = session->session_token_named ?
 				session->session_token_named :
 				session->session_token;
-	char *web_url;
+	char *web_url, *short_url;
 	xasprintf(&web_url, "https://%s/s/%s",
 		  tmate_settings->tmate_host,
 		  url_token);
-	tmate_notify("web session: %s", web_url);
-	tmate_set_env("tmtv_web", web_url);
+	xasprintf(&short_url, "https://%s/j/%s",
+		  tmate_settings->tmate_host,
+		  url_token);
+	tmate_notify("web session: %s", short_url);
+	tmate_set_env("tmtv_web", short_url);
 	free(web_url);
+	free(short_url);
 }
 
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_1 "Server requires authorized_keys but none are given."
@@ -55,6 +59,16 @@ static void tmate_send_session_urls(struct tmate_session *session)
 
 	if (session->web_sharing_enabled)
 		tmate_send_web_url(session);
+
+	/* Notify user about TTL if set */
+	if (session->link_ttl > 0) {
+		if (session->link_ttl >= 60)
+			tmate_notify("Session expires in %dm",
+				     session->link_ttl / 60);
+		else
+			tmate_notify("Session expires in %ds",
+				     session->link_ttl);
+	}
 }
 
 static void tmate_ready(struct tmate_session *session,
@@ -74,7 +88,7 @@ static void tmate_ready(struct tmate_session *session,
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_1);
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_2);
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_3);
-		tmate_notify("");
+		tmate_notify("%s", "");
 		kill(getpid(), SIGTERM);
 	}
 
