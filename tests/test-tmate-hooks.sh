@@ -92,6 +92,14 @@ else
     fail "tmtv-session-name option exists" "option not found: $OUTPUT"
 fi
 
+# Test 7c: tmtv-web-input option
+OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g tmtv-web-input 2>/dev/null || echo "MISSING")
+if echo "$OUTPUT" | grep -q "tmtv-web-input"; then
+    pass "tmtv-web-input option exists"
+else
+    fail "tmtv-web-input option exists" "option not found: $OUTPUT"
+fi
+
 # Test 8: Core tmux still works with hooks (regression)
 "$TMTV" -S "$SOCKET" new-window -t hooktest 2>/dev/null
 OUTPUT=$("$TMTV" -S "$SOCKET" list-windows -t hooktest 2>/dev/null)
