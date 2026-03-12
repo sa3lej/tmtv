@@ -550,16 +550,16 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 		}
 	}
 
+	/* Check named web token (bare name, e.g. "claude") — this is
+	 * the primary web viewer URL, treat as RW like session_token */
 	token = s->session_token_named;
 	if (token) {
 		tlen = strlen(token);
-		if (tlen == token_only_len && memcmp(path, token, tlen) == 0) {
-			wc->readonly = true;
+		if (tlen == token_only_len && memcmp(path, token, tlen) == 0)
 			return 0;
-		}
 	}
 
-	/* Check RW named token */
+	/* Check RW named token (e.g. "12345-claude") */
 	token = s->session_token_rw_named;
 	if (token) {
 		tlen = strlen(token);

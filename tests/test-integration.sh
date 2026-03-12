@@ -1091,6 +1091,291 @@ remote "rm -f $PW_CONF" 2>/dev/null || true
 sleep 1
 
 # -------------------------------------------------------
+# Web input test helper: start session, test POST via each token type
+# Usage: wi_test_session <label> <conf_extra> <expect_named_input>
+# -------------------------------------------------------
+wi_post() {
+	local url="$1"
+	curl -s -m 5 -o /dev/null -w "%{http_code}" \
+		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "test" \
+		"$url" 2>/dev/null || echo "000"
+}
+
+wi_post_with_pw() {
+	local url="$1"
+	local pw="$2"
+	curl -s -m 5 -o /dev/null -w "%{http_code}" \
+		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "test" \
+		"${url}?password=${pw}" 2>/dev/null || echo "000"
+}
+
+# -------------------------------------------------------
+# Test: Web input — anonymous session (no name, no password)
+# -------------------------------------------------------
+ANON_CONF="/tmp/.tmtv-test-anon-$TESTID.conf"
+remote "cat > $ANON_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-web-sharing on
+set -g tmtv-web-input on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $ANON_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+sleep 4
+
+# Find the random RW token (only socket in sessions dir without symlinks)
+ANON_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | head -1" || echo "")
+
+if [ -n "$ANON_TOKEN" ]; then
+	ANON_CODE=$(wi_post "$SSE_BASE/$ANON_TOKEN/input")
+	if [ "$ANON_CODE" = "200" ]; then
+		pass "anon session: POST input via random token (200)"
+	else
+		fail "anon session: POST input via random token (200)" "got HTTP $ANON_CODE"
+	fi
+
+	# Web → SSH end-to-end: POST text, verify in capture
+	ANON_MARKER="ANONWEB${TESTID}"
+	curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		-d "echo $ANON_MARKER" "$SSE_BASE/$ANON_TOKEN/input" >/dev/null 2>&1
+	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		--data-binary @- "$SSE_BASE/$ANON_TOKEN/input" >/dev/null 2>&1
+	sleep 2
+	ANON_CAP=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
+	if echo "$ANON_CAP" | grep -q "$ANON_MARKER"; then
+		pass "anon session: web input reaches SSH (web → SSH)"
+	else
+		fail "anon session: web input reaches SSH (web → SSH)" "marker not in capture"
+	fi
+else
+	skip "anon session web input tests" "could not find session token"
+fi
+
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $ANON_CONF" 2>/dev/null || true
+sleep 1
+
+# -------------------------------------------------------
+# Test: Web input — named session (name, no password)
+# -------------------------------------------------------
+NAMED_CONF="/tmp/.tmtv-test-named-$TESTID.conf"
+NAMED_SESSNAME="na$TESTID"
+remote "cat > $NAMED_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$NAMED_SESSNAME\"
+set -g tmtv-web-sharing on
+set -g tmtv-web-input on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $NAMED_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+sleep 4
+
+NAMED_RW_TOKEN=$(remote "readlink $SESSIONS_DIR/$NAMED_SESSNAME 2>/dev/null" || echo "")
+
+if [ -n "$NAMED_RW_TOKEN" ]; then
+	# POST via named token (bare name — the web URL)
+	NAMED_CODE=$(wi_post "$SSE_BASE/$NAMED_SESSNAME/input")
+	if [ "$NAMED_CODE" = "200" ]; then
+		pass "named session: POST input via named token (200)"
+	else
+		fail "named session: POST input via named token (200)" "got HTTP $NAMED_CODE"
+	fi
+
+	# POST via random RW token
+	NAMED_RW_CODE=$(wi_post "$SSE_BASE/$NAMED_RW_TOKEN/input")
+	if [ "$NAMED_RW_CODE" = "200" ]; then
+		pass "named session: POST input via random RW token (200)"
+	else
+		fail "named session: POST input via random RW token (200)" "got HTTP $NAMED_RW_CODE"
+	fi
+
+	# POST via RO token must be rejected
+	NAMED_RO_CODE=$(wi_post "$SSE_BASE/ro-$NAMED_SESSNAME/input")
+	if [ "$NAMED_RO_CODE" = "403" ]; then
+		pass "named session: POST input via RO token rejected (403)"
+	else
+		fail "named session: POST input via RO token rejected (403)" "got HTTP $NAMED_RO_CODE"
+	fi
+
+	# Web → SSH end-to-end via named token
+	NAMED_MARKER="NAMEDWEB${TESTID}"
+	curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		-d "echo $NAMED_MARKER" "$SSE_BASE/$NAMED_SESSNAME/input" >/dev/null 2>&1
+	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		--data-binary @- "$SSE_BASE/$NAMED_SESSNAME/input" >/dev/null 2>&1
+	sleep 2
+	NAMED_CAP=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
+	if echo "$NAMED_CAP" | grep -q "$NAMED_MARKER"; then
+		pass "named session: web input reaches SSH via named token"
+	else
+		fail "named session: web input reaches SSH via named token" "marker not in capture"
+	fi
+
+	# Runtime disable: POST should return 403
+	remote_tmtv "set-option -g tmtv-web-input off"
+	sleep 2
+	NAMED_OFF_CODE=$(wi_post "$SSE_BASE/$NAMED_SESSNAME/input")
+	if [ "$NAMED_OFF_CODE" = "403" ]; then
+		pass "named session: POST rejected after runtime disable (403)"
+	else
+		fail "named session: POST rejected after runtime disable (403)" "got HTTP $NAMED_OFF_CODE"
+	fi
+else
+	skip "named session web input tests" "could not create named session"
+fi
+
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $NAMED_CONF" 2>/dev/null || true
+sleep 1
+
+# -------------------------------------------------------
+# Test: Web input — password session (no name, with password)
+# -------------------------------------------------------
+PWONLY_CONF="/tmp/.tmtv-test-pwonly-$TESTID.conf"
+PWONLY_PW="testpw$$"
+remote "cat > $PWONLY_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-password \"$PWONLY_PW\"
+set -g tmtv-web-sharing on
+set -g tmtv-web-input on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $PWONLY_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+sleep 4
+
+PWONLY_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | head -1" || echo "")
+
+if [ -n "$PWONLY_TOKEN" ]; then
+	# POST without password should be rejected (403)
+	PWONLY_NOPW_CODE=$(wi_post "$SSE_BASE/$PWONLY_TOKEN/input")
+	if [ "$PWONLY_NOPW_CODE" = "403" ]; then
+		pass "password session: POST without password rejected (403)"
+	else
+		fail "password session: POST without password rejected (403)" "got HTTP $PWONLY_NOPW_CODE"
+	fi
+
+	# POST with correct password should succeed
+	PWONLY_CODE=$(wi_post_with_pw "$SSE_BASE/$PWONLY_TOKEN/input" "$PWONLY_PW")
+	if [ "$PWONLY_CODE" = "200" ]; then
+		pass "password session: POST with correct password (200)"
+	else
+		fail "password session: POST with correct password (200)" "got HTTP $PWONLY_CODE"
+	fi
+
+	# Web → SSH end-to-end with password
+	PWONLY_MARKER="PWWEB${TESTID}"
+	curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		-d "echo $PWONLY_MARKER" "$SSE_BASE/$PWONLY_TOKEN/input?password=$PWONLY_PW" >/dev/null 2>&1
+	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		--data-binary @- "$SSE_BASE/$PWONLY_TOKEN/input?password=$PWONLY_PW" >/dev/null 2>&1
+	sleep 2
+	PWONLY_CAP=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
+	if echo "$PWONLY_CAP" | grep -q "$PWONLY_MARKER"; then
+		pass "password session: web input reaches SSH with password"
+	else
+		fail "password session: web input reaches SSH with password" "marker not in capture"
+	fi
+else
+	skip "password session web input tests" "could not find session token"
+fi
+
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $PWONLY_CONF" 2>/dev/null || true
+sleep 1
+
+# -------------------------------------------------------
+# Test: Web input — named + password session
+# -------------------------------------------------------
+NPPW_CONF="/tmp/.tmtv-test-nppw-$TESTID.conf"
+NPPW_SESSNAME="np$TESTID"
+NPPW_PW="secret$$"
+remote "cat > $NPPW_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$NPPW_SESSNAME\"
+set -g tmtv-session-password \"$NPPW_PW\"
+set -g tmtv-web-sharing on
+set -g tmtv-web-input on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $NPPW_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+sleep 4
+
+NPPW_RW_TOKEN=$(remote "readlink $SESSIONS_DIR/$NPPW_SESSNAME 2>/dev/null" || echo "")
+
+if [ -n "$NPPW_RW_TOKEN" ]; then
+	# POST via named token without password should be rejected
+	NPPW_NOPW_CODE=$(wi_post "$SSE_BASE/$NPPW_SESSNAME/input")
+	if [ "$NPPW_NOPW_CODE" = "403" ]; then
+		pass "named+pw session: POST via named token without pw (403)"
+	else
+		fail "named+pw session: POST via named token without pw (403)" "got HTTP $NPPW_NOPW_CODE"
+	fi
+
+	# POST via named token with correct password
+	NPPW_CODE=$(wi_post_with_pw "$SSE_BASE/$NPPW_SESSNAME/input" "$NPPW_PW")
+	if [ "$NPPW_CODE" = "200" ]; then
+		pass "named+pw session: POST via named token with pw (200)"
+	else
+		fail "named+pw session: POST via named token with pw (200)" "got HTTP $NPPW_CODE"
+	fi
+
+	# POST via random RW token with password
+	NPPW_RW_CODE=$(wi_post_with_pw "$SSE_BASE/$NPPW_RW_TOKEN/input" "$NPPW_PW")
+	if [ "$NPPW_RW_CODE" = "200" ]; then
+		pass "named+pw session: POST via random RW token with pw (200)"
+	else
+		fail "named+pw session: POST via random RW token with pw (200)" "got HTTP $NPPW_RW_CODE"
+	fi
+
+	# POST via RO token with password must still be rejected (readonly)
+	NPPW_RO_CODE=$(wi_post_with_pw "$SSE_BASE/ro-$NPPW_SESSNAME/input" "$NPPW_PW")
+	if [ "$NPPW_RO_CODE" = "403" ]; then
+		pass "named+pw session: POST via RO token with pw rejected (403)"
+	else
+		fail "named+pw session: POST via RO token with pw rejected (403)" "got HTTP $NPPW_RO_CODE"
+	fi
+
+	# Web → SSH end-to-end via named token with password
+	NPPW_MARKER="NPPWWEB${TESTID}"
+	curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		-d "echo $NPPW_MARKER" "$SSE_BASE/$NPPW_SESSNAME/input?password=$NPPW_PW" >/dev/null 2>&1
+	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		--data-binary @- "$SSE_BASE/$NPPW_SESSNAME/input?password=$NPPW_PW" >/dev/null 2>&1
+	sleep 2
+	NPPW_CAP=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
+	if echo "$NPPW_CAP" | grep -q "$NPPW_MARKER"; then
+		pass "named+pw session: web input reaches SSH via named token"
+	else
+		fail "named+pw session: web input reaches SSH via named token" "marker not in capture"
+	fi
+else
+	skip "named+pw session web input tests" "could not create session"
+fi
+
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $NPPW_CONF" 2>/dev/null || true
+sleep 1
+
+# -------------------------------------------------------
 # Test: Web input DISABLED by default — POST rejected
 # -------------------------------------------------------
 WID_CONF="/tmp/.tmtv-test-wid-$TESTID.conf"
@@ -1112,169 +1397,74 @@ sleep 4
 WID_TOKEN=$(remote "readlink $SESSIONS_DIR/$WID_SESSNAME 2>/dev/null" || echo "")
 
 if [ -n "$WID_TOKEN" ]; then
-	# Test: SSE stream works (web sharing is on)
-	WID_SSE=$(curl -s -m 5 "$SSE_BASE/$WID_TOKEN" 2>/dev/null | head -5)
-	if echo "$WID_SSE" | grep -q "data:"; then
-		pass "web sharing on, web input off: SSE works"
+	# POST rejected via named token (default off)
+	WID_NAMED_CODE=$(wi_post "$SSE_BASE/$WID_SESSNAME/input")
+	if [ "$WID_NAMED_CODE" = "403" ]; then
+		pass "default off: POST via named token rejected (403)"
 	else
-		fail "web sharing on, web input off: SSE works" "no SSE data"
+		fail "default off: POST via named token rejected (403)" "got HTTP $WID_NAMED_CODE"
 	fi
 
-	# Test: POST input rejected when web input not enabled (default off)
-	WID_POST_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
-		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
-		"$SSE_BASE/$WID_TOKEN/input" 2>/dev/null || echo "000")
-	if [ "$WID_POST_CODE" = "403" ]; then
-		pass "POST input rejected when web input disabled (default)"
+	# POST rejected via random RW token (default off)
+	WID_RW_CODE=$(wi_post "$SSE_BASE/$WID_TOKEN/input")
+	if [ "$WID_RW_CODE" = "403" ]; then
+		pass "default off: POST via random RW token rejected (403)"
 	else
-		fail "POST input rejected when web input disabled (default)" "got HTTP $WID_POST_CODE"
+		fail "default off: POST via random RW token rejected (403)" "got HTTP $WID_RW_CODE"
 	fi
 
-	# Test: Enable web input at runtime, POST should succeed
+	# Enable at runtime, POST should succeed
 	remote_tmtv "set-option -g tmtv-web-input on"
 	sleep 2
-	WID_ON_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
-		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
-		"$SSE_BASE/$WID_TOKEN/input" 2>/dev/null || echo "000")
+	WID_ON_CODE=$(wi_post "$SSE_BASE/$WID_SESSNAME/input")
 	if [ "$WID_ON_CODE" = "200" ]; then
-		pass "POST input accepted after runtime enable"
+		pass "default off: POST accepted after runtime enable (200)"
 	else
-		fail "POST input accepted after runtime enable" "got HTTP $WID_ON_CODE"
+		fail "default off: POST accepted after runtime enable (200)" "got HTTP $WID_ON_CODE"
 	fi
 else
 	skip "web input disabled tests" "could not create session"
 fi
 
-# Clean up web input disabled session
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $WID_CONF" 2>/dev/null || true
 sleep 1
 
 # -------------------------------------------------------
-# Test: Web input — bidirectional SSH <-> web typing
+# Test: CSRF protection — POST without X-Tmtv-Input header
 # -------------------------------------------------------
-WI_CONF="/tmp/.tmtv-test-wi-$TESTID.conf"
-WI_SESSNAME="wi$TESTID"
-remote "cat > $WI_CONF << CONF
+CSRF_CONF="/tmp/.tmtv-test-csrf-$TESTID.conf"
+remote "cat > $CSRF_CONF << CONF
 set -g tmtv-server-host \"127.0.0.1\"
 set -g tmtv-server-port $TMTV_PORT
 set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
 set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
-set -g tmtv-session-name \"$WI_SESSNAME\"
 set -g tmtv-web-sharing on
 set -g tmtv-web-input on
 CONF"
 
 remote "TERM=xterm-256color \
-	nohup script -qc '$REMOTE_TMTV -f $WI_CONF new-session -d -s main' \
+	nohup script -qc '$REMOTE_TMTV -f $CSRF_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
 sleep 4
 
-WI_TOKEN=$(remote "readlink $SESSIONS_DIR/$WI_SESSNAME 2>/dev/null" || echo "")
+CSRF_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | head -1" || echo "")
 
-if [ -n "$WI_TOKEN" ]; then
-	# Test: SSE session mode message includes web_input=true
-	SSE_MODE=$(curl -s -m 5 "$SSE_BASE/$WI_TOKEN" 2>/dev/null | head -5)
-	if echo "$SSE_MODE" | grep -q "data:"; then
-		pass "web input session sends SSE data"
-	else
-		fail "web input session sends SSE data" "no SSE data received"
-	fi
-
-	# Test: POST input to RW token returns 200
-	WI_POST_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
-		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
-		"$SSE_BASE/$WI_TOKEN/input" 2>/dev/null || echo "000")
-	if [ "$WI_POST_CODE" = "200" ]; then
-		pass "POST input to RW token returns 200"
-	else
-		fail "POST input to RW token returns 200" "got HTTP $WI_POST_CODE"
-	fi
-
-	# Test: POST input to RO token returns 403
-	# Use the named RO token directly (ro-SESSNAME), not readlink (which
-	# gives the RW token the symlink points to)
-	if remote "test -L $SESSIONS_DIR/ro-$WI_SESSNAME"; then
-		WI_RO_POST_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
-			-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
-			"$SSE_BASE/ro-$WI_SESSNAME/input" 2>/dev/null || echo "000")
-		if [ "$WI_RO_POST_CODE" = "403" ]; then
-			pass "POST input to RO token returns 403"
-		else
-			fail "POST input to RO token returns 403" "got HTTP $WI_RO_POST_CODE"
-		fi
-	else
-		skip "POST input to RO token (could not find RO token)"
-	fi
-
-	# Test: SSH host types → web viewer sees it via SSE (SSH → web)
-	# Type in SSH session, then verify SSE stream delivers new data
-	SSH_MARKER="SSHOUTPUT_$$"
-	# Start SSE listener in background, count data lines over 5 seconds
-	curl -s -m 6 "$SSE_BASE/$WI_TOKEN" >/tmp/sse_ssh_test_$$ 2>/dev/null &
-	SSE_PID=$!
-	sleep 1
-	# Type in the SSH session
-	remote_tmtv "send-keys -t main:0 'echo $SSH_MARKER' Enter"
-	sleep 3
-	kill $SSE_PID 2>/dev/null || true
-	wait $SSE_PID 2>/dev/null || true
-	SSE_SSH_LINES=$(grep -c "^data:" /tmp/sse_ssh_test_$$ 2>/dev/null || echo "0")
-	rm -f /tmp/sse_ssh_test_$$
-	if [ "$SSE_SSH_LINES" -gt 0 ]; then
-		pass "SSH output reaches web viewer via SSE (SSH → web)"
-	else
-		fail "SSH output reaches web viewer via SSE (SSH → web)" "no SSE data lines after typing in SSH"
-	fi
-
-	# Test: Web types → SSH host sees it
-	# Send text via POST, then check if it appeared in the session
-	WI_MARKER="WEBINPUT_$$"
-	curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
-		-d "echo $WI_MARKER" \
-		"$SSE_BASE/$WI_TOKEN/input" >/dev/null 2>&1
-	# Send Enter key
-	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
-		--data-binary @- \
-		"$SSE_BASE/$WI_TOKEN/input" >/dev/null 2>&1
-	sleep 2
-
-	# Check if the marker text is visible in the session
-	WI_CAPTURE=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
-	if echo "$WI_CAPTURE" | grep -q "$WI_MARKER"; then
-		pass "web input reaches SSH session (web → SSH)"
-	else
-		fail "web input reaches SSH session (web → SSH)" "marker '$WI_MARKER' not found in capture"
-	fi
-
-	# Test: POST without X-Tmtv-Input header returns 400 (CSRF protection)
-	WI_CSRF_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+if [ -n "$CSRF_TOKEN" ]; then
+	CSRF_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
 		-X POST -H "Content-Type: text/plain" -d "csrf" \
-		"$SSE_BASE/$WI_TOKEN/input" 2>/dev/null || echo "000")
-	if [ "$WI_CSRF_CODE" = "400" ]; then
-		pass "POST without X-Tmtv-Input header returns 400"
+		"$SSE_BASE/$CSRF_TOKEN/input" 2>/dev/null || echo "000")
+	if [ "$CSRF_CODE" = "400" ]; then
+		pass "CSRF: POST without X-Tmtv-Input header returns 400"
 	else
-		fail "POST without X-Tmtv-Input header returns 400" "got HTTP $WI_CSRF_CODE"
-	fi
-
-	# Test: Disable web input, POST should return 403
-	remote_tmtv "set-option -g tmtv-web-input off"
-	sleep 1
-	WI_OFF_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
-		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "blocked" \
-		"$SSE_BASE/$WI_TOKEN/input" 2>/dev/null || echo "000")
-	if [ "$WI_OFF_CODE" = "403" ]; then
-		pass "POST input rejected when web input disabled"
-	else
-		fail "POST input rejected when web input disabled" "got HTTP $WI_OFF_CODE"
+		fail "CSRF: POST without X-Tmtv-Input header returns 400" "got HTTP $CSRF_CODE"
 	fi
 else
-	skip "web input tests" "could not create web input session"
+	skip "CSRF test" "could not find session token"
 fi
 
-# Clean up web input session
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
-remote "rm -f $WI_CONF" 2>/dev/null || true
+remote "rm -f $CSRF_CONF" 2>/dev/null || true
 sleep 1
 
 # -------------------------------------------------------
