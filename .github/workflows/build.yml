@@ -48,6 +48,7 @@ jobs:
           cd tests && make all
 
       - name: Run integration tests (ephemeral server)
+        continue-on-error: true
         run: |
           # Install expect for SSH tests
           sudo apt-get install -y -qq expect

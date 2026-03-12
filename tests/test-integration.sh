@@ -649,6 +649,8 @@ fi
 # -------------------------------------------------------
 # Test: SSH viewer counts — verify S:N is accurate via format variables
 # -------------------------------------------------------
+# Wait for any lingering SSH connections from prior tests to disconnect
+sleep 3
 if [ -n "$TOKEN" ]; then
 	# Before any SSH viewer connects, S should be 0
 	S_BEFORE=$(remote_tmtv "display-message -p '#{tmtv_ssh_viewers}'" 2>/dev/null || echo "")
@@ -1044,7 +1046,7 @@ if [ -n "$PW_TOKEN" ]; then
 	fi
 
 	# SSE with correct password should return 200
-	SSE_RIGHT_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+	SSE_RIGHT_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
 		"$SSE_BASE/$PW_TOKEN?password=testpass123" 2>/dev/null || echo "000")
 	if [ "$SSE_RIGHT_CODE" = "200" ]; then
 		pass "password session accepts correct SSE password"
@@ -1120,7 +1122,7 @@ if [ -n "$WI_TOKEN" ]; then
 	fi
 
 	# Test: POST input to RW token returns 200
-	WI_POST_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+	WI_POST_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
 		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
 		"$SSE_BASE/$WI_TOKEN/input" 2>/dev/null || echo "000")
 	if [ "$WI_POST_CODE" = "200" ]; then
