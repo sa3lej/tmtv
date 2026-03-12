@@ -18,7 +18,7 @@ LIBSSH_CFLAGS := $(shell pkg-config --cflags libssh 2>/dev/null)
 LIBEVENT_CFLAGS := $(shell pkg-config --cflags libevent 2>/dev/null)
 
 UNIT_TESTS = test-msgpack test-version-compare
-SERVER_TESTS = test-server-header
+SERVER_TESTS = test-server-header test-session-tmate-ptr
 TMTV ?= ../tmtv
 
 .PHONY: all unit server-unit functional hooks session-cleanup integration clean
@@ -49,6 +49,9 @@ UTF8PROC_CFLAGS := $(shell pkg-config --cflags libutf8proc 2>/dev/null)
 test-server-header: test-server-header.c test-harness.h ../server/tmate.h ../server/tmate-protocol.h
 	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
 
+test-session-tmate-ptr: test-session-tmate-ptr.c test-harness.h ../tmux.h ../tmate.h
+	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
+
 functional:
 	@echo ""
 	@echo "Running functional tests..."
@@ -76,4 +79,4 @@ wiring:
 	@SRCDIR=$(SRCDIR) sh test-hook-wiring.sh
 
 clean:
-	rm -f $(UNIT_TESTS)
+	rm -f $(UNIT_TESTS) $(SERVER_TESTS)

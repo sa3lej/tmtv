@@ -1979,6 +1979,161 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: SSE OUT_STATUS contains non-empty left and right
+# -------------------------------------------------------
+# OUT_STATUS (type 5) is sent by the client when the status bar
+# changes.  Before the fix in v1.3.8, the right side was always
+# empty because tmate_status() was never called from status_redraw().
+if [ -n "$TOKEN" ]; then
+	# Trigger a status update — set a custom status-right, wait for
+	# the client to render it and send OUT_STATUS to the server.
+	remote_tmtv "set-option -g status-right 'RIGHTTEST %H:%M'"
+	sleep 3
+
+	# Capture ~5s of SSE data, extract data: lines, decode and
+	# look for OUT_STATUS messages with Python.
+	SSE_STATUS_RAW=$(curl -s -m 5 -N "$SSE_BASE/$TOKEN" 2>/dev/null || echo "")
+	SSE_STATUS_RESULT=$(echo "$SSE_STATUS_RAW" | python3 -c '
+import sys, base64, struct
+
+# Minimal msgpack decoder — sufficient for arrays of ints and strings.
+def decode(buf, pos=0):
+    if pos >= len(buf):
+        return None, pos
+    b = buf[pos]
+    # fixint (0-127)
+    if b <= 0x7f:
+        return b, pos + 1
+    # fixstr
+    if 0xa0 <= b <= 0xbf:
+        n = b & 0x1f
+        return buf[pos+1:pos+1+n].decode("utf-8", "replace"), pos + 1 + n
+    # str 8
+    if b == 0xd9:
+        n = buf[pos+1]
+        return buf[pos+2:pos+2+n].decode("utf-8", "replace"), pos + 2 + n
+    # str 16
+    if b == 0xda:
+        n = struct.unpack(">H", buf[pos+1:pos+3])[0]
+        return buf[pos+3:pos+3+n].decode("utf-8", "replace"), pos + 3 + n
+    # fixarray
+    if 0x90 <= b <= 0x9f:
+        n = b & 0x0f
+        arr = []
+        p = pos + 1
+        for _ in range(n):
+            v, p = decode(buf, p)
+            arr.append(v)
+        return arr, p
+    # array 16
+    if b == 0xdc:
+        n = struct.unpack(">H", buf[pos+1:pos+3])[0]
+        arr = []
+        p = pos + 3
+        for _ in range(n):
+            v, p = decode(buf, p)
+            arr.append(v)
+        return arr, p
+    # bin 8 / bin 16 — skip
+    if b == 0xc4:
+        n = buf[pos+1]
+        return buf[pos+2:pos+2+n], pos + 2 + n
+    if b == 0xc5:
+        n = struct.unpack(">H", buf[pos+1:pos+3])[0]
+        return buf[pos+3:pos+3+n], pos + 3 + n
+    # uint 8
+    if b == 0xcc:
+        return buf[pos+1], pos + 2
+    # uint 16
+    if b == 0xcd:
+        return struct.unpack(">H", buf[pos+1:pos+3])[0], pos + 3
+    # int 8
+    if b == 0xd0:
+        return struct.unpack(">b", buf[pos+1:pos+2])[0], pos + 2
+    # negative fixint
+    if b >= 0xe0:
+        return b - 256, pos + 1
+    # nil
+    if b == 0xc0:
+        return None, pos + 1
+    # true/false
+    if b == 0xc2:
+        return False, pos + 1
+    if b == 0xc3:
+        return True, pos + 1
+    return None, pos + 1
+
+OUT_STATUS = 5
+CTL_DEAMON_OUT_MSG = 1
+found_left = ""
+found_right = ""
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line.startswith("data:"):
+        continue
+    try:
+        raw = base64.b64decode(line[5:])
+    except Exception:
+        continue
+    pos = 0
+    while pos < len(raw):
+        try:
+            msg, pos = decode(raw, pos)
+        except Exception:
+            break
+        if not isinstance(msg, list) or len(msg) < 2:
+            continue
+        if msg[0] == CTL_DEAMON_OUT_MSG and isinstance(msg[1], list):
+            inner = msg[1]
+            if len(inner) >= 3 and inner[0] == OUT_STATUS:
+                left = inner[1] if isinstance(inner[1], str) else ""
+                right = inner[2] if isinstance(inner[2], str) else ""
+                if left:
+                    found_left = left
+                if right:
+                    found_right = right
+
+if found_left and found_right:
+    print("OK left=" + found_left + " right=" + found_right)
+elif found_left:
+    print("PARTIAL left=" + found_left + " right=empty")
+elif found_right:
+    print("PARTIAL left=empty right=" + found_right)
+else:
+    print("NONE")
+' 2>/dev/null || echo "ERROR")
+
+	if echo "$SSE_STATUS_RESULT" | grep -q "^OK "; then
+		pass "SSE OUT_STATUS has non-empty left and right"
+	elif echo "$SSE_STATUS_RESULT" | grep -q "^PARTIAL.*right=empty"; then
+		fail "SSE OUT_STATUS has non-empty left and right" \
+			"right side empty: $SSE_STATUS_RESULT"
+	elif echo "$SSE_STATUS_RESULT" | grep -q "^NONE"; then
+		fail "SSE OUT_STATUS has non-empty left and right" \
+			"no OUT_STATUS messages found in SSE stream"
+	else
+		fail "SSE OUT_STATUS has non-empty left and right" \
+			"unexpected: $SSE_STATUS_RESULT"
+	fi
+
+	# Verify right side contains our test string
+	if echo "$SSE_STATUS_RESULT" | grep -q "RIGHTTEST"; then
+		pass "SSE OUT_STATUS right contains custom text"
+	else
+		fail "SSE OUT_STATUS right contains custom text" \
+			"RIGHTTEST not found: $SSE_STATUS_RESULT"
+	fi
+
+	# Restore default
+	remote_tmtv "set-option -gu status-right"
+	sleep 1
+else
+	skip "SSE OUT_STATUS has non-empty left and right (no token)"
+	skip "SSE OUT_STATUS right contains custom text (no token)"
+fi
+
+# -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
 echo ""

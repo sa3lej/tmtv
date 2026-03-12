@@ -122,6 +122,16 @@ session_create(const char *prefix, const char *name, const char *cwd,
 #endif
 
 	s = xcalloc(1, sizeof *s);
+
+#ifdef TMATE
+	/*
+	 * Wire the global tmate_session to this tmux session.
+	 * This is the foundation for multi-session support: once we
+	 * allocate per-session tmate_session structs, this is where
+	 * the allocation will happen. For now, point at the global.
+	 */
+	s->tmate = &tmate_session;
+#endif
 	s->references = 1;
 	s->flags = 0;
 

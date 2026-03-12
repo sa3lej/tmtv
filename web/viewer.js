@@ -273,8 +273,8 @@
       var marker = (idx === activeIdx) ? '*' : '-';
       parts.push(idx + ':' + name + marker);
     }
-    var leftEl = document.getElementById('tmux-status-left');
-    if (leftEl && parts.length > 0) leftEl.textContent = '[0] ' + parts.join(' ');
+    var centerEl = document.getElementById('tmux-status-center');
+    if (centerEl && parts.length > 0) centerEl.textContent = parts.join(' ');
   }
 
   var pathMatch = location.pathname.match(/^\/[sj]\/([^\/]+)/);
@@ -596,8 +596,8 @@
         if (inner.length >= 3) {
           var leftEl = document.getElementById('tmux-status-left');
           var rightEl = document.getElementById('tmux-status-right');
-          if (leftEl && inner[1]) leftEl.textContent = toStr(inner[1]);
-          if (rightEl && inner[2]) rightEl.textContent = toStr(inner[2]);
+          if (leftEl && inner[1] != null) leftEl.textContent = toStr(inner[1]);
+          if (rightEl && inner[2] != null) rightEl.textContent = toStr(inner[2]);
         }
         break;
       case OUT_VIEWER_COUNT:

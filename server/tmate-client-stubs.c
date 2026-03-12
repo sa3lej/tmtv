@@ -38,6 +38,10 @@ void tmate_write_fin(void)
 {
 }
 
+void tmate_status(__unused const char *left, __unused const char *right)
+{
+}
+
 void tmate_session_init(struct event_base *base)
 {
 	/*

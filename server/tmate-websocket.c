@@ -1118,6 +1118,46 @@ void tmate_send_fin_to_ws_clients(struct tmate_session *session)
 }
 
 /*
+ * Route a web input key through the tmux key binding pipeline.
+ *
+ * When an SSH viewer is connected, we inject the key via
+ * server_client_handle_key() on the first attached client. This
+ * processes prefix keys (Ctrl+B), key bindings, copy mode entry,
+ * and pane navigation — exactly the same path SSH viewer keystrokes
+ * take.
+ *
+ * When no SSH viewer is connected, we fall back to
+ * tmate_client_pane_key() which sends the raw key directly to the
+ * host. Key bindings won't work in this case, but basic typing will.
+ */
+static void
+tmate_web_input_key(int pane_id, key_code key)
+{
+	struct client *c;
+
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (c->session == NULL)
+			continue;
+		if (c->flags & CLIENT_UNATTACHEDFLAGS)
+			continue;
+		if (c->flags & CLIENT_READONLY)
+			continue;
+
+		/* Found a suitable client — inject through tmux key handler */
+		struct key_event *event = xcalloc(1, sizeof *event);
+		event->key = key;
+		if (!server_client_handle_key(c, event)) {
+			free(event->buf);
+			free(event);
+		}
+		return;
+	}
+
+	/* No attached rw client — send raw key to host */
+	tmate_client_pane_key(pane_id, key);
+}
+
+/*
  * Handle POST /token/input: read body as raw keystrokes and forward
  * to the tmux client. Respond with 200 and close.
  */
@@ -1193,8 +1233,8 @@ static void handle_post_input(struct ws_client *wc)
 		unsigned char c = data[i];
 
 		if (c < 0x80) {
-			/* ASCII byte — send directly */
-			tmate_client_pane_key(-1, (key_code)c);
+			/* ASCII byte — route through tmux key bindings */
+			tmate_web_input_key(-1, (key_code)c);
 			i++;
 		} else {
 			struct utf8_data ud;
@@ -1208,7 +1248,7 @@ static void handle_post_input(struct ws_client *wc)
 
 			if (more == UTF8_DONE &&
 			    utf8_from_data(&ud, &uc) == UTF8_DONE) {
-				tmate_client_pane_key(-1, (key_code)uc);
+				tmate_web_input_key(-1, (key_code)uc);
 			} else {
 				/* Invalid UTF-8 — skip */
 				tmate_debug("POST input: skipping "
@@ -1522,12 +1562,12 @@ static void ctl_pane_keys(struct tmate_session *session,
 		return;
 	}
 
-	/* Forward input as keys, building tmux utf8_char for multibyte */
+	/* Forward input as keys, routing through tmux key bindings */
 	for (i = 0; str[i]; ) {
 		unsigned char c = (unsigned char)str[i];
 
 		if (c < 0x80) {
-			tmate_client_pane_key(pane_id, (key_code)c);
+			tmate_web_input_key(pane_id, (key_code)c);
 			i++;
 		} else {
 			struct utf8_data ud;
@@ -1542,7 +1582,7 @@ static void ctl_pane_keys(struct tmate_session *session,
 
 			if (more == UTF8_DONE &&
 			    utf8_from_data(&ud, &uc) == UTF8_DONE) {
-				tmate_client_pane_key(pane_id, (key_code)uc);
+				tmate_web_input_key(pane_id, (key_code)uc);
 			} else {
 				tmate_debug("ws input: skipping "
 				    "invalid UTF-8 at offset %zu", i);
