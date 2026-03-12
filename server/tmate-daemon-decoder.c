@@ -6,6 +6,29 @@
 
 char *tmate_left_status, *tmate_right_status;
 
+/*
+ * Compare two semver version strings "X.Y.Z".
+ * Returns <0 if a < b, 0 if equal, >0 if a > b.
+ * Malformed strings are treated as version 0.0.0.
+ */
+int
+tmtv_version_compare(const char *a, const char *b)
+{
+	int a_major = 0, a_minor = 0, a_patch = 0;
+	int b_major = 0, b_minor = 0, b_patch = 0;
+
+	if (a != NULL)
+		sscanf(a, "%d.%d.%d", &a_major, &a_minor, &a_patch);
+	if (b != NULL)
+		sscanf(b, "%d.%d.%d", &b_major, &b_minor, &b_patch);
+
+	if (a_major != b_major)
+		return a_major - b_major;
+	if (a_minor != b_minor)
+		return a_minor - b_minor;
+	return a_patch - b_patch;
+}
+
 void tmate_send_web_url(struct tmate_session *session)
 {
 	if (!tmate_has_websocket())
@@ -104,6 +127,15 @@ static void tmate_ready(struct tmate_session *session,
 	 */
 	tmate_send_session_urls(session);
 	session->urls_sent = true;
+
+	/* Notify if client version is older than server version */
+	if (session->client_version != NULL &&
+	    strcmp(session->client_version, "unknown") != 0 &&
+	    tmtv_version_compare(session->client_version, TMTV_VERSION) < 0) {
+		tmate_notify("Update available: tmtv %s (you have %s). "
+			     "curl -fsSL https://tmtv.se/install.sh | sh",
+			     TMTV_VERSION, session->client_version);
+	}
 
 	/*
 	 * Signal the client that URLs are ready. The client's

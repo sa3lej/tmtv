@@ -1087,7 +1087,7 @@ void tmate_disconnect_ws_clients(struct tmate_session *session)
  */
 #define POST_INPUT_MAX_BODY 1024
 
-#define POST_RATE_LIMIT    20  /* max POST requests per window */
+#define POST_RATE_LIMIT    60  /* max POST requests per window */
 #define POST_RATE_WINDOW   1   /* window size in seconds */
 
 static void handle_post_input(struct ws_client *wc)
@@ -1152,9 +1152,34 @@ static void handle_post_input(struct ws_client *wc)
 		return;
 	}
 
-	/* Forward each byte as a key to the active pane */
-	for (i = 0; i < len; i++)
-		tmate_client_pane_key(-1, (key_code)data[i]);
+	/* Forward input as keys, building tmux utf8_char for multibyte */
+	for (i = 0; i < len; ) {
+		unsigned char c = data[i];
+
+		if (c < 0x80) {
+			/* ASCII byte — send directly */
+			tmate_client_pane_key(-1, (key_code)c);
+			i++;
+		} else {
+			struct utf8_data ud;
+			utf8_char uc;
+			enum utf8_state more;
+
+			more = utf8_open(&ud, c);
+			i++;
+			while (i < len && more == UTF8_MORE)
+				more = utf8_append(&ud, data[i++]);
+
+			if (more == UTF8_DONE &&
+			    utf8_from_data(&ud, &uc) == UTF8_DONE) {
+				tmate_client_pane_key(-1, (key_code)uc);
+			} else {
+				/* Invalid UTF-8 — skip */
+				tmate_debug("POST input: skipping "
+				    "invalid UTF-8 at offset %zu", i);
+			}
+		}
+	}
 
 	tmate_debug("POST input: forwarded %zu bytes", len);
 
@@ -1461,11 +1486,35 @@ static void ctl_pane_keys(struct tmate_session *session,
 		return;
 	}
 
-	/* Forward each byte as a key to the tmux client */
-	for (i = 0; str[i]; i++)
-		tmate_client_pane_key(pane_id, (key_code)(unsigned char)str[i]);
+	/* Forward input as keys, building tmux utf8_char for multibyte */
+	for (i = 0; str[i]; ) {
+		unsigned char c = (unsigned char)str[i];
 
-	tmate_debug("Forwarded %zu keys from websocket to pane %d", i, pane_id);
+		if (c < 0x80) {
+			tmate_client_pane_key(pane_id, (key_code)c);
+			i++;
+		} else {
+			struct utf8_data ud;
+			utf8_char uc;
+			enum utf8_state more;
+
+			more = utf8_open(&ud, c);
+			i++;
+			while (str[i] && more == UTF8_MORE)
+				more = utf8_append(&ud,
+				    (unsigned char)str[i++]);
+
+			if (more == UTF8_DONE &&
+			    utf8_from_data(&ud, &uc) == UTF8_DONE) {
+				tmate_client_pane_key(pane_id, (key_code)uc);
+			} else {
+				tmate_debug("ws input: skipping "
+				    "invalid UTF-8 at offset %zu", i);
+			}
+		}
+	}
+
+	tmate_debug("Forwarded keys from websocket to pane %d", pane_id);
 	free(str);
 }
 
