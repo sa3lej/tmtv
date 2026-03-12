@@ -43,9 +43,47 @@ jobs:
           ./tmtv -V
           ./tmtv-server -V
 
-      - name: Run tests
+      - name: Run unit tests
         run: |
           cd tests && make all
+
+      - name: Run integration tests (ephemeral server)
+        continue-on-error: true
+        run: |
+          # Install expect for SSH tests
+          sudo apt-get install -y -qq expect
+
+          # Generate SSH host keys
+          KEYS_DIR="$(pwd)/test-keys"
+          mkdir -p "$KEYS_DIR"
+          ssh-keygen -t ed25519 -f "$KEYS_DIR/ssh_host_ed25519_key" -N "" -q
+          ssh-keygen -t rsa -b 4096 -f "$KEYS_DIR/ssh_host_rsa_key" -N "" -q
+
+          # Start tmtv-server in background
+          sudo ./tmtv-server -k "$KEYS_DIR" -p 2222 -z 4002 -T 300 -L 600 -v &
+          sleep 2
+
+          # Verify server is running
+          if ! sudo pgrep -f tmtv-server; then
+            echo "ERROR: tmtv-server failed to start"
+            exit 1
+          fi
+
+          # Install binaries where tests expect them
+          sudo cp ./tmtv /usr/local/bin/tmtv
+          sudo cp ./tmtv-server /usr/local/bin/tmtv-server
+
+          # Run integration tests in local/quick mode
+          TEST_HOST=localhost WEB_PROTO=http WEB_PORT=0 \
+            REMOTE_KEYS_DIR="$KEYS_DIR" \
+            sh tests/test-integration.sh --quick --local || {
+            echo "Integration tests failed"
+            sudo kill $(pgrep -f tmtv-server) 2>/dev/null || true
+            exit 1
+          }
+
+          # Clean up
+          sudo kill $(pgrep -f tmtv-server) 2>/dev/null || true
 
       - name: Build static binaries (Docker/Alpine)
         run: |
