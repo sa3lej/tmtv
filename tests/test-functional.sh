@@ -100,40 +100,37 @@ else
     fail "kill session" "session still exists: $OUTPUT"
 fi
 
-# Test 9: Second new-session gives error, not crash
-# (tmate only supports one session; server must stay alive)
+# Test 9: Multiple sessions work (v1.4.0 removed single-session guard)
 SOCKET2="/tmp/tmtv-test-multi-$$"
 "$TMTV" -S "$SOCKET2" new-session -d -s first 2>/dev/null
 if "$TMTV" -S "$SOCKET2" list-sessions 2>/dev/null | grep -q "first"; then
-    OUTPUT=$("$TMTV" -S "$SOCKET2" new-session -d -s second 2>&1 || true)
-    # Server must still be alive after the failed second session
-    if "$TMTV" -S "$SOCKET2" list-sessions 2>/dev/null | grep -q "first"; then
-        pass "second new-session errors without crash"
+    "$TMTV" -S "$SOCKET2" new-session -d -s second 2>/dev/null
+    # Both sessions must exist
+    if "$TMTV" -S "$SOCKET2" list-sessions 2>/dev/null | grep -q "second"; then
+        pass "multiple sessions work"
     else
-        fail "second new-session errors without crash" "server died: $OUTPUT"
+        fail "multiple sessions work" "second session not created"
     fi
 else
-    fail "second new-session errors without crash" "could not create test session"
+    fail "multiple sessions work" "could not create first session"
 fi
 "$TMTV" -S "$SOCKET2" kill-server 2>/dev/null || true
 rm -f "$SOCKET2"
 
-# Test 10: Bare tmtv does not auto-attach (creates new session like tmux)
-# With auto-attach removed, bare tmtv against an existing socket should NOT
-# silently attach — it tries new-session which errors, but server stays alive.
+# Test 10: Bare tmtv creates new session when one exists (multi-session)
 SOCKET3="/tmp/tmtv-test-noattach-$$"
 "$TMTV" -S "$SOCKET3" new-session -d -s existing 2>/dev/null
 if "$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | grep -q "existing"; then
-    # Bare tmtv against existing socket — should NOT auto-attach
-    RC=0; timeout 2 "$TMTV" -S "$SOCKET3" 2>/dev/null || RC=$?
-    # Server must still be alive after the attempt
-    if "$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | grep -q "existing"; then
-        pass "bare tmtv does not auto-attach (server alive, exit=$RC)"
+    # Bare tmtv against existing socket — should create a second session
+    RC=0; timeout 2 "$TMTV" -S "$SOCKET3" new-session -d 2>/dev/null || RC=$?
+    COUNT=$("$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | wc -l)
+    if [ "$COUNT" -ge 2 ]; then
+        pass "bare tmtv creates additional session (count=$COUNT)"
     else
-        fail "bare tmtv does not auto-attach" "server died (exit=$RC)"
+        fail "bare tmtv creates additional session" "expected >= 2 sessions, got $COUNT"
     fi
 else
-    fail "bare tmtv does not auto-attach" "could not create test session"
+    fail "bare tmtv creates additional session" "could not create test session"
 fi
 "$TMTV" -S "$SOCKET3" kill-server 2>/dev/null || true
 rm -f "$SOCKET3"
@@ -163,19 +160,17 @@ fi
 "$TMTV" -S "$SOCKET4" kill-server 2>/dev/null || true
 rm -f "$SOCKET4"
 
-# Test 12: Multi-session guard returns proper error message (tmtv-02u.11)
-# The error message must be user-friendly and explain the limitation.
+# Test 12: Can create three sessions and list them all
 SOCKET5="/tmp/tmtv-test-multierr-$$"
-"$TMTV" -S "$SOCKET5" new-session -d -s primary 2>/dev/null
-if "$TMTV" -S "$SOCKET5" list-sessions 2>/dev/null | grep -q "primary"; then
-    OUTPUT=$("$TMTV" -S "$SOCKET5" new-session -d -s secondary 2>&1 || true)
-    if echo "$OUTPUT" | grep -q "multiple sessions are not supported"; then
-        pass "multi-session guard shows correct error"
-    else
-        fail "multi-session guard shows correct error" "unexpected output: $OUTPUT"
-    fi
+"$TMTV" -S "$SOCKET5" new-session -d -s alpha 2>/dev/null
+"$TMTV" -S "$SOCKET5" new-session -d -s beta 2>/dev/null
+"$TMTV" -S "$SOCKET5" new-session -d -s gamma 2>/dev/null
+OUTPUT=$("$TMTV" -S "$SOCKET5" list-sessions 2>/dev/null)
+COUNT=$(echo "$OUTPUT" | wc -l)
+if [ "$COUNT" -ge 3 ]; then
+    pass "three concurrent sessions created"
 else
-    fail "multi-session guard shows correct error" "could not create test session"
+    fail "three concurrent sessions created" "expected >= 3 sessions, got $COUNT: $OUTPUT"
 fi
 "$TMTV" -S "$SOCKET5" kill-server 2>/dev/null || true
 rm -f "$SOCKET5"

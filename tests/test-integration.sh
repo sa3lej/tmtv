@@ -1020,22 +1020,22 @@ else
 fi
 
 # -------------------------------------------------------
-# Test: second new-session gives error, not crash
+# Test: multiple sessions work (v1.4.0 multi-session support)
 # -------------------------------------------------------
 remote "TERM=xterm-256color $REMOTE_TMTV new -d -s multi1" 2>/dev/null
 sleep 2
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "multi1"; then
-	remote "TERM=xterm-256color $REMOTE_TMTV new -d -s multi2" 2>/dev/null || true
+	remote "TERM=xterm-256color $REMOTE_TMTV new -d -s multi2" 2>/dev/null
 	sleep 1
-	# Server must still be alive after the failed second session
-	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "multi1"; then
-		pass "second new-session errors without crash"
+	# Both sessions must exist
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "multi2"; then
+		pass "second new-session creates multi2"
 	else
-		fail "second new-session errors without crash" "server died"
+		fail "second new-session creates multi2" "multi2 not found"
 	fi
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 else
-	fail "second new-session errors without crash" "could not create test session"
+	fail "second new-session creates multi2" "could not create test session"
 fi
 sleep 1
 
@@ -1059,6 +1059,49 @@ else
 	fail "bare tmtv auto-attaches to existing session" "could not create test session"
 fi
 sleep 1
+
+# -------------------------------------------------------
+# Test: named session auto-numbering (name, name-1, name-2)
+# -------------------------------------------------------
+# Start two tmtv clients with the same tmtv-session-name.
+# The server should auto-number: first gets "autonum", second gets "autonum-1".
+AUTONUM_CONF1="/tmp/.tmtv-test-auto1-$TESTID.conf"
+AUTONUM_CONF2="/tmp/.tmtv-test-auto2-$TESTID.conf"
+remote "cat > $AUTONUM_CONF1 << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"autonum\"
+set -g tmtv-web-sharing on
+CONF"
+remote "cp $AUTONUM_CONF1 $AUTONUM_CONF2"
+
+# Start first client
+remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -f $AUTONUM_CONF1 new-session -d -s auto1' /dev/null </dev/null >/dev/null 2>&1 &"
+sleep 4
+
+# Check first session got the name
+if remote "test -L $SESSIONS_DIR/autonum"; then
+	pass "auto-numbering: first session gets base name"
+
+	# Start second client with same session name
+	remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -f $AUTONUM_CONF2 new-session -d -s auto2' /dev/null </dev/null >/dev/null 2>&1 &"
+	sleep 4
+
+	# Second session should get auto-numbered name
+	if remote "test -L $SESSIONS_DIR/autonum-1"; then
+		pass "auto-numbering: second session gets name-1"
+	else
+		fail "auto-numbering: second session gets name-1" "autonum-1 not found in $SESSIONS_DIR"
+	fi
+else
+	fail "auto-numbering: first session gets base name" "autonum not found in $SESSIONS_DIR"
+	skip "auto-numbering: second session gets name-1"
+fi
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $AUTONUM_CONF1 $AUTONUM_CONF2" 2>/dev/null || true
+sleep 2
 
 # -------------------------------------------------------
 # Test: tmtv reattach after detach works

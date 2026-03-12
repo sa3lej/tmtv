@@ -30,23 +30,10 @@
 /*
  * Create a new session and attach to the current terminal unless -d is given.
  *
- * Multi-session design (tmtv-02u.11):
- * ====================================
- * When multi-session support is complete, `tmtv new-session -s name` will:
- *   1. Create a new tmux session (the normal tmux path below)
- *   2. Allocate a new struct tmate_session for this tmux session
- *   3. Initialize and start the tmate connection (DNS lookup, SSH connect)
- *   4. The server assigns independent tokens for this new sharing session
- *
- * The user experience:
- *   $ tmtv                          # creates session "0" + sharing connection
- *   $ tmtv new-session -s debug     # creates session "debug" + NEW sharing
- *   $ tmtv list-sessions            # shows both, each with own SSH/web URLs
- *   $ tmtv switch-client -t debug   # switches to "debug" session
- *
- * Until the plumbing is ready (tmtv-02u.1 through .6, .9, .10), creating a
- * second session returns an error: "multiple sessions are not supported".
- * See the guard in session_create() (session.c).
+ * Multi-session support (v1.4.0):
+ * Multiple tmux sessions are allowed. Only the first session gets a tmate
+ * sharing connection; additional sessions work locally. Per-session sharing
+ * (each session with its own SSH/web tokens) is a future enhancement.
  */
 
 #define NEW_SESSION_TEMPLATE "#{session_name}:"
@@ -295,13 +282,7 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 	}
 	s = session_create(prefix, newname, cwd, env, oo, tiop);
 	if (s == NULL) {
-		/*
-		 * Multi-session TODO (tmtv-02u.11): When session_create()
-		 * no longer rejects multiple sessions, remove this error
-		 * path and add tmate_session allocation + start logic here.
-		 * See the design comment at the top of this file.
-		 */
-		cmdq_error(item, "multiple sessions are not supported");
+		cmdq_error(item, "failed to create session");
 		environ_free(env);
 		options_free(oo);
 		goto fail;

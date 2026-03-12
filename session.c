@@ -114,13 +114,6 @@ session_create(const char *prefix, const char *name, const char *cwd,
 {
 	struct session	*s;
 
-#ifdef TMATE
-	if (!RB_EMPTY(&sessions)) {
-		tmate_info("multi sessions is not supported with tmtv");
-		return (NULL);
-	}
-#endif
-
 	s = xcalloc(1, sizeof *s);
 	s->references = 1;
 	s->flags = 0;
