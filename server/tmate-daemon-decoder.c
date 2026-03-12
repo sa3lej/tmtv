@@ -526,7 +526,7 @@ static void tmate_failed_cmd(__unused struct tmate_session *session,
 	free(cause);
 }
 
-static void tmate_status(__unused struct tmate_session *session,
+static void tmate_status(struct tmate_session *session,
 			 struct tmate_unpacker *uk)
 {
 	struct client *c;
@@ -538,6 +538,14 @@ static void tmate_status(__unused struct tmate_session *session,
 
 	TAILQ_FOREACH(c, &clients, entry)
 		c->flags |= CLIENT_REDRAWSTATUS;
+
+	/* Broadcast status to web viewers via SSE */
+	if (tmate_has_websocket()) {
+		pack(array, 3);
+		pack(int, TMATE_OUT_STATUS);
+		pack(string, tmate_left_status ? tmate_left_status : "");
+		pack(string, tmate_right_status ? tmate_right_status : "");
+	}
 }
 
 static void tmate_sync_copy_mode(__unused struct tmate_session *session,

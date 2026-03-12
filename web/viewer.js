@@ -181,10 +181,7 @@
         /* Bind input handler if web input is active */
         if (!sessionReadonly && webInputEnabled) {
           t.options.disableStdin = false;
-          panes[id]._inputBound = true;
-          (function(pane) {
-            pane.term.onData(function(data) { queueInput(data); });
-          })(panes[id]);
+          bindTerminalInput(panes[id]);
         }
         if (pendingData[id]) {
           for (var j = 0; j < pendingData[id].length; j++) {
@@ -363,17 +360,29 @@
     badge.classList.remove('hidden');
   }
 
+  function bindTerminalInput(pane) {
+    if (pane._inputBound) return;
+    pane._inputBound = true;
+    pane.term.onData(function(data) { queueInput(data); });
+    /* Prevent browser from intercepting Ctrl sequences (Ctrl+C = copy,
+     * Ctrl+L = address bar, etc.) so they reach the terminal instead. */
+    pane.term.attachCustomKeyEventHandler(function(ev) {
+      if (ev.ctrlKey && ev.type === 'keydown') {
+        /* Allow Ctrl+Shift+C/V for clipboard (browser convention) */
+        if (ev.shiftKey && (ev.key === 'C' || ev.key === 'V')) return true;
+        ev.preventDefault();
+        return true;
+      }
+      return true;
+    });
+  }
+
   function enableTerminalInput() {
     for (var id in panes) {
       var p = panes[id];
       if (p && p.term) {
         p.term.options.disableStdin = false;
-        if (!p._inputBound) {
-          p._inputBound = true;
-          (function(pane) {
-            pane.term.onData(function(data) { queueInput(data); });
-          })(p);
-        }
+        bindTerminalInput(p);
       }
     }
   }
@@ -472,6 +481,8 @@
   function connectEventSource() {
     var url = buildSseUrl();
     var es = new EventSource(url);
+    var dataReceived = false;
+    var silenceTimer = null;
 
     es.onopen = function() {
       setStatus('Connected', 'connected');
@@ -481,10 +492,21 @@
         sessionStart = Date.now();
         durationTimer = setInterval(updateMeta, 1000);
       }
+      /* Watchdog: if no data arrives within 10s of connecting,
+       * the session is likely dead (server holds connection open
+       * but child process is gone). Treat as connection error. */
+      silenceTimer = setTimeout(function() {
+        if (!dataReceived && !sessionEnded) {
+          es.close();
+          es.onerror();
+        }
+      }, 10000);
     };
 
     es.onmessage = function(evt) {
+      dataReceived = true;
       reconnectAttempts = 0;
+      if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
       var binary = atob(evt.data);
       var bytes = new Uint8Array(binary.length);
       for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -499,6 +521,7 @@
     };
 
     es.onerror = function() {
+      if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
       es.close();
       if (sessionEnded) {
         setStatus('Session ended', 'error');
