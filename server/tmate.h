@@ -134,6 +134,7 @@ extern void tmate_translate_legacy_key(int pane_id, key_code key);
 extern char *tmate_left_status, *tmate_right_status;
 extern void tmate_dispatch_daemon_message(struct tmate_session *session,
 					  struct tmate_unpacker *uk);
+extern int tmtv_version_compare(const char *a, const char *b);
 
 /* tmate-ssh-daemon.c */
 
