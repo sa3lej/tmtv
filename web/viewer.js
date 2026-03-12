@@ -475,7 +475,6 @@
 
     es.onopen = function() {
       setStatus('Connected', 'connected');
-      reconnectAttempts = 0;
       everConnected = true;
       hidePasswordPrompt();
       if (!sessionStart) {
@@ -485,6 +484,7 @@
     };
 
     es.onmessage = function(evt) {
+      reconnectAttempts = 0;
       var binary = atob(evt.data);
       var bytes = new Uint8Array(binary.length);
       for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
