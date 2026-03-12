@@ -541,10 +541,10 @@ static void tmate_status(struct tmate_session *session,
 
 	/* Broadcast status to web viewers via SSE */
 	if (tmate_has_websocket()) {
-		pack(array, 3);
-		pack(int, TMATE_OUT_STATUS);
-		pack(string, tmate_left_status ? tmate_left_status : "");
-		pack(string, tmate_right_status ? tmate_right_status : "");
+		_pack(&session->websocket_encoder, array, 3);
+		_pack(&session->websocket_encoder, int, TMATE_OUT_STATUS);
+		_pack(&session->websocket_encoder, string, tmate_left_status ? tmate_left_status : "");
+		_pack(&session->websocket_encoder, string, tmate_right_status ? tmate_right_status : "");
 	}
 }
 
