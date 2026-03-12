@@ -229,6 +229,14 @@ void tmate_session_start(void)
 			tmate_set_val("session_password", pw);
 	}
 
+	/* Send link TTL if configured */
+	{
+		const char *ttl = options_get_string(global_options,
+						     "tmtv-link-ttl");
+		if (ttl != NULL && *ttl != '\0')
+			tmate_set_val("link_ttl", ttl);
+	}
+
 	send_authorized_keys();
 	tmate_write_uname();
 	tmate_write_ready();

@@ -52,3 +52,27 @@ void tmate_session_init(struct event_base *base)
 void tmate_session_start(void)
 {
 }
+
+/* Recording is client-only; server never records. */
+
+void tmtv_recording_start(__unused const char *token,
+			  __unused u_int width, __unused u_int height)
+{
+}
+
+void tmtv_recording_write(__unused const char *buf, __unused size_t len)
+{
+}
+
+void tmtv_recording_resize(__unused u_int width, __unused u_int height)
+{
+}
+
+void tmtv_recording_stop(void)
+{
+}
+
+int tmtv_recording_active(void)
+{
+	return (0);
+}

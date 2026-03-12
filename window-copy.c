@@ -564,10 +564,13 @@ window_copy_vadd(struct window_pane *wp, int parse, const char *fmt, va_list ap)
 		data->backing_written = 1;
 	old_cy = backing->cy;
 	if (parse) {
-		vasprintf(&text, fmt, ap);
-		input_parse_screen(data->ictx, backing, window_copy_init_ctx_cb,
-		    data, text, strlen(text));
-		free(text);
+		if (vasprintf(&text, fmt, ap) == -1)
+			text = NULL;
+		if (text != NULL) {
+			input_parse_screen(data->ictx, backing,
+			    window_copy_init_ctx_cb, data, text, strlen(text));
+			free(text);
+		}
 	} else {
 		memcpy(&gc, &grid_default_cell, sizeof gc);
 		screen_write_vnputs(&backing_ctx, 0, &gc, fmt, ap);

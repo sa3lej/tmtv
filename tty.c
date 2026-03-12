@@ -636,8 +636,9 @@ tty_add(struct tty *tty, const char *buf, size_t len)
 	log_debug("%s: %.*s", c->name, (int)len, buf);
 	c->written += len;
 
-	if (tty_log_fd != -1)
-		write(tty_log_fd, buf, len);
+	if (tty_log_fd != -1) {
+		ssize_t __unused n = write(tty_log_fd, buf, len);
+	}
 	if (tty->flags & TTY_STARTED)
 		event_add(&tty->event_out, NULL);
 }

@@ -217,6 +217,7 @@ dist_tmtv_SOURCES = \
 	tmate-env.c \
 	tmate-msg.c \
 	tmate-msgpack.c \
+	tmate-recording.c \
 	tmate-session.c \
 	tmate-ssh-client.c
 nodist_tmtv_SOURCES = osdep-@PLATFORM@.c

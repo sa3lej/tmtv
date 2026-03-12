@@ -582,7 +582,7 @@ utf8_fromwc(wchar_t wc, struct utf8_data *ud)
 #endif
 	if (size < 0) {
 		log_debug("UTF-8 %d, wctomb() %d", wc, errno);
-		wctomb(NULL, 0);
+		{ int __unused r = wctomb(NULL, 0); } /* reset shift state */
 		return (UTF8_ERROR);
 	}
 	if (size == 0)

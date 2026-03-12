@@ -80,6 +80,9 @@ void tmate_sync_layout(void)
 	if (s->curw && s->curw->window) {
 		pack(int, s->curw->window->sx);
 		pack(int, s->curw->window->sy);
+		if (tmtv_recording_active())
+			tmtv_recording_resize(s->curw->window->sx,
+					      s->curw->window->sy);
 	} else {
 		pack(int, 80);
 		pack(int, 24);
