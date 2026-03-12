@@ -479,9 +479,32 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 	if (path_len == 0)
 		return -1;
 
+	/* Check for "/input" suffix and strip it for token matching */
+	{
+		const char *qmark = memchr(path, '?', path_len);
+		size_t pre_query = qmark ? (size_t)(qmark - path) : path_len;
+		if (pre_query > 6 &&
+		    memcmp(path + pre_query - 6, "/input", 6) == 0) {
+			wc->is_post = true;
+			/* Adjust: remove "/input" but keep query string */
+			if (qmark) {
+				/* path is: TOKEN/input?query...
+				 * We want TOKEN?query... for matching */
+				path_len -= 6; /* shrinks pre_query part */
+				/* Move query portion left by 6 */
+				/* Actually, just set token_only_len below */
+			} else {
+				path_len -= 6;
+			}
+		}
+	}
+
 	/* Separate token from query string (?password=...) */
 	query_start = memchr(path, '?', path_len);
 	token_only_len = query_start ? (size_t)(query_start - path) : path_len;
+
+	/* Assume RW until we match an RO token */
+	wc->readonly = false;
 
 	/* Check against all session tokens */
 	token = s->session_token;
@@ -494,11 +517,21 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 	token = s->session_token_ro;
 	if (token) {
 		tlen = strlen(token);
+		if (tlen == token_only_len && memcmp(path, token, tlen) == 0) {
+			wc->readonly = true;
+			return 0;
+		}
+	}
+
+	token = s->session_token_named;
+	if (token) {
+		tlen = strlen(token);
 		if (tlen == token_only_len && memcmp(path, token, tlen) == 0)
 			return 0;
 	}
 
-	token = s->session_token_named;
+	/* Check RW named token */
+	token = s->session_token_rw_named;
 	if (token) {
 		tlen = strlen(token);
 		if (tlen == token_only_len && memcmp(path, token, tlen) == 0)
@@ -555,6 +588,38 @@ static char *sse_extract_password(const char *path, size_t path_len)
 	return NULL;
 }
 
+/*
+ * Send session mode to an SSE client after handshake.
+ * Tells the browser whether this is a RW or RO session and
+ * whether web input is enabled.
+ */
+static void sse_send_session_mode(struct bufferevent *bev,
+				  bool readonly, bool web_input_enabled)
+{
+	msgpack_sbuffer sbuf;
+	msgpack_packer pk;
+
+	msgpack_sbuffer_init(&sbuf);
+	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+
+	msgpack_pack_array(&pk, 3);
+	msgpack_pack_int(&pk, TMATE_OUT_SESSION_MODE);
+	if (readonly)
+		msgpack_pack_true(&pk);
+	else
+		msgpack_pack_false(&pk);
+	if (web_input_enabled && !readonly)
+		msgpack_pack_true(&pk);
+	else
+		msgpack_pack_false(&pk);
+
+	sse_send_data(bev, (unsigned char *)sbuf.data, sbuf.size);
+	msgpack_sbuffer_destroy(&sbuf);
+}
+
 static int sse_do_handshake(struct ws_client *wc)
 {
 	struct evbuffer *input = bufferevent_get_input(wc->bev);
@@ -596,13 +661,36 @@ static int sse_do_handshake(struct ws_client *wc)
 		"\r\n"
 		"wrong_password";
 
-	/* Only accept GET requests — reject anything else */
-	if (strncmp(data, "GET ", 4) != 0) {
-		tmate_debug("SSE rejecting non-GET request");
+	/* Handle CORS preflight */
+	if (strncmp(data, "OPTIONS ", 8) == 0) {
+		static const char *cors_response =
+			"HTTP/1.1 204 No Content\r\n"
+			"Access-Control-Allow-Origin: *\r\n"
+			"Access-Control-Allow-Methods: GET, POST\r\n"
+			"Access-Control-Allow-Headers: Content-Type\r\n"
+			"Access-Control-Max-Age: 86400\r\n"
+			"Content-Length: 0\r\n"
+			"\r\n";
+		evbuffer_drain(input, (header_end - data) + 4);
+		bufferevent_write(wc->bev, cors_response,
+				  strlen(cors_response));
+		return -1;
+	}
+
+	/* Accept GET and POST requests */
+	bool is_post_method = false;
+	int method_len;
+	if (strncmp(data, "GET ", 4) == 0) {
+		method_len = 4;
+	} else if (strncmp(data, "POST ", 5) == 0) {
+		method_len = 5;
+		is_post_method = true;
+	} else {
+		tmate_debug("SSE rejecting unsupported method");
 		evbuffer_drain(input, (header_end - data) + 4);
 		static const char *method_reject =
 			"HTTP/1.1 405 Method Not Allowed\r\n"
-			"Allow: GET\r\n"
+			"Allow: GET, POST\r\n"
 			"Content-Length: 0\r\n"
 			"Connection: close\r\n"
 			"\r\n";
@@ -612,7 +700,7 @@ static int sse_do_handshake(struct ws_client *wc)
 	}
 
 	{
-		const char *path_start = data + 4;
+		const char *path_start = data + method_len;
 		const char *path_end = memchr(path_start, ' ',
 					      header_end - path_start);
 		if (!path_end) {
@@ -658,6 +746,22 @@ static int sse_do_handshake(struct ws_client *wc)
 			tmate_debug("SSE password accepted");
 			free(pw);
 		}
+	}
+
+	/* Handle CORS preflight for POST */
+	if (!is_post_method && strncmp(data, "OPTIONS ", 8) == 0) {
+		/* This branch can't be reached (we reject OPTIONS above),
+		 * but handle it defensively */
+		evbuffer_drain(input, (header_end - data) + 4);
+		return -1;
+	}
+
+	if (is_post_method) {
+		wc->is_post = true;
+		/* POST /token/input — handled in on_ws_client_read
+		 * after we drain the headers here */
+		evbuffer_drain(input, (header_end - data) + 4);
+		return 2; /* special: POST input mode */
 	}
 
 	static const char *response =
@@ -944,6 +1048,67 @@ void tmate_disconnect_ws_clients(struct tmate_session *session)
 	tmate_debug("All SSE clients disconnected (web sharing disabled)");
 }
 
+/*
+ * Handle POST /token/input: read body as raw keystrokes and forward
+ * to the tmux client. Respond with 200 and close.
+ */
+#define POST_INPUT_MAX_BODY 1024
+
+static void handle_post_input(struct ws_client *wc)
+{
+	struct tmate_session *session = wc->session;
+	struct evbuffer *input = bufferevent_get_input(wc->bev);
+	size_t len = evbuffer_get_length(input);
+	unsigned char *data;
+	size_t i;
+
+	static const char *ok_response =
+		"HTTP/1.1 200 OK\r\n"
+		"Content-Length: 0\r\n"
+		"Access-Control-Allow-Origin: *\r\n"
+		"Connection: close\r\n"
+		"\r\n";
+
+	static const char *forbidden =
+		"HTTP/1.1 403 Forbidden\r\n"
+		"Content-Length: 0\r\n"
+		"Access-Control-Allow-Origin: *\r\n"
+		"Connection: close\r\n"
+		"\r\n";
+
+	/* Reject if web input is not enabled or viewer is RO */
+	if (!session->web_input_enabled || wc->readonly) {
+		tmate_debug("POST input rejected: web_input=%d readonly=%d",
+			    session->web_input_enabled, wc->readonly);
+		bufferevent_write(wc->bev, forbidden, strlen(forbidden));
+		ws_client_free_after_flush(wc);
+		return;
+	}
+
+	if (len == 0)
+		return; /* need more data */
+
+	if (len > POST_INPUT_MAX_BODY)
+		len = POST_INPUT_MAX_BODY;
+
+	data = evbuffer_pullup(input, len);
+	if (!data) {
+		bufferevent_write(wc->bev, ok_response, strlen(ok_response));
+		ws_client_free_after_flush(wc);
+		return;
+	}
+
+	/* Forward each byte as a key to the active pane */
+	for (i = 0; i < len; i++)
+		tmate_client_pane_key(-1, (key_code)data[i]);
+
+	tmate_debug("POST input: forwarded %zu bytes", len);
+
+	evbuffer_drain(input, len);
+	bufferevent_write(wc->bev, ok_response, strlen(ok_response));
+	ws_client_free_after_flush(wc);
+}
+
 static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 {
 	struct ws_client *wc = arg;
@@ -958,17 +1123,37 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		if (ret == 0)
 			return; /* need more data */
 
+		if (ret == 2) {
+			/* POST input — handle the body */
+			wc->handshake_done = true;
+			bufferevent_set_timeouts(wc->bev, NULL, NULL);
+			tmate_info("POST input request from %s viewer",
+				   wc->readonly ? "RO" : "RW");
+			handle_post_input(wc);
+			return;
+		}
+
 		wc->handshake_done = true;
 		/* Clear handshake timeout — connection is established */
 		bufferevent_set_timeouts(wc->bev, NULL, NULL);
-		tmate_info("SSE client connected");
+		tmate_info("SSE client connected (%s)",
+			   wc->readonly ? "RO" : "RW");
 
+		/* Send session mode so browser knows RW/RO and input status */
+		sse_send_session_mode(wc->bev, wc->readonly,
+				      wc->session->web_input_enabled);
 		/* Send layout sync so browser knows terminal size + window names */
 		sse_send_sync_layout(wc->bev);
 		/* Send current screen state from tmux grid */
 		sse_send_screen_dump(wc->bev);
 		/* Broadcast updated viewer counts to all clients */
 		tmate_broadcast_viewer_count(wc->session);
+		return;
+	}
+
+	/* POST clients: handle remaining body data */
+	if (wc->is_post) {
+		handle_post_input(wc);
 		return;
 	}
 
@@ -1176,20 +1361,28 @@ static void ctl_daemon_fwd_msg(__unused struct tmate_session *session,
 	tmate_send_mc_obj(&uk->argv[0]);
 }
 
-static void ctl_pane_keys(__unused struct tmate_session *session,
+static void ctl_pane_keys(struct tmate_session *session,
 			  struct tmate_unpacker *uk)
 {
 	int pane_id;
 	char *str;
+	size_t i;
 
 	pane_id = unpack_int(uk);
 	str = unpack_string(uk);
 
-	/* View-only mode: ignore keyboard input from browsers */
-	tmate_debug("Ignoring pane keys from websocket (view-only mode)");
+	if (!session->web_input_enabled) {
+		tmate_debug("Ignoring pane keys (web input disabled)");
+		free(str);
+		return;
+	}
 
+	/* Forward each byte as a key to the tmux client */
+	for (i = 0; str[i]; i++)
+		tmate_client_pane_key(pane_id, (key_code)(unsigned char)str[i]);
+
+	tmate_debug("Forwarded %zu keys from websocket to pane %d", i, pane_id);
 	free(str);
-	(void)pane_id;
 }
 
 static void ctl_resize(struct tmate_session *session,

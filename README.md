@@ -36,6 +36,16 @@ To auto-enable web sharing, add to `~/.tmtv.conf`:
 set -g tmtv-web-sharing on
 ```
 
+### Interactive web viewers
+
+By default, web viewers can only watch. To let RW web viewers type:
+
+```sh
+tmtv set -g tmtv-web-input on
+```
+
+When enabled, web viewers connected via the RW token can type in the terminal. RO token viewers remain view-only. A badge in the viewer titlebar shows the session mode ("interactive" or "view-only").
+
 ### Named sessions
 
 Pick a memorable name instead of a random token:
@@ -86,6 +96,7 @@ set -g tmtv-session-password secret
 - Instant session sharing over SSH with read-write and read-only tokens
 - Password-protected sessions — viewers must authenticate before connecting
 - Web viewer with xterm.js and WebGL rendering
+- Interactive web input — RW web viewers can type when enabled by the host
 - Late-join support — browser viewers see current terminal state
 - Server-Sent Events streaming — works through proxies and firewalls
 - Live viewer counts — `S:N W:N` in tmux status bar and web titlebar

@@ -233,6 +233,8 @@ struct ws_client {
 	struct tmate_session *session;
 	struct bufferevent *bev;
 	bool handshake_done;
+	bool readonly;        /* true if connected via RO token */
+	bool is_post;         /* true if this is a POST /input request */
 	TAILQ_ENTRY(ws_client) entry;
 };
 
@@ -269,6 +271,7 @@ struct tmate_session {
 	struct event *ev_ipc; /* libevent2: monitors ipc_fd for incoming fds */
 	struct event *ev_ws_snapshot; /* periodic snapshot timer */
 	bool web_sharing_enabled; /* client-controlled web sharing toggle */
+	bool web_input_enabled;   /* host-controlled web input toggle */
 	bool urls_sent;           /* true after initial URLs sent in tmate_ready */
 
 	/* only for role client-pty */

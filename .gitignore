@@ -21,7 +21,10 @@ etc/
 fuzz/*-fuzzer
 tags
 tmux
+tmtv
+tmtv-server
 tmux.1.*
+action-tmtv/
 !tests/Makefile
 tests/test-msgpack
 tests/test-*

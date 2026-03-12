@@ -1030,6 +1030,104 @@ remote "rm -f $PW_CONF" 2>/dev/null || true
 sleep 1
 
 # -------------------------------------------------------
+# Test: Web input — bidirectional SSH <-> web typing
+# -------------------------------------------------------
+WI_CONF="/tmp/.tmtv-test-wi-$TESTID.conf"
+WI_SESSNAME="wi$TESTID"
+remote "cat > $WI_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$WI_SESSNAME\"
+set -g tmtv-web-sharing on
+set -g tmtv-web-input on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $WI_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+sleep 4
+
+WI_TOKEN=$(remote "readlink $SESSIONS_DIR/$WI_SESSNAME 2>/dev/null" || echo "")
+
+if [ -n "$WI_TOKEN" ]; then
+	# Test: SSE session mode message includes web_input=true
+	SSE_MODE=$(curl -s -m 5 "$SSE_BASE/$WI_TOKEN" 2>/dev/null | head -5)
+	if echo "$SSE_MODE" | grep -q "data:"; then
+		pass "web input session sends SSE data"
+	else
+		fail "web input session sends SSE data" "no SSE data received"
+	fi
+
+	# Test: POST input to RW token returns 200
+	WI_POST_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+		-X POST -H "Content-Type: text/plain" -d "hello" \
+		"$SSE_BASE/$WI_TOKEN/input" 2>/dev/null || echo "000")
+	if [ "$WI_POST_CODE" = "200" ]; then
+		pass "POST input to RW token returns 200"
+	else
+		fail "POST input to RW token returns 200" "got HTTP $WI_POST_CODE"
+	fi
+
+	# Test: POST input to RO token returns 403
+	WI_RO_TOKEN=$(remote "readlink $SESSIONS_DIR/ro-$WI_SESSNAME 2>/dev/null || \
+		ls $SESSIONS_DIR/ 2>/dev/null | grep '^ro-'" || echo "")
+	if [ -n "$WI_RO_TOKEN" ]; then
+		WI_RO_POST_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+			-X POST -H "Content-Type: text/plain" -d "hello" \
+			"$SSE_BASE/$WI_RO_TOKEN/input" 2>/dev/null || echo "000")
+		if [ "$WI_RO_POST_CODE" = "403" ]; then
+			pass "POST input to RO token returns 403"
+		else
+			fail "POST input to RO token returns 403" "got HTTP $WI_RO_POST_CODE"
+		fi
+	else
+		skip "POST input to RO token (could not find RO token)"
+	fi
+
+	# Test: SSH host types → web viewer sees it (already tested by existing SSE tests)
+	# Test: Web types → SSH host sees it
+	# Send text via POST, then check if it appeared in the session
+	WI_MARKER="WEBINPUT_$$"
+	curl -s -m 3 -X POST -H "Content-Type: text/plain" \
+		-d "echo $WI_MARKER" \
+		"$SSE_BASE/$WI_TOKEN/input" >/dev/null 2>&1
+	# Send Enter key
+	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" \
+		--data-binary @- \
+		"$SSE_BASE/$WI_TOKEN/input" >/dev/null 2>&1
+	sleep 2
+
+	# Check if the marker text is visible in the session
+	WI_CAPTURE=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
+	if echo "$WI_CAPTURE" | grep -q "$WI_MARKER"; then
+		pass "web input reaches SSH session (web → SSH)"
+	else
+		fail "web input reaches SSH session (web → SSH)" "marker '$WI_MARKER' not found in capture"
+	fi
+
+	# Test: Disable web input, POST should return 403
+	remote_tmtv "set-option -t main tmtv-set tmtv-web-input=off"
+	sleep 1
+	WI_OFF_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+		-X POST -H "Content-Type: text/plain" -d "blocked" \
+		"$SSE_BASE/$WI_TOKEN/input" 2>/dev/null || echo "000")
+	if [ "$WI_OFF_CODE" = "403" ]; then
+		pass "POST input rejected when web input disabled"
+	else
+		fail "POST input rejected when web input disabled" "got HTTP $WI_OFF_CODE"
+	fi
+else
+	skip "web input tests" "could not create web input session"
+fi
+
+# Clean up web input session
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $WI_CONF" 2>/dev/null || true
+sleep 1
+
+# -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
 echo ""
