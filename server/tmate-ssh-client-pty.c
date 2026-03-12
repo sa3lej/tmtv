@@ -8,6 +8,8 @@
 
 extern int server_fd;
 
+static void ssh_echo(struct tmate_ssh_client *ssh_client, const char *str);
+
 static int on_ssh_channel_read(__unused ssh_session _session,
 			       __unused ssh_channel channel,
 			       void *_data, uint32_t total_len,
@@ -18,8 +20,15 @@ static int on_ssh_channel_read(__unused ssh_session _session,
 	size_t written = 0;
 	ssize_t len;
 
-	if (session->readonly)
+	if (session->readonly) {
+		/* Let read-only viewers quit with Ctrl-Q */
+		if (total_len == 1 && *(unsigned char *)data == 0x11) {
+			ssh_echo(&session->ssh_client,
+				 "\r\nDisconnecting read-only session.\r\n");
+			ssh_channel_close(session->ssh_client.channel);
+		}
 		return total_len;
+	}
 
 	setblocking(session->pty, 1);
 	while (total_len) {
@@ -228,6 +237,8 @@ connect_ok:
 	if (session->readonly) {
 		argv = argv_ro;
 		argc = 2;
+		ssh_echo(client,
+			 "Read-only session. Press Ctrl-Q to disconnect.\r\n");
 	}
 
 	if (openpty(&session->pty, &slave_pty, NULL, NULL, NULL) < 0)

@@ -60,7 +60,9 @@ Require a password for viewers to join:
 tmtv -p secret
 ```
 
-SSH viewers are prompted for the password automatically. Can also be set in config:
+SSH viewers must authenticate with the password — public key authentication alone is rejected. Web viewers see a password prompt before the terminal loads. Passwords are SHA-256 hashed server-side and never stored in plain text.
+
+Can also be set in config:
 
 ```
 # In ~/.tmtv.conf
@@ -82,11 +84,13 @@ set -g tmtv-session-password secret
 
 - Full tmux 3.6a terminal multiplexer
 - Instant session sharing over SSH with read-write and read-only tokens
+- Password-protected sessions — viewers must authenticate before connecting
 - Web viewer with xterm.js and WebGL rendering
 - Late-join support — browser viewers see current terminal state
 - Server-Sent Events streaming — works through proxies and firewalls
 - Live viewer counts — `S:N W:N` in tmux status bar and web titlebar
 - Dynamic page titles — link previews show the session name (Slack, Discord, iMessage)
+- Read-only viewers can disconnect cleanly with Ctrl-Q
 - Zero config — just type `tmtv`
 
 ## Format variables
