@@ -377,7 +377,7 @@ void get_in_jail(void)
 
 	nice(1);
 
-	tmate_debug("Dropped priviledges to %s (%d,%d), jailed in %s",
+	tmate_debug("Dropped privileges to %s (%d,%d), jailed in %s",
 		    TMATE_JAIL_USER, uid, gid, TMATE_WORKDIR "/jail");
 }
 
