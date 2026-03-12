@@ -59,10 +59,15 @@ RUN ./tmtv-server -V
 
 FROM alpine:3.20
 
-RUN apk --no-cache add bash
-RUN mkdir /build
+RUN apk --no-cache add bash openssh-keygen
+RUN mkdir /build /data
 ENV PATH=/build:$PATH
 COPY --from=build /build/tmtv.symbols /build
 COPY --from=build /build/tmtv /build
 COPY --from=build /build/tmtv-server.symbols /build
 COPY --from=build /build/tmtv-server /build
+COPY deploy/docker-entrypoint.sh /build/docker-entrypoint.sh
+
+EXPOSE 2222 4002
+VOLUME /data
+ENTRYPOINT ["docker-entrypoint.sh"]

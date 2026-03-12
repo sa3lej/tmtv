@@ -244,26 +244,12 @@ int main(int argc, char **argv, char **envp)
 			    "Try deleting " TMATE_WORKDIR " and try again");
 
 	/*
-	 * Startup wipe: remove all stale session entries from a previous run.
-	 * The server just started, so every entry is orphaned by definition.
+	 * No startup wipe: session entries from a previous run are left
+	 * in place so that reconnecting clients can reclaim their tokens.
+	 * The periodic GC in the main loop (gc_stale_sessions(), every 60s)
+	 * will clean up any truly orphaned entries once it's clear no
+	 * client is coming back.
 	 */
-	{
-		DIR *dir = opendir(TMATE_WORKDIR "/sessions");
-		if (dir) {
-			struct dirent *ent;
-			int removed = 0;
-			int dfd = dirfd(dir);
-			while ((ent = readdir(dir)) != NULL) {
-				if (ent->d_name[0] == '.')
-					continue;
-				unlinkat(dfd, ent->d_name, 0);
-				removed++;
-			}
-			closedir(dir);
-			if (removed)
-				tmate_info("Startup wipe: removed %d stale session entries", removed);
-		}
-	}
 
 	tmate_info("tmtv-server %s starting: ssh_port=%d sse_port=%d "
 		   "bind=%s proxy_protocol=%s authorized_keys_only=%s "
