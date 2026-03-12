@@ -25,7 +25,7 @@
  */
 #define MAX_CHILDREN       100
 #define RATE_WINDOW_SEC    30
-#define RATE_MAX_PER_IP    10
+#define RATE_MAX_PER_IP    20
 #define CONN_HISTORY_SIZE  512
 
 struct conn_record {
