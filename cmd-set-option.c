@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include "tmux.h"
+#include "tmate.h"
 
 /*
  * Set an option.
