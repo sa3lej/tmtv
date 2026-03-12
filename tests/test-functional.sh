@@ -204,6 +204,64 @@ fi
 "$TMTV" -S "$SOCKET6" kill-server 2>/dev/null || true
 rm -f "$SOCKET6"
 
+# Test 14: display-popup command works (tmtv-8z3.7)
+# Popups are a tmux 3.2+ feature that never existed in tmate (stuck on tmux 2.4).
+# tmtv rebased on tmux 3.6a should support them without crashing.
+SOCKET7="/tmp/tmtv-test-popup-$$"
+"$TMTV" -S "$SOCKET7" new-session -d -s popup1 2>/dev/null
+if "$TMTV" -S "$SOCKET7" list-sessions 2>/dev/null | grep -q "popup1"; then
+    # Run display-popup with a simple command; without a terminal it may error,
+    # but it must NOT crash the server.
+    "$TMTV" -S "$SOCKET7" display-popup -t popup1 "echo hello" 2>/dev/null || true
+    sleep 0.3
+    if "$TMTV" -S "$SOCKET7" list-sessions 2>/dev/null | grep -q "popup1"; then
+        pass "display-popup doesn't crash server"
+    else
+        fail "display-popup doesn't crash server" "server died after display-popup"
+    fi
+else
+    fail "display-popup doesn't crash server" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET7" kill-server 2>/dev/null || true
+rm -f "$SOCKET7"
+
+# Test 15: popup with -E flag works (tmtv-8z3.7)
+# The -E flag closes the popup automatically when the command finishes.
+# This is the most common popup usage pattern.
+SOCKET8="/tmp/tmtv-test-popup-e-$$"
+"$TMTV" -S "$SOCKET8" new-session -d -s popup2 2>/dev/null
+if "$TMTV" -S "$SOCKET8" list-sessions 2>/dev/null | grep -q "popup2"; then
+    "$TMTV" -S "$SOCKET8" display-popup -t popup2 -E "echo popup-test-marker" 2>/dev/null || true
+    sleep 0.3
+    if "$TMTV" -S "$SOCKET8" list-sessions 2>/dev/null | grep -q "popup2"; then
+        pass "display-popup -E doesn't crash server"
+    else
+        fail "display-popup -E doesn't crash server" "server died after display-popup -E"
+    fi
+else
+    fail "display-popup -E doesn't crash server" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET8" kill-server 2>/dev/null || true
+rm -f "$SOCKET8"
+
+# Test 16: display-menu doesn't crash (tmtv-8z3.7)
+# Menus are another tmux 3.0+ overlay feature absent from tmate.
+SOCKET9="/tmp/tmtv-test-menu-$$"
+"$TMTV" -S "$SOCKET9" new-session -d -s menu1 2>/dev/null
+if "$TMTV" -S "$SOCKET9" list-sessions 2>/dev/null | grep -q "menu1"; then
+    "$TMTV" -S "$SOCKET9" display-menu -t menu1 -T "Test" a test "send-keys test" 2>/dev/null || true
+    sleep 0.3
+    if "$TMTV" -S "$SOCKET9" list-sessions 2>/dev/null | grep -q "menu1"; then
+        pass "display-menu doesn't crash server"
+    else
+        fail "display-menu doesn't crash server" "server died after display-menu"
+    fi
+else
+    fail "display-menu doesn't crash server" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET9" kill-server 2>/dev/null || true
+rm -f "$SOCKET9"
+
 echo ""
 echo "$((PASSED + FAILED)) tests: $PASSED passed, $FAILED failed"
 exit $FAILED

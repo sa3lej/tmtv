@@ -104,6 +104,8 @@ extern void tmate_write_copy_mode(struct tmate_session *session,
 				  struct window_pane *wp, const char *str);
 extern void tmate_write_fin(struct tmate_session *session);
 extern void tmate_send_reconnection_state(struct tmate_session *session);
+extern void tmate_expand_status(void);
+extern void tmate_start_status_timer(struct tmate_session *session);
 
 /* tmate-decoder.c */
 
