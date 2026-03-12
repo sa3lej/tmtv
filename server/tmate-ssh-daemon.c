@@ -226,6 +226,7 @@ static void on_idle_timer(__unused evutil_socket_t fd,
 			   session->link_ttl);
 		tmate_notify("Session expired (TTL: %ds)",
 			     session->link_ttl);
+		tmate_send_fin_to_ws_clients(session);
 		request_server_termination();
 		return;
 	}
@@ -237,6 +238,7 @@ static void on_idle_timer(__unused evutil_socket_t fd,
 			   max_lifetime);
 		tmate_notify("Session ended: max lifetime (%ds) reached",
 			     max_lifetime);
+		tmate_send_fin_to_ws_clients(session);
 		request_server_termination();
 		return;
 	}
@@ -249,6 +251,7 @@ static void on_idle_timer(__unused evutil_socket_t fd,
 			   idle_timeout);
 		tmate_notify("Session ended: idle timeout (%ds) with no viewers",
 			     idle_timeout);
+		tmate_send_fin_to_ws_clients(session);
 		request_server_termination();
 		return;
 	}
@@ -554,6 +557,7 @@ static void handle_session_name_options(const char *name,
 }
 
 extern void tmate_disconnect_ws_clients(struct tmate_session *session);
+extern void tmate_send_fin_to_ws_clients(struct tmate_session *session);
 
 static void handle_web_sharing_option(const char *name, const char *val)
 {
