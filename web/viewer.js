@@ -311,7 +311,7 @@
   }
 
   var reconnectAttempts = 0;
-  var maxReconnect = 5;
+  var maxReconnect = 3;
   var sessionEnded = false;
   var everConnected = false;
   var sessionReadonly = true;     /* assume RO until server says otherwise */
@@ -492,15 +492,18 @@
         sessionStart = Date.now();
         durationTimer = setInterval(updateMeta, 1000);
       }
-      /* Watchdog: if no data arrives within 10s of connecting,
+      /* Watchdog: if no data arrives shortly after connecting,
        * the session is likely dead (server holds connection open
-       * but child process is gone). Treat as connection error. */
+       * but child process is gone). Treat as connection error.
+       * Use a shorter timeout on reconnects — we already had data
+       * before, so the screen dump should arrive quickly. */
+      var watchdogMs = everConnected ? 3000 : 10000;
       silenceTimer = setTimeout(function() {
         if (!dataReceived && !sessionEnded) {
           es.close();
           es.onerror();
         }
-      }, 10000);
+      }, watchdogMs);
     };
 
     es.onmessage = function(evt) {
