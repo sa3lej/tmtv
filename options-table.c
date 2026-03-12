@@ -1127,7 +1127,14 @@ const struct options_table_entry options_table[] = {
 	  .text = "Password required for SSH viewers to connect."
 	},
 
-	{ .name = "tmtv-session-name-ro",
+	{ .name = "tmtv-web-input",
+  .type = OPTIONS_TABLE_FLAG,
+  .scope = OPTIONS_TABLE_SERVER,
+  .default_num = 0,
+  .text = "Allow read-write web viewers to send keyboard input."
+},
+
+{ .name = "tmtv-session-name-ro",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .default_str = "",

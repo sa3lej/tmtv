@@ -1091,6 +1091,66 @@ remote "rm -f $PW_CONF" 2>/dev/null || true
 sleep 1
 
 # -------------------------------------------------------
+# Test: Web input DISABLED by default — POST rejected
+# -------------------------------------------------------
+WID_CONF="/tmp/.tmtv-test-wid-$TESTID.conf"
+WID_SESSNAME="wid$TESTID"
+remote "cat > $WID_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$WID_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $WID_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+sleep 4
+
+WID_TOKEN=$(remote "readlink $SESSIONS_DIR/$WID_SESSNAME 2>/dev/null" || echo "")
+
+if [ -n "$WID_TOKEN" ]; then
+	# Test: SSE stream works (web sharing is on)
+	WID_SSE=$(curl -s -m 5 "$SSE_BASE/$WID_TOKEN" 2>/dev/null | head -5)
+	if echo "$WID_SSE" | grep -q "data:"; then
+		pass "web sharing on, web input off: SSE works"
+	else
+		fail "web sharing on, web input off: SSE works" "no SSE data"
+	fi
+
+	# Test: POST input rejected when web input not enabled (default off)
+	WID_POST_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
+		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
+		"$SSE_BASE/$WID_TOKEN/input" 2>/dev/null || echo "000")
+	if [ "$WID_POST_CODE" = "403" ]; then
+		pass "POST input rejected when web input disabled (default)"
+	else
+		fail "POST input rejected when web input disabled (default)" "got HTTP $WID_POST_CODE"
+	fi
+
+	# Test: Enable web input at runtime, POST should succeed
+	remote_tmtv "set-option -g tmtv-web-input on"
+	sleep 2
+	WID_ON_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" \
+		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
+		"$SSE_BASE/$WID_TOKEN/input" 2>/dev/null || echo "000")
+	if [ "$WID_ON_CODE" = "200" ]; then
+		pass "POST input accepted after runtime enable"
+	else
+		fail "POST input accepted after runtime enable" "got HTTP $WID_ON_CODE"
+	fi
+else
+	skip "web input disabled tests" "could not create session"
+fi
+
+# Clean up web input disabled session
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $WID_CONF" 2>/dev/null || true
+sleep 1
+
+# -------------------------------------------------------
 # Test: Web input — bidirectional SSH <-> web typing
 # -------------------------------------------------------
 WI_CONF="/tmp/.tmtv-test-wi-$TESTID.conf"
@@ -1132,12 +1192,12 @@ if [ -n "$WI_TOKEN" ]; then
 	fi
 
 	# Test: POST input to RO token returns 403
-	WI_RO_TOKEN=$(remote "readlink $SESSIONS_DIR/ro-$WI_SESSNAME 2>/dev/null || \
-		ls $SESSIONS_DIR/ 2>/dev/null | grep '^ro-'" || echo "")
-	if [ -n "$WI_RO_TOKEN" ]; then
+	# Use the named RO token directly (ro-SESSNAME), not readlink (which
+	# gives the RW token the symlink points to)
+	if remote "test -L $SESSIONS_DIR/ro-$WI_SESSNAME"; then
 		WI_RO_POST_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
 			-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
-			"$SSE_BASE/$WI_RO_TOKEN/input" 2>/dev/null || echo "000")
+			"$SSE_BASE/ro-$WI_SESSNAME/input" 2>/dev/null || echo "000")
 		if [ "$WI_RO_POST_CODE" = "403" ]; then
 			pass "POST input to RO token returns 403"
 		else
@@ -1198,7 +1258,7 @@ if [ -n "$WI_TOKEN" ]; then
 	fi
 
 	# Test: Disable web input, POST should return 403
-	remote_tmtv "set-option -t main tmtv-set tmtv-web-input=off"
+	remote_tmtv "set-option -g tmtv-web-input off"
 	sleep 1
 	WI_OFF_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
 		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "blocked" \

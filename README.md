@@ -183,6 +183,30 @@ tmtv attach -t work
 
 Run your own tmtv relay server instead of using tmtv.se.
 
+### Docker Compose (recommended)
+
+```sh
+docker compose up -d
+```
+
+That's it — SSH sharing on port 2222. Clients connect via `ssh TOKEN@your.host.com -p 2222`.
+
+For production with TLS and web viewing:
+
+```sh
+TMTV_DOMAIN=share.example.com docker compose --profile tls up -d
+```
+
+SSH host keys persist in a Docker volume. Configuration via environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TMTV_DOMAIN` | Hostname in connection strings | `localhost` |
+| `TMTV_SSH_PORT` | SSH listen port | `2222` |
+| `TMTV_IDLE_TIMEOUT` | Disconnect idle sessions (seconds) | `3600` |
+| `TMTV_MAX_LIFETIME` | Maximum session lifetime (seconds) | `86400` |
+| `TMTV_LOG_LEVEL` | Log verbosity (0=quiet, 1+=verbose) | `0` |
+
 ### Building from source
 
 #### Linux (Debian/Ubuntu)

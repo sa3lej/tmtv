@@ -235,6 +235,13 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 		else
 			tmate_set_val("web_sharing", value ? value : "off");
 	}
+	if (strcmp(name, "tmtv-web-input") == 0) {
+		extern void tmate_set_val(const char *, const char *);
+		if (args_has(args, 'u'))
+			tmate_set_val("web_input", "off");
+		else
+			tmate_set_val("web_input", value ? value : "off");
+	}
 #else
 	/* Server side: process option hooks */
 	{
