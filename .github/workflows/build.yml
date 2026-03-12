@@ -68,11 +68,13 @@ jobs:
             exit 1
           fi
 
-          # Install client binary where tests expect it
+          # Install binaries where tests expect them
           sudo cp ./tmtv /usr/local/bin/tmtv
+          sudo cp ./tmtv-server /usr/local/bin/tmtv-server
 
           # Run integration tests in local/quick mode
           TEST_HOST=localhost WEB_PROTO=http WEB_PORT=0 \
+            REMOTE_KEYS_DIR="$KEYS_DIR" \
             sh tests/test-integration.sh --quick --local || {
             echo "Integration tests failed"
             sudo kill $(pgrep -f tmtv-server) 2>/dev/null || true
