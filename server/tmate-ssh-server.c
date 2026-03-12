@@ -231,6 +231,7 @@ static int auth_pubkey_cb(__unused ssh_session session,
 			return SSH_AUTH_DENIED;
 		}
 
+		free(client->username);
 		client->username = xstrdup(user);
 
 		const char *key_type = ssh_key_type_to_char(ssh_key_type(pubkey));
@@ -279,6 +280,7 @@ static int auth_none_cb(__unused ssh_session session, const char *user, void *us
 		return SSH_AUTH_DENIED;
 	}
 
+	free(client->username);
 	client->username = xstrdup(user);
 	client->pubkey = NULL;
 
@@ -297,6 +299,7 @@ static int auth_password_cb(__unused ssh_session session,
 		return SSH_AUTH_DENIED;
 	}
 
+	free(client->username);
 	client->username = xstrdup(user);
 	client->pubkey = NULL;
 
@@ -417,14 +420,13 @@ static void client_bootstrap(struct tmate_session *_session)
 
 static int get_client_ip_socket(int fd, char *dst, size_t len)
 {
-	struct sockaddr sa;
+	struct sockaddr_storage sa;
 	socklen_t sa_len = sizeof(sa);
 
-	if (getpeername(fd, &sa, &sa_len) < 0)
+	if (getpeername(fd, (struct sockaddr *)&sa, &sa_len) < 0)
 		return -1;
 
-
-	switch (sa.sa_family) {
+	switch (((struct sockaddr *)&sa)->sa_family) {
 	case AF_INET:
 		if (!inet_ntop(AF_INET, &((struct sockaddr_in *)&sa)->sin_addr,
 			       dst, len))
@@ -524,14 +526,18 @@ static void ssh_import_key(ssh_bind bind, const char *keys_dir, const char *name
 	char path[PATH_MAX];
 	ssh_key key = NULL;
 
-	sprintf(path, "%s/%s", keys_dir, name);
+	snprintf(path, sizeof(path), "%s/%s", keys_dir, name);
 
 	if (access(path, F_OK) < 0)
 		return;
 
 	tmate_info("Loading key %s", path);
 
-	ssh_pki_import_privkey_file(path, NULL, NULL, NULL, &key);
+	if (ssh_pki_import_privkey_file(path, NULL, NULL, NULL, &key) != SSH_OK ||
+	    key == NULL) {
+		tmate_info("Failed to load key %s", path);
+		return;
+	}
 	ssh_bind_options_set(bind, SSH_BIND_OPTIONS_IMPORT_KEY, key);
 }
 
@@ -788,9 +794,16 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 			pending_gc = 0;
 			gc_stale_sessions();
 
-			/* Process dead pids collected in signal handler */
+			/* Process dead pids collected in signal handler.
+			 * Block SIGCHLD to prevent race with the handler
+			 * modifying dead_pids while we read it. */
+			sigset_t block, prev;
+			sigemptyset(&block);
+			sigaddset(&block, SIGCHLD);
+			sigprocmask(SIG_BLOCK, &block, &prev);
 			int ndead = dead_pid_count;
 			dead_pid_count = 0;
+			sigprocmask(SIG_SETMASK, &prev, NULL);
 			for (int d = 0; d < ndead; d++) {
 				pid_t dpid = dead_pids[d];
 				sse_registry_remove_by_pid(&sse_reg, dpid);

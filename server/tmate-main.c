@@ -7,7 +7,6 @@
 #include <errno.h>
 #include <grp.h>
 #include <pwd.h>
-#include <unistd.h>
 #ifdef HAVE_CURSES_H
 #include <curses.h>
 #else
