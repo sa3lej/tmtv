@@ -479,13 +479,14 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 	if (path_len == 0)
 		return -1;
 
-	/* Check for "/input" suffix and strip it for token matching */
+	/* Check for "/input" suffix and strip it for token matching.
+	 * Note: is_post is set by the HTTP method check in sse_do_handshake,
+	 * not here — a GET to /token/input should not enter POST handling. */
 	{
 		const char *qmark = memchr(path, '?', path_len);
 		size_t pre_query = qmark ? (size_t)(qmark - path) : path_len;
 		if (pre_query > 6 &&
 		    memcmp(path + pre_query - 6, "/input", 6) == 0) {
-			wc->is_post = true;
 			/* Adjust: remove "/input" but keep query string */
 			if (qmark) {
 				/* path is: TOKEN/input?query...
@@ -750,14 +751,6 @@ static int sse_do_handshake(struct ws_client *wc)
 		}
 	}
 
-	/* Handle CORS preflight for POST */
-	if (!is_post_method && strncmp(data, "OPTIONS ", 8) == 0) {
-		/* This branch can't be reached (we reject OPTIONS above),
-		 * but handle it defensively */
-		evbuffer_drain(input, (header_end - data) + 4);
-		return -1;
-	}
-
 	if (is_post_method) {
 		/* CSRF protection: require X-Tmtv-Input header.
 		 * This forces a CORS preflight for cross-origin requests,
@@ -925,7 +918,7 @@ static int count_web_viewers(struct tmate_session *session)
 	struct ws_client *wc;
 	int count = 0;
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
-		if (wc->handshake_done)
+		if (wc->handshake_done && !wc->is_post)
 			count++;
 	}
 	return count;
@@ -986,9 +979,9 @@ void tmate_broadcast_viewer_count(struct tmate_session *session)
 	snprintf(buf, sizeof(buf), "%d", web);
 	tmate_set_env("tmtv_web_viewers", buf);
 
-	/* Broadcast to all SSE clients */
+	/* Broadcast to all SSE clients (skip POST) */
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
-		if (wc->handshake_done)
+		if (wc->handshake_done && !wc->is_post)
 			sse_send_viewer_count(wc->bev, ssh_rw, ssh_ro, web);
 	}
 
@@ -1061,7 +1054,7 @@ void tmate_disconnect_ws_clients(struct tmate_session *session)
 	/* Send FIN to each client before disconnecting so the browser
 	 * can show "session ended" instead of retrying forever. */
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
-		if (wc->handshake_done)
+		if (wc->handshake_done && !wc->is_post)
 			sse_send_fin(wc->bev);
 	}
 
@@ -1214,7 +1207,7 @@ static void on_ws_client_event(__unused struct bufferevent *bev,
 {
 	struct ws_client *wc = arg;
 
-	if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR))
+	if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR | BEV_EVENT_TIMEOUT))
 		ws_client_free(wc);
 }
 
@@ -1391,7 +1384,7 @@ static void on_websocket_encoder_write(void *userdata, struct evbuffer *buffer)
 	pty_replay_append(data, len);
 
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
-		if (wc->handshake_done)
+		if (wc->handshake_done && !wc->is_post)
 			sse_send_data(wc->bev, data, len);
 	}
 
@@ -1470,7 +1463,7 @@ static bool ws_has_clients(struct tmate_session *session)
 {
 	struct ws_client *wc;
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
-		if (wc->handshake_done)
+		if (wc->handshake_done && !wc->is_post)
 			return true;
 	}
 	return false;
@@ -1579,9 +1572,9 @@ void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 	/* Store in replay buffer */
 	pty_replay_append((unsigned char *)sbuf.data, sbuf.size);
 
-	/* Broadcast to all connected SSE clients */
+	/* Broadcast to all connected SSE clients (skip POST) */
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
-		if (wc->handshake_done)
+		if (wc->handshake_done && !wc->is_post)
 			sse_send_data(wc->bev, (unsigned char *)sbuf.data, sbuf.size);
 	}
 
