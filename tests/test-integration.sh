@@ -1829,15 +1829,34 @@ fi
 # OUT_STATUS (type 5) is sent by the client when the status bar
 # changes.  Before the fix in v1.3.8, the right side was always
 # empty because tmate_status() was never called from status_redraw().
-if [ -n "$TOKEN" ]; then
+# Start a fresh session — previous sections may have killed the server.
+STATUS_CONF="/tmp/.tmtv-test-status-$TESTID.conf"
+STATUS_SESSNAME="status-$TESTID"
+remote "cat > $STATUS_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$STATUS_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $STATUS_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+sleep 4
+
+STATUS_TOKEN=$(remote "readlink $SESSIONS_DIR/$STATUS_SESSNAME 2>/dev/null" || echo "")
+
+if [ -n "$STATUS_TOKEN" ]; then
 	# Trigger a status update — set a custom status-right, wait for
 	# the client to render it and send OUT_STATUS to the server.
-	remote_tmtv "set-option -g status-right 'RIGHTTEST %H:%M'"
+	remote "TERM=xterm-256color $REMOTE_TMTV -f $STATUS_CONF set-option -g status-right 'RIGHTTEST %H:%M'" 2>/dev/null || true
 	sleep 3
 
 	# Capture ~5s of SSE data, extract data: lines, decode and
 	# look for OUT_STATUS messages with Python.
-	SSE_STATUS_RAW=$(curl -s -m 5 -N "$SSE_BASE/$TOKEN" 2>/dev/null || echo "")
+	SSE_STATUS_RAW=$(curl -s -m 5 -N "$SSE_BASE/$STATUS_TOKEN" 2>/dev/null || echo "")
 	SSE_STATUS_RESULT=$(echo "$SSE_STATUS_RAW" | python3 -c '
 import sys, base64, struct
 
@@ -1970,12 +1989,13 @@ else:
 			"RIGHTTEST not found: $SSE_STATUS_RESULT"
 	fi
 
-	# Restore default
-	remote_tmtv "set-option -gu status-right"
+	# Cleanup: kill the status test session
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+	remote "rm -f $STATUS_CONF" 2>/dev/null || true
 	sleep 1
 else
-	skip "SSE OUT_STATUS has non-empty left and right (no token)"
-	skip "SSE OUT_STATUS right contains custom text (no token)"
+	skip "SSE OUT_STATUS has non-empty left and right" "could not create session"
+	skip "SSE OUT_STATUS right contains custom text" "could not create session"
 fi
 
 # -------------------------------------------------------
