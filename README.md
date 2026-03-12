@@ -334,6 +334,10 @@ TEST_HOST=<host> sh test-integration.sh --quick
 
 ISC license, same as tmux.
 
+## Support
+
+If tmtv is useful to you, [buy me a coffee](https://buymeacoffee.com/lejo).
+
 ## Acknowledgments
 
 - [tmux](https://github.com/tmux/tmux) by Nicholas Marriott and contributors
