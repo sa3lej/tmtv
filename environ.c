@@ -231,13 +231,14 @@ environ_log(struct environ *env, const char *fmt, ...)
 	char			*prefix;
 
 	va_start(ap, fmt);
-	vasprintf(&prefix, fmt, ap);
+	if (vasprintf(&prefix, fmt, ap) == -1)
+		prefix = NULL;
 	va_end(ap);
 
 	RB_FOREACH(envent, environ, env) {
 		if (envent->value != NULL && *envent->name != '\0') {
-			log_debug("%s%s=%s", prefix, envent->name,
-			    envent->value);
+			log_debug("%s%s=%s", prefix != NULL ? prefix : "",
+			    envent->name, envent->value);
 		}
 	}
 

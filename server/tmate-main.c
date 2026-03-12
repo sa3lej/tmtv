@@ -375,7 +375,8 @@ void get_in_jail(void)
 		tmate_fatal("Cannot setuid()");
 #endif
 
-	nice(1);
+	if (nice(1) == -1 && errno != 0)
+		tmate_debug("nice(1) failed: %s", strerror(errno));
 
 	tmate_debug("Dropped privileges to %s (%d,%d), jailed in %s",
 		    TMATE_JAIL_USER, uid, gid, TMATE_WORKDIR "/jail");

@@ -508,27 +508,20 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 	/* Check for "/input" suffix and strip it for token matching.
 	 * Note: is_post is set by the HTTP method check in sse_do_handshake,
 	 * not here — a GET to /token/input should not enter POST handling. */
+	size_t input_suffix_len = 0;
 	{
 		const char *qmark = memchr(path, '?', path_len);
 		size_t pre_query = qmark ? (size_t)(qmark - path) : path_len;
 		if (pre_query > 6 &&
-		    memcmp(path + pre_query - 6, "/input", 6) == 0) {
-			/* Adjust: remove "/input" but keep query string */
-			if (qmark) {
-				/* path is: TOKEN/input?query...
-				 * We want TOKEN?query... for matching */
-				path_len -= 6; /* shrinks pre_query part */
-				/* Move query portion left by 6 */
-				/* Actually, just set token_only_len below */
-			} else {
-				path_len -= 6;
-			}
-		}
+		    memcmp(path + pre_query - 6, "/input", 6) == 0)
+			input_suffix_len = 6;
 	}
 
 	/* Separate token from query string (?password=...) */
 	query_start = memchr(path, '?', path_len);
-	token_only_len = query_start ? (size_t)(query_start - path) : path_len;
+	token_only_len = query_start ?
+		(size_t)(query_start - path) - input_suffix_len :
+		path_len - input_suffix_len;
 
 	/* Assume RW until we match an RO token */
 	wc->readonly = false;
@@ -1127,8 +1120,6 @@ static void handle_post_input(struct ws_client *wc)
 
 	/* Reject if web input is not enabled or viewer is RO */
 	if (!session->web_input_enabled || wc->readonly) {
-		tmate_debug("POST input rejected: web_input=%d readonly=%d",
-			    session->web_input_enabled, wc->readonly);
 		bufferevent_write(wc->bev, forbidden, strlen(forbidden));
 		ws_client_free_after_flush(wc);
 		return;

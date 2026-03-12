@@ -819,7 +819,8 @@ client_dispatch_attached(struct imsg *imsg)
 		if (datalen == 0 || data[datalen - 1] != '\0')
 			fatalx("bad MSG_LOCK string");
 
-		system(data);
+		if (system(data) != 0)
+			log_debug("lock command returned non-zero");
 		proc_send(client_peer, MSG_UNLOCK, -1, NULL, 0);
 		break;
 	}

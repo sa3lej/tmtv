@@ -74,7 +74,7 @@ static void tmate_ready(struct tmate_session *session,
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_1);
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_2);
 		tmate_notify(AUTHORIZED_KEYS_ONLY_ERROR_MSG_3);
-		tmate_notify("");
+		tmate_notify("%s", "");
 		kill(getpid(), SIGTERM);
 	}
 

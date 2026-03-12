@@ -79,6 +79,38 @@ Can also be set in config:
 set -g tmtv-session-password secret
 ```
 
+### All sharing options
+
+Here's every sharing option in one place:
+
+```
+# ~/.tmtv.conf
+
+# Web sharing (off by default, SSH is always on)
+set -g tmtv-web-sharing on
+
+# Allow RW web viewers to type (off by default)
+set -g tmtv-web-input on
+
+# Named session — gives you a memorable URL
+set -g tmtv-session-name demo
+
+# Password — required for all viewers (SSH and web)
+set -g tmtv-session-password secret
+```
+
+All options can be combined freely. A named session with password and web input gives you:
+- `ssh 12345-demo@tmtv.se` — SSH read-write (password required)
+- `ssh ro-demo@tmtv.se` — SSH read-only (password required)
+- `https://tmtv.se/s/demo` — web viewer with typing enabled (password prompt shown)
+
+Options can also be toggled at runtime:
+
+```sh
+tmtv set -g tmtv-web-sharing on    # enable web sharing mid-session
+tmtv set -g tmtv-web-input off     # disable web input mid-session
+```
+
 ## GitHub Action
 
 Debug CI failures by SSH-ing into your runner. Drop-in replacement for `action-tmate`:
@@ -286,11 +318,14 @@ Web sharing is off by default. If you want browser-based viewing, add `-z 4002` 
 
 A production-ready Caddyfile is provided in [`deploy/Caddyfile`](deploy/Caddyfile). It includes Caddy templates for dynamic page titles (link previews show the session name in Slack, Discord, iMessage). Replace `tmtv.se` with your hostname.
 
-Copy the web viewer from the `web/` directory:
+Build and deploy the web viewer:
 
 ```sh
+cd site && npm ci && npm run build && cd ..
 sudo mkdir -p /var/www/tmtv
-sudo cp web/viewer.html web/viewer.js /var/www/tmtv/
+sudo cp site/dist/index.html /var/www/tmtv/
+sudo cp site/dist/viewer/index.html /var/www/tmtv/viewer.html
+sudo cp web/viewer.js /var/www/tmtv/
 ```
 
 #### 5. Firewall
@@ -357,7 +392,7 @@ cd tests && make all
 
 #### Integration tests
 
-Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, viewer counts, and more (36+ tests).
+Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, viewer counts, web input, and more (77+ tests).
 
 **Build machine requirements** (where you run the tests):
 - `ssh`, `curl`
@@ -366,7 +401,7 @@ Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, vi
 **Test machine requirements** (the server):
 - `tmtv-server` running via systemd
 - `tmtv` client binary
-- Caddy (or any reverse proxy) on port 8080 with `/s/*` → `viewer.html` and `/ws/*` → SSE proxy
+- Caddy (or any reverse proxy) on port 8080 with `/s/*` → viewer page and `/ws/*` → SSE proxy
 - `expect` for SSH RW/RO tests: `apt install expect`
 - SSH host keys in `/root/keys/`
 
@@ -375,7 +410,6 @@ Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, vi
 make && \
   scp tmtv-server root@<host>:/usr/local/bin/tmtv-server && \
   scp tmtv root@<host>:/root/tmtv && \
-  scp web/viewer.html web/viewer.js root@<host>:/var/www/tmtv/ && \
   ssh root@<host> systemctl restart tmtv-server && \
   cd tests && TEST_HOST=<host> make integration
 ```

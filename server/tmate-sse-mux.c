@@ -39,6 +39,13 @@
 
 #include "tmate.h"
 
+/* Best-effort write for HTTP error/status responses on closing fds. */
+static void
+sse_write_response(int fd, const void *buf, size_t len)
+{
+	ssize_t __unused n = write(fd, buf, len);
+}
+
 /* --- Session registry --- */
 
 void sse_registry_init(struct sse_registry *reg)
@@ -338,7 +345,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 			"Access-Control-Max-Age: 86400\r\n"
 			"Content-Length: 0\r\n"
 			"\r\n";
-		(void)write(client_fd, cors, strlen(cors));
+		sse_write_response(client_fd, cors, strlen(cors));
 		close(client_fd);
 		return;
 	}
@@ -376,7 +383,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 				"\r\n"
 				"%s", body_len, body);
 
-			(void)write(client_fd, resp, resp_len);
+			sse_write_response(client_fd, resp, resp_len);
 			close(client_fd);
 			return;
 		}
@@ -390,7 +397,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 			"Content-Length: 0\r\n"
 			"Connection: close\r\n"
 			"\r\n";
-		(void)write(client_fd, not_found, strlen(not_found));
+		sse_write_response(client_fd, not_found, strlen(not_found));
 		close(client_fd);
 		return;
 	}
@@ -403,7 +410,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 			"Content-Length: 0\r\n"
 			"Connection: close\r\n"
 			"\r\n";
-		(void)write(client_fd, not_found, strlen(not_found));
+		sse_write_response(client_fd, not_found, strlen(not_found));
 		close(client_fd);
 		return;
 	}
@@ -423,7 +430,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 			"Content-Length: 0\r\n"
 			"Connection: close\r\n"
 			"\r\n";
-		(void)write(client_fd, err, strlen(err));
+		sse_write_response(client_fd, err, strlen(err));
 	}
 
 	/* Main process closes its copy; daemon has the fd now */

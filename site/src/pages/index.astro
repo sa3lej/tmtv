@@ -2,7 +2,34 @@
 import Base from '../layouts/Base.astro';
 ---
 
-<Base title="tmtv — SSH terminal sharing">
+<Base title="tmtv — SSH terminal sharing built on modern tmux">
+  <!-- Structured data -->
+  <script type="application/ld+json" is:inline>
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "tmtv",
+    "description": "Share your terminal over SSH with tmtv — a modern tmate alternative built on tmux 3.6a. Pair program in your terminal with read-write and read-only SSH tokens.",
+    "url": "https://tmtv.se",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux, macOS",
+    "license": "https://opensource.org/licenses/ISC",
+    "softwareVersion": "1.3.4",
+    "author": {
+      "@type": "Person",
+      "name": "Lars-Erik Jonsson",
+      "url": "https://github.com/sa3lej"
+    },
+    "codeRepository": "https://github.com/sa3lej/tmtv",
+    "downloadUrl": "https://tmtv.se/install.sh",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    }
+  }
+  </script>
+
   <!-- Background gradients -->
   <div class="fixed inset-0 -z-10">
     <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_50%,rgba(40,20,80,0.3)_0%,transparent_60%)]"></div>
@@ -193,61 +220,131 @@ import Base from '../layouts/Base.astro';
 
   <!-- What's new -->
   <div class="max-w-2xl mx-auto px-5 pb-16">
-    <h2 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] text-center mb-6">
+    <h2 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] text-center mb-10">
       What's new
     </h2>
-    <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 space-y-1">
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.3.4</span>
-        <span class="text-sm text-gray-300">Web input that actually works.</span>
+
+    <!-- Timeline -->
+    <div class="relative ml-4 sm:ml-8" role="list" aria-label="Release history">
+      <!-- Vertical timeline line -->
+      <div class="absolute left-[7px] top-3 bottom-3 w-px bg-gradient-to-b from-tmtv-green via-tmtv-blue to-tmtv-purple/30" aria-hidden="true"></div>
+
+      <!-- Latest release — featured -->
+      <div class="relative pl-8 pb-8 group" role="listitem">
+        <div class="absolute left-0 top-1.5 w-[15px] h-[15px] rounded-full border-2 border-tmtv-green bg-tmtv-bg motion-safe:group-hover:shadow-[0_0_8px_rgba(61,220,132,0.5)] motion-safe:transition-shadow" aria-hidden="true">
+          <div class="absolute inset-[3px] rounded-full bg-tmtv-green"></div>
+        </div>
+        <div class="bg-white/[0.03] border border-tmtv-green/20 rounded-xl p-5 motion-safe:group-hover:border-tmtv-green/40 motion-safe:transition-colors">
+          <div class="flex flex-wrap items-center gap-2.5 mb-2">
+            <span class="inline-flex items-center font-mono text-xs font-bold bg-tmtv-green/15 text-tmtv-green px-2.5 py-1 rounded-md tracking-wide">v1.3.4</span>
+            <span class="text-[11px] font-medium text-tmtv-green/70 uppercase tracking-wider">Latest</span>
+          </div>
+          <p class="text-[15px] text-gray-200 font-medium leading-snug">Web input that actually works.</p>
+        </div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.3.3</span>
-        <span class="text-sm text-gray-300">The config that finally clicks.</span>
+
+      <!-- v1.3.x releases -->
+      <div class="relative pl-8 pb-5 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-blue/60 motion-safe:group-hover:bg-tmtv-blue motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-blue/80 shrink-0">v1.3.3</span>
+          <span class="text-sm text-gray-300 motion-safe:group-hover:text-gray-200 motion-safe:transition-colors">The config that finally clicks.</span>
+        </div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.3.2</span>
-        <span class="text-sm text-gray-300">Your server, one command.</span>
+
+      <div class="relative pl-8 pb-5 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-blue/60 motion-safe:group-hover:bg-tmtv-blue motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-blue/80 shrink-0">v1.3.2</span>
+          <span class="text-sm text-gray-300 motion-safe:group-hover:text-gray-200 motion-safe:transition-colors">Your server, one command.</span>
+        </div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.3.1</span>
-        <span class="text-sm text-gray-300">The server that cleans up after itself.</span>
+
+      <div class="relative pl-8 pb-5 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-blue/60 motion-safe:group-hover:bg-tmtv-blue motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-blue/80 shrink-0">v1.3.1</span>
+          <span class="text-sm text-gray-300 motion-safe:group-hover:text-gray-200 motion-safe:transition-colors">The server that cleans up after itself.</span>
+        </div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.3.0</span>
-        <span class="text-sm text-gray-300">The viewer learns to type.</span>
+
+      <div class="relative pl-8 pb-5 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-blue/60 motion-safe:group-hover:bg-tmtv-blue motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-blue/80 shrink-0">v1.3.0</span>
+          <span class="text-sm text-gray-300 motion-safe:group-hover:text-gray-200 motion-safe:transition-colors">The viewer learns to type.</span>
+        </div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.7</span>
-        <span class="text-sm text-gray-300">Your sessions, password-protected.</span>
+
+      <!-- Minor version divider -->
+      <div class="relative pl-8 pb-4" aria-hidden="true">
+        <div class="absolute left-[3px] top-2 w-[9px] h-[1px] bg-white/10"></div>
+        <div class="border-t border-white/[0.04] ml-1"></div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.6</span>
-        <span class="text-sm text-gray-300">Your terminal, your rules.</span>
+
+      <!-- v1.2.x releases -->
+      <div class="relative pl-8 pb-5 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-purple/50 motion-safe:group-hover:bg-tmtv-purple/80 motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-purple/70 shrink-0">v1.2.7</span>
+          <span class="text-sm text-gray-400 motion-safe:group-hover:text-gray-300 motion-safe:transition-colors">Your sessions, password-protected.</span>
+        </div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.5</span>
-        <span class="text-sm text-gray-300">Detach and come back.</span>
+
+      <div class="relative pl-8 pb-5 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-purple/50 motion-safe:group-hover:bg-tmtv-purple/80 motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-purple/70 shrink-0">v1.2.6</span>
+          <span class="text-sm text-gray-400 motion-safe:group-hover:text-gray-300 motion-safe:transition-colors">Your terminal, your rules.</span>
+        </div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.4</span>
-        <span class="text-sm text-gray-300">Refresh without regret.</span>
+
+      <div class="relative pl-8 pb-5 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-purple/50 motion-safe:group-hover:bg-tmtv-purple/80 motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-purple/70 shrink-0">v1.2.5</span>
+          <span class="text-sm text-gray-400 motion-safe:group-hover:text-gray-300 motion-safe:transition-colors">Detach and come back.</span>
+        </div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.3</span>
-        <span class="text-sm text-gray-300">The viewer gets a makeover.</span>
+
+      <div class="relative pl-8 pb-5 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-purple/50 motion-safe:group-hover:bg-tmtv-purple/80 motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-purple/70 shrink-0">v1.2.4</span>
+          <span class="text-sm text-gray-400 motion-safe:group-hover:text-gray-300 motion-safe:transition-colors">Refresh without regret.</span>
+        </div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.2</span>
-        <span class="text-sm text-gray-300">The status bar that keeps its promises.</span>
+
+      <div class="relative pl-8 pb-5 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-purple/50 motion-safe:group-hover:bg-tmtv-purple/80 motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-purple/70 shrink-0">v1.2.3</span>
+          <span class="text-sm text-gray-400 motion-safe:group-hover:text-gray-300 motion-safe:transition-colors">The viewer gets a makeover.</span>
+        </div>
       </div>
-      <div class="flex items-baseline gap-3 py-1.5">
-        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.1</span>
-        <span class="text-sm text-gray-300">Your links now have faces.</span>
+
+      <div class="relative pl-8 pb-5 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-purple/50 motion-safe:group-hover:bg-tmtv-purple/80 motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-purple/70 shrink-0">v1.2.2</span>
+          <span class="text-sm text-gray-400 motion-safe:group-hover:text-gray-300 motion-safe:transition-colors">The status bar that keeps its promises.</span>
+        </div>
+      </div>
+
+      <div class="relative pl-8 pb-2 group" role="listitem">
+        <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-purple/50 motion-safe:group-hover:bg-tmtv-purple/80 motion-safe:transition-colors" aria-hidden="true"></div>
+        <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
+          <span class="font-mono text-xs font-semibold text-tmtv-purple/70 shrink-0">v1.2.1</span>
+          <span class="text-sm text-gray-400 motion-safe:group-hover:text-gray-300 motion-safe:transition-colors">Your links now have faces.</span>
+        </div>
       </div>
     </div>
-    <p class="text-center text-xs text-gray-400 mt-4">
-      <a href="https://github.com/sa3lej/tmtv/releases" class="text-gray-300 hover:text-gray-200 transition-colors underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">Full changelog on GitHub</a>
+
+    <p class="text-center text-xs text-gray-400 mt-8">
+      <a href="https://github.com/sa3lej/tmtv/releases" class="inline-flex items-center gap-1.5 text-gray-300 hover:text-gray-200 transition-colors underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">
+        Full changelog on GitHub
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17l9.2-9.2M17 17V7H7"/></svg>
+      </a>
     </p>
   </div>
 
