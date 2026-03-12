@@ -49,6 +49,7 @@ import Viewer from '../layouts/Viewer.astro';
         <span id="titlebar-label">tmtv</span>
         <span id="titlebar-meta"></span>
       </span>
+      <span id="session-mode" class="session-mode hidden"></span>
     </div>
 
     <div id="terminal-container" class="terminal-container"></div>
@@ -136,6 +137,16 @@ import Viewer from '../layouts/Viewer.astro';
     display: flex; align-items: center; gap: 8px;
   }
   #titlebar-meta { color: #666; font-size: 10px; font-weight: 400; }
+
+  .session-mode {
+    position: absolute; right: 14px;
+    font-family: "JetBrains Mono", monospace; font-size: 10px;
+    font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 3px;
+  }
+  .session-mode.hidden { display: none; }
+  .session-mode.ro { background: rgba(255,255,255,0.08); color: #888; }
+  .session-mode.rw { background: rgba(61,220,132,0.15); color: #3ddc84; }
 
   .terminal-container {
     background: #191d27; position: relative; flex: 0 0 auto; overflow: hidden;

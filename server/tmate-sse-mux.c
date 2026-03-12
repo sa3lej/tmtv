@@ -239,10 +239,13 @@ static int extract_token_from_http(const char *buf, size_t buflen,
 	const char *path_start, *path_end, *tok_start;
 	size_t tok_len;
 
-	if (buflen < 4 || strncmp(buf, "GET ", 4) != 0)
+	if (buflen >= 5 && strncmp(buf, "POST ", 5) == 0) {
+		path_start = buf + 5;
+	} else if (buflen >= 4 && strncmp(buf, "GET ", 4) == 0) {
+		path_start = buf + 4;
+	} else {
 		return -1;
-
-	path_start = buf + 4;
+	}
 	path_end = memchr(path_start, ' ', buflen - 4);
 	if (!path_end)
 		return -1;
@@ -267,6 +270,10 @@ static int extract_token_from_http(const char *buf, size_t buflen,
 		if (qmark)
 			tok_len = qmark - tok_start;
 	}
+
+	/* Strip "/input" suffix (POST input endpoint) */
+	if (tok_len > 6 && memcmp(tok_start + tok_len - 6, "/input", 6) == 0)
+		tok_len -= 6;
 
 	if (tok_len == 0 || tok_len >= dst_len)
 		return -1;
@@ -313,6 +320,23 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 
 	/* Need at least the first HTTP line (ends with \r\n) */
 	if (!memchr(buf, '\n', n)) {
+		close(client_fd);
+		return;
+	}
+
+	/* Handle CORS preflight (OPTIONS) directly — no daemon needed */
+	if (n >= 8 && strncmp(buf, "OPTIONS ", 8) == 0) {
+		/* Consume the peeked data */
+		(void)recv(client_fd, buf, sizeof(buf) - 1, 0);
+		static const char *cors =
+			"HTTP/1.1 204 No Content\r\n"
+			"Access-Control-Allow-Origin: *\r\n"
+			"Access-Control-Allow-Methods: GET, POST\r\n"
+			"Access-Control-Allow-Headers: Content-Type, X-Tmtv-Input\r\n"
+			"Access-Control-Max-Age: 86400\r\n"
+			"Content-Length: 0\r\n"
+			"\r\n";
+		(void)write(client_fd, cors, strlen(cors));
 		close(client_fd);
 		return;
 	}

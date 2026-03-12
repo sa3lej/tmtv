@@ -103,9 +103,9 @@ import Base from '../layouts/Base.astro';
       </div>
       <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 text-center">
         <div class="font-mono text-2xl font-bold mb-3 bg-gradient-to-br from-tmtv-blue to-tmtv-purple bg-clip-text text-transparent" aria-hidden="true">3</div>
-        <h3 class="text-sm font-semibold text-gray-300 mb-2">Or just watch</h3>
+        <h3 class="text-sm font-semibold text-gray-300 mb-2">Or use the browser</h3>
         <p class="text-xs text-gray-400 leading-relaxed">
-          Open the web viewer if you don't have a terminal handy. Zero install.
+          Open the web viewer if you don't have a terminal handy. Watch, or type along with a read-write token. Zero install.
         </p>
       </div>
     </div>
@@ -126,7 +126,21 @@ import Base from '../layouts/Base.astro';
       </div>
       <div class="text-center py-4">
         <div class="text-[11px] font-medium text-gray-400 tracking-wide">Web viewer</div>
-        <div class="font-mono text-xs text-tmtv-green mt-1">view-only, zero install</div>
+        <div class="font-mono text-xs text-tmtv-green mt-1">view or interact, zero install</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CI debugging -->
+  <div class="max-w-2xl mx-auto px-5 pb-12">
+    <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6">
+      <h3 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] mb-3">Debug CI failures</h3>
+      <p class="text-xs text-gray-400 leading-relaxed mb-4">
+        Drop <code class="font-mono text-[11px] bg-tmtv-blue/10 text-tmtv-blue px-1.5 py-0.5 rounded">sa3lej/action-tmtv@v1</code> into your GitHub Actions workflow. When a job fails, SSH in and debug it live. Drop-in replacement for <code class="font-mono text-[11px] bg-white/5 px-1.5 py-0.5 rounded text-gray-300">action-tmate</code>.
+      </p>
+      <div class="bg-black/40 rounded-xl p-4 font-mono text-[12px] text-gray-300 leading-relaxed">
+        <div><span class="text-tmtv-purple">- name:</span> <span class="text-gray-300">Debug via SSH</span></div>
+        <div>&nbsp; <span class="text-tmtv-purple">uses:</span> <span class="text-tmtv-blue">sa3lej/action-tmtv@v1</span></div>
       </div>
     </div>
   </div>
@@ -179,6 +193,10 @@ import Base from '../layouts/Base.astro';
       What's new
     </h2>
     <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 space-y-1">
+      <div class="flex items-baseline gap-3 py-1.5">
+        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.3.0</span>
+        <span class="text-sm text-gray-300">The viewer learns to type.</span>
+      </div>
       <div class="flex items-baseline gap-3 py-1.5">
         <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.7</span>
         <span class="text-sm text-gray-300">Your sessions, password-protected.</span>

@@ -23,6 +23,7 @@
   var OUT_STATUS        = 5;
   var OUT_FIN           = 8;
   var OUT_VIEWER_COUNT  = 14;
+  var OUT_SESSION_MODE  = 15;
 
   var FONT = '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace';
   /* macOS Terminal.app "Clear Dark" palette */
@@ -106,11 +107,12 @@
   }
 
   function createPaneTerminal(sx, sy) {
+    var disableInput = sessionReadonly || !webInputEnabled;
     return new Terminal({
       fontFamily: FONT, fontSize: fontSize, lineHeight: 1.15,
       theme: THEME, cols: sx, rows: sy, scrollback: 0,
-      cursorBlink: false, cursorStyle: 'block',
-      disableStdin: true, allowProposedApi: true
+      cursorBlink: !disableInput, cursorStyle: 'block',
+      disableStdin: disableInput, allowProposedApi: true
     });
   }
 
@@ -175,7 +177,15 @@
         container.appendChild(el);
         var t = createPaneTerminal(sx, sy);
         t.open(el);
-        panes[id] = { term: t, el: el, sx: sx, sy: sy, needsRefresh: true };
+        panes[id] = { term: t, el: el, sx: sx, sy: sy, needsRefresh: true, _inputBound: false };
+        /* Bind input handler if web input is active */
+        if (!sessionReadonly && webInputEnabled) {
+          t.options.disableStdin = false;
+          panes[id]._inputBound = true;
+          (function(pane) {
+            pane.term.onData(function(data) { queueInput(data); });
+          })(panes[id]);
+        }
         if (pendingData[id]) {
           for (var j = 0; j < pendingData[id].length; j++) {
             var d = pendingData[id][j];
@@ -307,6 +317,66 @@
   var maxReconnect = 5;
   var sessionEnded = false;
   var everConnected = false;
+  var sessionReadonly = true;     /* assume RO until server says otherwise */
+  var webInputEnabled = false;
+  var inputBatchTimer = null;
+  var inputBatch = '';
+
+  function sendInputBatch() {
+    if (!inputBatch) return;
+    var data = inputBatch;
+    inputBatch = '';
+    var url = buildSseUrl().replace(/\?.*$/, '') + '/input';
+    var pw = sessionPassword;
+    if (pw) url += '?password=' + encodeURIComponent(pw);
+    fetch(url, {
+      method: 'POST',
+      body: data,
+      headers: { 'Content-Type': 'text/plain', 'X-Tmtv-Input': '1' }
+    }).catch(function() {});
+  }
+
+  function queueInput(data) {
+    if (sessionReadonly || !webInputEnabled) return;
+    inputBatch += data;
+    if (!inputBatchTimer) {
+      inputBatchTimer = setTimeout(function() {
+        inputBatchTimer = null;
+        sendInputBatch();
+      }, 30);
+    }
+  }
+
+  function updateSessionModeBadge() {
+    var badge = document.getElementById('session-mode');
+    if (!badge) return;
+    if (sessionReadonly) {
+      badge.textContent = 'view-only';
+      badge.className = 'session-mode ro';
+    } else if (webInputEnabled) {
+      badge.textContent = 'interactive';
+      badge.className = 'session-mode rw';
+    } else {
+      badge.textContent = 'view-only';
+      badge.className = 'session-mode ro';
+    }
+    badge.classList.remove('hidden');
+  }
+
+  function enableTerminalInput() {
+    for (var id in panes) {
+      var p = panes[id];
+      if (p && p.term) {
+        p.term.options.disableStdin = false;
+        if (!p._inputBound) {
+          p._inputBound = true;
+          (function(pane) {
+            pane.term.onData(function(data) { queueInput(data); });
+          })(p);
+        }
+      }
+    }
+  }
   var sessionPassword = sessionStorage.getItem('tmtv_pw_' + (sessionToken || '')) || '';
 
   function showPasswordPrompt(isRetry) {
@@ -508,6 +578,14 @@
         if (inner.length >= 4) {
           webViewers = inner[3];
           updateMeta();
+        }
+        break;
+      case OUT_SESSION_MODE:
+        if (inner.length >= 3) {
+          sessionReadonly = !!inner[1];
+          webInputEnabled = !!inner[2];
+          updateSessionModeBadge();
+          if (!sessionReadonly && webInputEnabled) enableTerminalInput();
         }
         break;
       case OUT_FIN:
