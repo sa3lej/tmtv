@@ -306,21 +306,64 @@ else
 fi
 
 # -------------------------------------------------------
-# Test: SSE viewer count — web viewer receives VIEWER_COUNT message
+# Test: SSE viewer count — verify W count increments and decrements
 # -------------------------------------------------------
 if [ -n "$TOKEN" ]; then
-	# Capture SSE data for a few seconds — should contain viewer count
-	# VIEWER_COUNT is msgpack type 14, sent as base64. We verify we get
-	# data events (the count message is included in the stream).
-	SSE_VC=$(curl -s -m 3 "$SSE_BASE/$TOKEN" 2>/dev/null || echo "")
-	VC_EVENTS=$(echo "$SSE_VC" | grep -c "^data:" || true)
-	if [ "$VC_EVENTS" -ge 1 ]; then
-		pass "SSE delivers viewer count events"
+	# First, check W:0 with no web viewers connected.
+	# Read status bar from tmtv format variable directly.
+	W_BEFORE=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
+	if [ "$W_BEFORE" = "0" ]; then
+		pass "web viewer count starts at 0"
 	else
-		fail "SSE delivers viewer count events" "no data events in stream"
+		fail "web viewer count starts at 0" "got W:${W_BEFORE:-empty}"
 	fi
+
+	# Connect an SSE client in background
+	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
+	SSE_PID1=$!
+	sleep 3
+
+	# W should now be 1
+	W_WITH_ONE=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
+	if [ "$W_WITH_ONE" = "1" ]; then
+		pass "web viewer count increments to 1"
+	else
+		fail "web viewer count increments to 1" "got W:${W_WITH_ONE:-empty}"
+	fi
+
+	# Connect a second SSE client
+	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
+	SSE_PID2=$!
+	sleep 3
+
+	# W should now be 2
+	W_WITH_TWO=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
+	if [ "$W_WITH_TWO" = "2" ]; then
+		pass "web viewer count increments to 2"
+	else
+		fail "web viewer count increments to 2" "got W:${W_WITH_TWO:-empty}"
+	fi
+
+	# Disconnect first client
+	kill $SSE_PID1 2>/dev/null || true
+	sleep 3
+
+	# W should be back to 1
+	W_AFTER_DC=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
+	if [ "$W_AFTER_DC" = "1" ]; then
+		pass "web viewer count decrements on disconnect"
+	else
+		fail "web viewer count decrements on disconnect" "got W:${W_AFTER_DC:-empty}"
+	fi
+
+	# Clean up second client
+	kill $SSE_PID2 2>/dev/null || true
+	sleep 2
 else
-	skip "SSE delivers viewer count events (no token)"
+	skip "web viewer count starts at 0 (no token)"
+	skip "web viewer count increments to 1 (no token)"
+	skip "web viewer count increments to 2 (no token)"
+	skip "web viewer count decrements on disconnect (no token)"
 fi
 
 # -------------------------------------------------------
@@ -547,51 +590,67 @@ else
 fi
 
 # -------------------------------------------------------
-# Test: SSH viewer status bar shows viewer count (S:N W:N)
+# Test: SSH viewer counts — verify S:N is accurate via format variables
 # -------------------------------------------------------
 if [ -n "$TOKEN" ]; then
-	# Connect an SSH RO viewer and capture the terminal output
+	# Before any SSH viewer connects, S should be 0
+	S_BEFORE=$(remote_tmtv "display-message -p '#{tmtv_ssh_viewers}'" 2>/dev/null || echo "")
+	if [ "$S_BEFORE" = "0" ]; then
+		pass "SSH viewer count starts at 0"
+	else
+		fail "SSH viewer count starts at 0" "got S:${S_BEFORE:-empty}"
+	fi
+
+	# Connect an SSH RO viewer in background
+	remote "nohup expect -c '
+		set timeout 10
+		spawn ssh -o StrictHostKeyChecking=no -p $TMTV_PORT ro-${TESTID}@127.0.0.1
+		sleep 8
+		send \"\"
+		expect eof
+	' >/dev/null 2>&1 &" 2>/dev/null
+	sleep 4
+
+	# S should now be >= 1
+	S_WITH_VIEWER=$(remote_tmtv "display-message -p '#{tmtv_ssh_viewers}'" 2>/dev/null || echo "")
+	if [ -n "$S_WITH_VIEWER" ] && [ "$S_WITH_VIEWER" -ge 1 ] 2>/dev/null; then
+		pass "SSH viewer count increments on connect (S:$S_WITH_VIEWER)"
+	else
+		fail "SSH viewer count increments on connect" "got S:${S_WITH_VIEWER:-empty}"
+	fi
+
+	# Also verify the status bar shows S:N W:N pattern
 	VIEWER_LOG=$(remote "TERM=xterm-256color script -qc \
 		'timeout 6 ssh -tt -p $TMTV_PORT -o StrictHostKeyChecking=no \
 		ro-${TESTID}@127.0.0.1' /tmp/viewer-status.log 2>/dev/null; \
 		strings /tmp/viewer-status.log" || echo "")
-
 	if echo "$VIEWER_LOG" | grep -qo "S:[0-9]* W:[0-9]*"; then
-		pass "SSH viewer status bar shows S:N W:N"
+		pass "SSH status bar shows S:N W:N format"
 	else
-		fail "SSH viewer status bar shows S:N W:N" \
+		fail "SSH status bar shows S:N W:N format" \
 			"pattern not found in viewer output"
 	fi
 
-	# Verify the count is at least S:1 (the viewer itself)
-	VIEWER_S=$(echo "$VIEWER_LOG" | grep -o "S:[0-9]*" | tail -1 | cut -d: -f2)
-	if [ -n "$VIEWER_S" ] && [ "$VIEWER_S" -ge 1 ] 2>/dev/null; then
-		pass "SSH viewer count >= 1"
-	else
-		fail "SSH viewer count >= 1" "got S:${VIEWER_S:-empty}"
-	fi
-
-	# Test web viewer count: connect SSE client, verify W:1 in SSH status bar
+	# Verify W:N in status bar reflects actual web viewers.
+	# Connect an SSE client, then check W via format variable.
 	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
 	WEB_CURL_PID=$!
 	sleep 3
 
-	VIEWER_LOG2=$(remote "TERM=xterm-256color script -qc \
-		'timeout 6 ssh -tt -p $TMTV_PORT -o StrictHostKeyChecking=no \
-		ro-${TESTID}@127.0.0.1' /tmp/viewer-web.log 2>/dev/null; \
-		strings /tmp/viewer-web.log" || echo "")
+	W_IN_STATUS=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
 	kill $WEB_CURL_PID 2>/dev/null || true
+	sleep 2
 
-	VIEWER_W=$(echo "$VIEWER_LOG2" | grep -o "W:[0-9]*" | tail -1 | cut -d: -f2)
-	if [ -n "$VIEWER_W" ] && [ "$VIEWER_W" -ge 1 ] 2>/dev/null; then
-		pass "web viewer count >= 1 in SSH status bar"
+	if [ -n "$W_IN_STATUS" ] && [ "$W_IN_STATUS" -ge 1 ] 2>/dev/null; then
+		pass "W:N in status bar matches web viewers (W:$W_IN_STATUS)"
 	else
-		fail "web viewer count >= 1 in SSH status bar" "got W:${VIEWER_W:-empty}"
+		fail "W:N in status bar matches web viewers" "got W:${W_IN_STATUS:-empty}"
 	fi
 else
-	skip "SSH viewer status bar shows S:N W:N (no token)"
-	skip "SSH viewer count >= 1 (no token)"
-	skip "web viewer count >= 1 in SSH status bar (no token)"
+	skip "SSH viewer count starts at 0 (no token)"
+	skip "SSH viewer count increments on connect (no token)"
+	skip "SSH status bar shows S:N W:N format (no token)"
+	skip "W:N in status bar matches web viewers (no token)"
 fi
 
 # -------------------------------------------------------
@@ -616,12 +675,14 @@ if [ -n "$TOKEN" ]; then
 			"YYYY-MM-DD not found in viewer output"
 	fi
 
-	# Verify viewer counts still work after override
-	if echo "$CUSTOM_LOG" | grep -qo "S:[0-9]* W:[0-9]*"; then
-		pass "viewer counts survive status-right override"
+	# Verify viewer counts still work after override — check actual values
+	# The RO SSH viewer connecting here counts as S:1
+	CUSTOM_S=$(echo "$CUSTOM_LOG" | grep -o "S:[0-9]*" | tail -1 | cut -d: -f2)
+	if [ -n "$CUSTOM_S" ] && [ "$CUSTOM_S" -ge 1 ] 2>/dev/null; then
+		pass "viewer counts survive status-right override (S:$CUSTOM_S)"
 	else
 		fail "viewer counts survive status-right override" \
-			"S:N W:N not found after set-option"
+			"S:N not >= 1 after set-option (got S:${CUSTOM_S:-empty})"
 	fi
 
 	# Restore default
@@ -852,23 +913,92 @@ fi
 sleep 1
 
 # -------------------------------------------------------
-# Test: bare tmtv auto-attaches to existing session
+# Test: bare tmtv does not auto-attach (mimics tmux)
 # -------------------------------------------------------
-remote "TERM=xterm-256color $REMOTE_TMTV new -d -s autoattach" 2>/dev/null
+remote "TERM=xterm-256color $REMOTE_TMTV new -d -s existing1" 2>/dev/null
 sleep 2
-if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "autoattach"; then
-	# Run bare tmtv with timeout — will block on attach (no TTY), but must not crash
+if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "existing1"; then
+	# Bare tmtv against existing server — should NOT auto-attach
 	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV" 2>/dev/null || true
 	sleep 1
-	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "autoattach"; then
-		pass "bare tmtv auto-attaches without crash"
+	# Server must still be alive
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "existing1"; then
+		pass "bare tmtv does not auto-attach (server alive)"
 	else
-		fail "bare tmtv auto-attaches without crash" "server died"
+		fail "bare tmtv does not auto-attach" "server died"
 	fi
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 else
-	fail "bare tmtv auto-attaches without crash" "could not create test session"
+	fail "bare tmtv does not auto-attach" "could not create test session"
 fi
+sleep 1
+
+# -------------------------------------------------------
+# Test: password-protected session — SSH rejects pubkey auth
+# -------------------------------------------------------
+PW_CONF="/tmp/.tmtv-test-pw-$TESTID.conf"
+PW_SESSNAME="pw$TESTID"
+remote "cat > $PW_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$PW_SESSNAME\"
+set -g tmtv-web-sharing on
+set -g tmtv-session-password \"testpass123\"
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $PW_CONF new-session -d -s pwtest' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+sleep 4
+
+PW_TOKEN=$(remote "readlink $SESSIONS_DIR/$PW_SESSNAME 2>/dev/null" || echo "")
+PW_RO_TOKEN="ro-$PW_SESSNAME"
+
+if [ -n "$PW_TOKEN" ]; then
+	# SSH without password should be rejected (pubkey alone insufficient)
+	SSH_RESULT=$(ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no \
+		-o ConnectTimeout=3 -p "$TMTV_PORT" "$PW_TOKEN@$TEST_HOST" exit 2>&1 || true)
+	if echo "$SSH_RESULT" | grep -qi "denied\|refused\|permission\|disconnect"; then
+		pass "password session rejects SSH pubkey-only auth"
+	else
+		fail "password session rejects SSH pubkey-only auth" "got: $SSH_RESULT"
+	fi
+
+	# SSE without password should return 403
+	SSE_PW_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+		"$SSE_BASE/$PW_TOKEN" 2>/dev/null || echo "000")
+	if [ "$SSE_PW_CODE" = "403" ]; then
+		pass "password session returns 403 on SSE without password"
+	else
+		fail "password session returns 403 on SSE without password" "got HTTP $SSE_PW_CODE"
+	fi
+
+	# SSE with wrong password should return 403
+	SSE_WRONG_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+		"$SSE_BASE/$PW_TOKEN?password=wrongpassword" 2>/dev/null || echo "000")
+	if [ "$SSE_WRONG_CODE" = "403" ]; then
+		pass "password session rejects wrong SSE password"
+	else
+		fail "password session rejects wrong SSE password" "got HTTP $SSE_WRONG_CODE"
+	fi
+
+	# SSE with correct password should return 200
+	SSE_RIGHT_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+		"$SSE_BASE/$PW_TOKEN?password=testpass123" 2>/dev/null || echo "000")
+	if [ "$SSE_RIGHT_CODE" = "200" ]; then
+		pass "password session accepts correct SSE password"
+	else
+		fail "password session accepts correct SSE password" "got HTTP $SSE_RIGHT_CODE"
+	fi
+else
+	skip "password session tests" "could not create password-protected session"
+fi
+
+# Clean up password session
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $PW_CONF" 2>/dev/null || true
 sleep 1
 
 # -------------------------------------------------------

@@ -91,7 +91,7 @@ import Base from '../layouts/Base.astro';
         <h3 class="text-sm font-semibold text-gray-300 mb-2">Share</h3>
         <p class="text-xs text-gray-400 leading-relaxed">
           Run <code class="font-mono text-[11px] bg-tmtv-blue/10 text-tmtv-blue px-1.5 py-0.5 rounded">tmtv</code>.
-          You get two SSH tokens: read-write for your pair, read-only for spectators.
+          You get two SSH tokens: read-write for your pair, read-only for spectators. Add a password if you want to lock the door.
         </p>
       </div>
       <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 text-center">
@@ -111,10 +111,14 @@ import Base from '../layouts/Base.astro';
     </div>
 
     <!-- Feature badges -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
       <div class="text-center py-4">
         <div class="text-[11px] font-medium text-gray-400 tracking-wide">SSH sharing</div>
         <div class="font-mono text-xs text-tmtv-green mt-1">read-write + read-only</div>
+      </div>
+      <div class="text-center py-4">
+        <div class="text-[11px] font-medium text-gray-400 tracking-wide">Session security</div>
+        <div class="font-mono text-xs text-tmtv-green mt-1">password protection</div>
       </div>
       <div class="text-center py-4">
         <div class="text-[11px] font-medium text-gray-400 tracking-wide">Built on</div>
@@ -175,6 +179,10 @@ import Base from '../layouts/Base.astro';
       What's new
     </h2>
     <div class="bg-white/[0.02] border border-white/[0.04] rounded-xl p-6 space-y-1">
+      <div class="flex items-baseline gap-3 py-1.5">
+        <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.7</span>
+        <span class="text-sm text-gray-300">Your sessions, password-protected.</span>
+      </div>
       <div class="flex items-baseline gap-3 py-1.5">
         <span class="font-mono text-sm font-semibold text-tmtv-green shrink-0 w-11">1.2.6</span>
         <span class="text-sm text-gray-300">Your terminal, your rules.</span>

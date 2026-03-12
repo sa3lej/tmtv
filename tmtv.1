@@ -27,6 +27,7 @@
 .Op Fl c Ar shell-command
 .Op Fl f Ar file
 .Op Fl H Ar server-host
+.Op Fl p Ar password
 .Op Fl P Ar server-port
 .Op Fl k Ar api-key
 .Op Fl L Ar socket-name
@@ -76,6 +77,16 @@ Server hostname to connect to (default: tmtv.se).
 Server SSH port (default: 22).
 .It Fl k Ar api-key
 API key for named sessions.
+.It Fl p Ar password
+Require a password for viewers to connect.
+SSH viewers are prompted for the password automatically (public key
+authentication alone is rejected).
+Web viewers see a password prompt before the terminal loads.
+The password is SHA-256 hashed server-side and never stored in plain text.
+Can also be set with the
+.Ic tmtv-session-password
+option in
+.Pa ~/.tmtv.conf .
 .El
 .Pp
 A session is a single collection of
