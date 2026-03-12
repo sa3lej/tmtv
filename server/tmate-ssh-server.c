@@ -48,12 +48,18 @@ static bool check_rate_limit(const char *ip)
 			count++;
 	}
 
+	if (count >= RATE_MAX_PER_IP)
+		return false;
+
+	/* Only record allowed connections — rejected ones must not
+	 * fill the history buffer or the rate limit becomes a death
+	 * spiral: each retry adds an entry, preventing recovery. */
 	strlcpy(conn_history[conn_history_pos].ip, ip,
 		sizeof(conn_history[0].ip));
 	conn_history[conn_history_pos].ts = now;
 	conn_history_pos = (conn_history_pos + 1) % CONN_HISTORY_SIZE;
 
-	return count < RATE_MAX_PER_IP;
+	return true;
 }
 
 static int get_peer_ip(int fd, char *dst, size_t len)
