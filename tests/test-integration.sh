@@ -992,23 +992,32 @@ if [ -n "$PW_TOKEN" ]; then
 	else
 		fail "password session accepts correct SSE password" "got HTTP $SSE_RIGHT_CODE"
 	fi
-	# Playwright: password prompt appears in web viewer (visual verification)
+	# Playwright: full password prompt flow (wrong pw → error, correct pw → connect)
 	if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$QUICK" = "false" ]; then
-		PW_SCREENSHOT="/tmp/tmtv-pw-prompt-$$.png"
+		PW_SCREENSHOT_DIR="/tmp/tmtv-pw-screenshots-$$"
+		mkdir -p "$PW_SCREENSHOT_DIR"
 		PW_TEST_SCRIPT="$(dirname "$0")/test-password-prompt.js"
-		PW_OUTPUT=$(node "$PW_TEST_SCRIPT" "$WEB_URL/s/$PW_SESSNAME" "$PW_SCREENSHOT" 2>&1)
+		PW_OUTPUT=$(node "$PW_TEST_SCRIPT" \
+			"$WEB_URL/s/$PW_SESSNAME" "testpass123" "$PW_SCREENSHOT_DIR" 2>&1)
 		PW_EXIT=$?
 		if [ $PW_EXIT -eq 0 ]; then
-			pass "password prompt visible in web viewer"
+			# Parse individual step results from output
+			echo "$PW_OUTPUT" | grep "PASS step 1" >/dev/null && pass "password prompt visible in web viewer"
+			echo "$PW_OUTPUT" | grep "PASS step 2" >/dev/null && pass "wrong password shows error in web viewer"
+			echo "$PW_OUTPUT" | grep "PASS step 3" >/dev/null && pass "correct password connects web viewer"
 		else
-			fail "password prompt visible in web viewer" "$PW_OUTPUT"
+			fail "password prompt flow" "$PW_OUTPUT"
 		fi
-		rm -f "$PW_SCREENSHOT"
+		rm -rf "$PW_SCREENSHOT_DIR"
 	else
 		if [ "$HAS_PLAYWRIGHT" != "true" ]; then
 			skip "password prompt visible (playwright not installed)"
+			skip "wrong password shows error (playwright not installed)"
+			skip "correct password connects (playwright not installed)"
 		else
 			skip "password prompt visible (--quick)"
+			skip "wrong password shows error (--quick)"
+			skip "correct password connects (--quick)"
 		fi
 	fi
 else

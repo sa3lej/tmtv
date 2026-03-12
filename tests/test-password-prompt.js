@@ -1,16 +1,22 @@
-// Playwright test: verify password prompt appears for password-protected sessions.
-// Usage: node test-password-prompt.js <url> <screenshot-path>
+// Playwright test: full interactive password prompt flow.
 //
-// Exits 0 if the password prompt is visible with expected content.
-// Exits 1 on failure (prints reason to stderr).
+// Usage: node test-password-prompt.js <url> <password> <screenshot-dir>
+//
+// Tests:
+//   1. Password overlay appears with correct title and form elements
+//   2. Wrong password → "Wrong password" error message appears
+//   3. Correct password → overlay hides, terminal connects
+//
+// Exits 0 if all checks pass. Exits 1 on failure (prints reason to stderr).
 
 const { chromium } = require('playwright');
 
 const url = process.argv[2];
-const screenshotPath = process.argv[3];
+const password = process.argv[3];
+const screenshotDir = process.argv[4] || '/tmp';
 
-if (!url || !screenshotPath) {
-  console.error('Usage: node test-password-prompt.js <url> <screenshot-path>');
+if (!url || !password) {
+  console.error('Usage: node test-password-prompt.js <url> <password> <screenshot-dir>');
   process.exit(1);
 }
 
@@ -21,38 +27,64 @@ if (!url || !screenshotPath) {
   try {
     await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
 
-    // Wait for the password overlay to become visible
+    // --- Step 1: Password prompt appears ---
     const overlay = page.locator('#password-overlay');
     await overlay.waitFor({ state: 'visible', timeout: 10000 });
 
-    // Verify the title text is present
-    const title = page.locator('.error-title');
+    // Verify title
+    const title = overlay.locator('.error-title');
     const titleText = await title.textContent();
     if (!titleText || !titleText.includes('password-protected')) {
-      throw new Error('Password prompt title missing or wrong: ' + titleText);
+      throw new Error('Step 1: title wrong: ' + titleText);
     }
 
-    // Verify the password input field exists and is visible
+    // Verify input and button exist
     const input = page.locator('#password-input');
     await input.waitFor({ state: 'visible', timeout: 5000 });
+    const button = page.locator('#password-form button[type="submit"]');
+    await button.waitFor({ state: 'visible', timeout: 5000 });
 
-    // Verify the submit button exists
-    const button = page.locator('#password-form button, #password-form input[type="submit"]');
-    const buttonCount = await button.count();
-    if (buttonCount === 0) {
-      throw new Error('No submit button found in password form');
+    await page.screenshot({ path: screenshotDir + '/pw-1-prompt.png' });
+    console.log('PASS step 1: password prompt visible');
+
+    // --- Step 2: Wrong password → error message ---
+    await input.fill('definitely-wrong-password');
+    await button.click();
+
+    // After wrong password, the overlay should reappear with error
+    await overlay.waitFor({ state: 'visible', timeout: 10000 });
+    const errorMsg = page.locator('#password-error');
+    await errorMsg.waitFor({ state: 'visible', timeout: 10000 });
+
+    const errorText = await errorMsg.textContent();
+    if (!errorText || !errorText.toLowerCase().includes('wrong')) {
+      throw new Error('Step 2: error message wrong: ' + errorText);
     }
 
-    // Take screenshot as evidence
-    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await page.screenshot({ path: screenshotDir + '/pw-2-wrong.png' });
+    console.log('PASS step 2: wrong password shows error');
 
-    console.log('PASS: password prompt visible with correct content');
+    // --- Step 3: Correct password → terminal connects ---
+    const input2 = page.locator('#password-input');
+    await input2.fill(password);
+    await button.click();
+
+    // Overlay should become hidden
+    await overlay.waitFor({ state: 'hidden', timeout: 15000 });
+
+    // Terminal wrap should have xterm content (canvas or .xterm-screen)
+    const terminal = page.locator('.xterm-screen, #terminal-wrap canvas');
+    await terminal.first().waitFor({ state: 'visible', timeout: 15000 });
+
+    await page.screenshot({ path: screenshotDir + '/pw-3-connected.png' });
+    console.log('PASS step 3: correct password connects to terminal');
+
+    console.log('PASS: all password prompt tests passed');
     await browser.close();
     process.exit(0);
   } catch (err) {
-    // Take screenshot even on failure for debugging
     try {
-      await page.screenshot({ path: screenshotPath, fullPage: true });
+      await page.screenshot({ path: screenshotDir + '/pw-fail.png' });
     } catch (_) {}
 
     console.error('FAIL: ' + err.message);
