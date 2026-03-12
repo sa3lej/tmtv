@@ -60,6 +60,7 @@ enum tmate_daemon_out_msg_types {
 	TMATE_OUT_EXEC_CMD,
 	TMATE_OUT_UNAME,
 	TMATE_OUT_VIEWER_COUNT,
+	TMATE_OUT_SESSION_MODE,
 };
 
 /*
@@ -84,6 +85,7 @@ enum tmate_daemon_out_msg_types {
 [TMATE_OUT_UNAME, string: name.sysname, string: name.nodename,
                   string: name.release, string: name.version, string: name.machine]
 [TMATE_OUT_VIEWER_COUNT, int: ssh_rw, int: ssh_ro, int: web]
+[TMATE_OUT_SESSION_MODE, boolean: readonly, boolean: web_input_enabled]
 */
 
 enum tmate_daemon_in_msg_types {

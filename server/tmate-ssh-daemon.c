@@ -445,9 +445,24 @@ static void handle_web_sharing_option(const char *name, const char *val)
 	}
 }
 
+static void handle_web_input_option(const char *name, const char *val)
+{
+	if (strcmp(name, "tmtv-web-input") != 0)
+		return;
+
+	bool enabled = val && (!strcmp(val, "on") || !strcmp(val, "1"));
+	tmate_session->web_input_enabled = enabled;
+	tmate_info("Web input toggled: %s", enabled ? "on" : "off");
+	if (enabled)
+		tmate_notify("Web input enabled — RW web viewers can type");
+	else
+		tmate_notify("Web input disabled");
+}
+
 void tmate_hook_set_option(const char *name, const char *val)
 {
 	tmate_hook_set_option_auth(name, val);
 	handle_session_name_options(name, val);
 	handle_web_sharing_option(name, val);
+	handle_web_input_option(name, val);
 }

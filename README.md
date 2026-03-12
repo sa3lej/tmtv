@@ -36,6 +36,16 @@ To auto-enable web sharing, add to `~/.tmtv.conf`:
 set -g tmtv-web-sharing on
 ```
 
+### Interactive web viewers
+
+By default, web viewers can only watch. To let RW web viewers type:
+
+```sh
+tmtv set -g tmtv-web-input on
+```
+
+When enabled, web viewers connected via the RW token can type in the terminal. RO token viewers remain view-only. A badge in the viewer titlebar shows the session mode ("interactive" or "view-only").
+
 ### Named sessions
 
 Pick a memorable name instead of a random token:
@@ -69,6 +79,27 @@ Can also be set in config:
 set -g tmtv-session-password secret
 ```
 
+## GitHub Action
+
+Debug CI failures by SSH-ing into your runner. Drop-in replacement for `action-tmate`:
+
+```yaml
+- name: Debug via tmtv
+  if: failure()
+  uses: sa3lej/action-tmtv@v1
+  with:
+    limit-access-to-actor: true
+```
+
+Migrating from action-tmate? One-line diff:
+
+```diff
+- uses: mxschmitt/action-tmate@v3
++ uses: sa3lej/action-tmtv@v1
+```
+
+See [action-tmtv](https://github.com/sa3lej/action-tmtv) for full docs.
+
 ## How it works
 
 ```
@@ -86,6 +117,7 @@ set -g tmtv-session-password secret
 - Instant session sharing over SSH with read-write and read-only tokens
 - Password-protected sessions — viewers must authenticate before connecting
 - Web viewer with xterm.js and WebGL rendering
+- Interactive web input — RW web viewers can type when enabled by the host
 - Late-join support — browser viewers see current terminal state
 - Server-Sent Events streaming — works through proxies and firewalls
 - Live viewer counts — `S:N W:N` in tmux status bar and web titlebar
@@ -333,6 +365,10 @@ TEST_HOST=<host> sh test-integration.sh --quick
 ## License
 
 ISC license, same as tmux.
+
+## Support
+
+If tmtv is useful to you, [buy me a coffee](https://buymeacoffee.com/lejo).
 
 ## Acknowledgments
 
