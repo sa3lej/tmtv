@@ -1062,7 +1062,7 @@ if [ -n "$WI_TOKEN" ]; then
 
 	# Test: POST input to RW token returns 200
 	WI_POST_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
-		-X POST -H "Content-Type: text/plain" -d "hello" \
+		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
 		"$SSE_BASE/$WI_TOKEN/input" 2>/dev/null || echo "000")
 	if [ "$WI_POST_CODE" = "200" ]; then
 		pass "POST input to RW token returns 200"
@@ -1075,7 +1075,7 @@ if [ -n "$WI_TOKEN" ]; then
 		ls $SESSIONS_DIR/ 2>/dev/null | grep '^ro-'" || echo "")
 	if [ -n "$WI_RO_TOKEN" ]; then
 		WI_RO_POST_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
-			-X POST -H "Content-Type: text/plain" -d "hello" \
+			-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "hello" \
 			"$SSE_BASE/$WI_RO_TOKEN/input" 2>/dev/null || echo "000")
 		if [ "$WI_RO_POST_CODE" = "403" ]; then
 			pass "POST input to RO token returns 403"
@@ -1086,15 +1086,34 @@ if [ -n "$WI_TOKEN" ]; then
 		skip "POST input to RO token (could not find RO token)"
 	fi
 
-	# Test: SSH host types → web viewer sees it (already tested by existing SSE tests)
+	# Test: SSH host types → web viewer sees it via SSE (SSH → web)
+	# Type in SSH session, then verify SSE stream delivers new data
+	SSH_MARKER="SSHOUTPUT_$$"
+	# Start SSE listener in background, count data lines over 5 seconds
+	curl -s -m 6 "$SSE_BASE/$WI_TOKEN" >/tmp/sse_ssh_test_$$ 2>/dev/null &
+	SSE_PID=$!
+	sleep 1
+	# Type in the SSH session
+	remote_tmtv "send-keys -t main:0 'echo $SSH_MARKER' Enter"
+	sleep 3
+	kill $SSE_PID 2>/dev/null || true
+	wait $SSE_PID 2>/dev/null || true
+	SSE_SSH_LINES=$(grep -c "^data:" /tmp/sse_ssh_test_$$ 2>/dev/null || echo "0")
+	rm -f /tmp/sse_ssh_test_$$
+	if [ "$SSE_SSH_LINES" -gt 0 ]; then
+		pass "SSH output reaches web viewer via SSE (SSH → web)"
+	else
+		fail "SSH output reaches web viewer via SSE (SSH → web)" "no SSE data lines after typing in SSH"
+	fi
+
 	# Test: Web types → SSH host sees it
 	# Send text via POST, then check if it appeared in the session
 	WI_MARKER="WEBINPUT_$$"
-	curl -s -m 3 -X POST -H "Content-Type: text/plain" \
+	curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 		-d "echo $WI_MARKER" \
 		"$SSE_BASE/$WI_TOKEN/input" >/dev/null 2>&1
 	# Send Enter key
-	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" \
+	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 		--data-binary @- \
 		"$SSE_BASE/$WI_TOKEN/input" >/dev/null 2>&1
 	sleep 2
@@ -1107,11 +1126,21 @@ if [ -n "$WI_TOKEN" ]; then
 		fail "web input reaches SSH session (web → SSH)" "marker '$WI_MARKER' not found in capture"
 	fi
 
+	# Test: POST without X-Tmtv-Input header returns 400 (CSRF protection)
+	WI_CSRF_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+		-X POST -H "Content-Type: text/plain" -d "csrf" \
+		"$SSE_BASE/$WI_TOKEN/input" 2>/dev/null || echo "000")
+	if [ "$WI_CSRF_CODE" = "400" ]; then
+		pass "POST without X-Tmtv-Input header returns 400"
+	else
+		fail "POST without X-Tmtv-Input header returns 400" "got HTTP $WI_CSRF_CODE"
+	fi
+
 	# Test: Disable web input, POST should return 403
 	remote_tmtv "set-option -t main tmtv-set tmtv-web-input=off"
 	sleep 1
 	WI_OFF_CODE=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
-		-X POST -H "Content-Type: text/plain" -d "blocked" \
+		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" -d "blocked" \
 		"$SSE_BASE/$WI_TOKEN/input" 2>/dev/null || echo "000")
 	if [ "$WI_OFF_CODE" = "403" ]; then
 		pass "POST input rejected when web input disabled"

@@ -332,7 +332,7 @@
     fetch(url, {
       method: 'POST',
       body: data,
-      headers: { 'Content-Type': 'text/plain' }
+      headers: { 'Content-Type': 'text/plain', 'X-Tmtv-Input': '1' }
     }).catch(function() {});
   }
 

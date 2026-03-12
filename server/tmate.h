@@ -272,6 +272,8 @@ struct tmate_session {
 	struct event *ev_ws_snapshot; /* periodic snapshot timer */
 	bool web_sharing_enabled; /* client-controlled web sharing toggle */
 	bool web_input_enabled;   /* host-controlled web input toggle */
+	time_t post_rate_window;  /* start of current rate-limit window */
+	int post_rate_count;      /* POST requests in current window */
 	bool urls_sent;           /* true after initial URLs sent in tmate_ready */
 
 	/* only for role client-pty */

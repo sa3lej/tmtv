@@ -667,7 +667,7 @@ static int sse_do_handshake(struct ws_client *wc)
 			"HTTP/1.1 204 No Content\r\n"
 			"Access-Control-Allow-Origin: *\r\n"
 			"Access-Control-Allow-Methods: GET, POST\r\n"
-			"Access-Control-Allow-Headers: Content-Type\r\n"
+			"Access-Control-Allow-Headers: Content-Type, X-Tmtv-Input\r\n"
 			"Access-Control-Max-Age: 86400\r\n"
 			"Content-Length: 0\r\n"
 			"\r\n";
@@ -757,6 +757,22 @@ static int sse_do_handshake(struct ws_client *wc)
 	}
 
 	if (is_post_method) {
+		/* CSRF protection: require X-Tmtv-Input header.
+		 * This forces a CORS preflight for cross-origin requests,
+		 * preventing malicious websites from injecting keystrokes. */
+		if (!strstr(data, "X-Tmtv-Input:") &&
+		    !strstr(data, "x-tmtv-input:")) {
+			static const char *reject_csrf =
+				"HTTP/1.1 400 Bad Request\r\n"
+				"Content-Length: 0\r\n"
+				"Connection: close\r\n"
+				"\r\n";
+			tmate_debug("POST rejected: missing X-Tmtv-Input");
+			evbuffer_drain(input, (header_end - data) + 4);
+			bufferevent_write(wc->bev, reject_csrf,
+					  strlen(reject_csrf));
+			return -1;
+		}
 		wc->is_post = true;
 		/* POST /token/input — handled in on_ws_client_read
 		 * after we drain the headers here */
@@ -1054,6 +1070,9 @@ void tmate_disconnect_ws_clients(struct tmate_session *session)
  */
 #define POST_INPUT_MAX_BODY 1024
 
+#define POST_RATE_LIMIT    20  /* max POST requests per window */
+#define POST_RATE_WINDOW   1   /* window size in seconds */
+
 static void handle_post_input(struct ws_client *wc)
 {
 	struct tmate_session *session = wc->session;
@@ -1061,18 +1080,24 @@ static void handle_post_input(struct ws_client *wc)
 	size_t len = evbuffer_get_length(input);
 	unsigned char *data;
 	size_t i;
+	time_t now;
 
 	static const char *ok_response =
 		"HTTP/1.1 200 OK\r\n"
 		"Content-Length: 0\r\n"
-		"Access-Control-Allow-Origin: *\r\n"
 		"Connection: close\r\n"
 		"\r\n";
 
 	static const char *forbidden =
 		"HTTP/1.1 403 Forbidden\r\n"
 		"Content-Length: 0\r\n"
-		"Access-Control-Allow-Origin: *\r\n"
+		"Connection: close\r\n"
+		"\r\n";
+
+	static const char *rate_limited =
+		"HTTP/1.1 429 Too Many Requests\r\n"
+		"Content-Length: 0\r\n"
+		"Retry-After: 1\r\n"
 		"Connection: close\r\n"
 		"\r\n";
 
@@ -1081,6 +1106,20 @@ static void handle_post_input(struct ws_client *wc)
 		tmate_debug("POST input rejected: web_input=%d readonly=%d",
 			    session->web_input_enabled, wc->readonly);
 		bufferevent_write(wc->bev, forbidden, strlen(forbidden));
+		ws_client_free_after_flush(wc);
+		return;
+	}
+
+	/* Per-session rate limiting */
+	now = time(NULL);
+	if (now != session->post_rate_window) {
+		session->post_rate_window = now;
+		session->post_rate_count = 0;
+	}
+	if (++session->post_rate_count > POST_RATE_LIMIT) {
+		tmate_debug("POST rate limited: %d requests/sec",
+			    session->post_rate_count);
+		bufferevent_write(wc->bev, rate_limited, strlen(rate_limited));
 		ws_client_free_after_flush(wc);
 		return;
 	}
