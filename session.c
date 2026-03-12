@@ -122,16 +122,6 @@ session_create(const char *prefix, const char *name, const char *cwd,
 #endif
 
 	s = xcalloc(1, sizeof *s);
-
-#ifdef TMATE
-	/*
-	 * Wire the global tmate_session to this tmux session.
-	 * This is the foundation for multi-session support: once we
-	 * allocate per-session tmate_session structs, this is where
-	 * the allocation will happen. For now, point at the global.
-	 */
-	s->tmate = &tmate_session;
-#endif
 	s->references = 1;
 	s->flags = 0;
 
@@ -250,7 +240,7 @@ session_destroy(struct session *s, int notify, const char *from)
 	if (tmtv_recording_active())
 		tmtv_recording_stop();
 	tmate_info("Session closed");
-	tmate_write_fin();
+	tmate_write_fin(&tmate_session);
 #endif
 }
 
@@ -365,7 +355,7 @@ session_attach(struct session *s, struct window *w, int idx, char **cause)
 	notify_session_window("window-linked", s, w);
 
 #ifdef TMATE
-	tmate_sync_layout();
+	tmate_sync_layout(&tmate_session, s);
 #endif
 
 	session_group_synchronize_from(s);
@@ -387,7 +377,7 @@ session_detach(struct session *s, struct winlink *wl)
 	winlink_remove(&s->windows, wl);
 
 #ifdef TMATE
-	tmate_sync_layout();
+	tmate_sync_layout(&tmate_session, s);
 #endif
 
 	session_group_synchronize_from(s);
@@ -533,7 +523,7 @@ session_set_current(struct session *s, struct winlink *wl)
 	winlink_clear_flags(wl);
 
 #ifdef TMATE
-	tmate_sync_layout();
+	tmate_sync_layout(&tmate_session, s);
 #endif
 
 	window_update_activity(wl->window);

@@ -416,7 +416,7 @@ status_redraw(struct client *c)
 		sright = options_get_string(s->options, "status-right");
 		eleft = format_expand_time(ft, sleft);
 		eright = format_expand_time(ft, sright);
-		tmate_status(eleft, eright);
+		tmate_status(&tmate_session, eleft, eright);
 		free(eleft);
 		free(eright);
 	}

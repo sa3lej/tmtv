@@ -25,20 +25,23 @@
 
 int tmate_foreground;
 
-void tmate_sync_layout(void)
+void tmate_sync_layout(__unused struct tmate_session *session,
+		       __unused struct session *s)
 {
 }
 
-void tmate_pty_data(__unused struct window_pane *wp,
+void tmate_pty_data(__unused struct tmate_session *session,
+		    __unused struct window_pane *wp,
 		    __unused const char *buf, __unused size_t len)
 {
 }
 
-void tmate_write_fin(void)
+void tmate_write_fin(__unused struct tmate_session *session)
 {
 }
 
-void tmate_status(__unused const char *left, __unused const char *right)
+void tmate_status(__unused struct tmate_session *session,
+		  __unused const char *left, __unused const char *right)
 {
 }
 

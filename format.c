@@ -5811,8 +5811,10 @@ format_defaults(struct format_tree *ft, struct client *c, struct session *s,
 
 #ifdef TMATE
 	{
-		extern void tmate_format(struct format_tree *);
-		tmate_format(ft);
+		extern void tmate_format(struct tmate_session *,
+					 struct format_tree *);
+		extern struct tmate_session tmate_session;
+		tmate_format(&tmate_session, ft);
 	}
 #endif
 }

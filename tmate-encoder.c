@@ -2,18 +2,29 @@
 #include "tmate.h"
 #include "tmate-protocol.h"
 
-#define pack(what, ...) _pack(&tmate_session.encoder, what, ##__VA_ARGS__)
+/*
+ * The pack() macro is defined locally in each function scope via the session
+ * parameter, eliminating the old file-level macro that hardcoded the global
+ * tmate_session.  Every encoder function now takes a struct tmate_session *
+ * so the caller controls which session's encoder is used.
+ */
 
-void tmate_write_header(void)
+#define PACK(session) \
+	struct tmate_encoder *__enc __attribute__((unused)) = &(session)->encoder
+#define pack(what, ...) _pack(__enc, what, ##__VA_ARGS__)
+
+void tmate_write_header(struct tmate_session *session)
 {
+	PACK(session);
 	pack(array, 3);
 	pack(int, TMATE_OUT_HEADER);
 	pack(int, TMATE_PROTOCOL_VERSION);
 	pack(string, TMTV_VERSION);
 }
 
-void tmate_write_uname(void)
+void tmate_write_uname(struct tmate_session *session)
 {
+	PACK(session);
 	struct utsname name;
 	if (uname(&name) < 0) {
 		tmate_debug("uname() failed");
@@ -29,15 +40,16 @@ void tmate_write_uname(void)
 	pack(string, name.machine);
 }
 
-void tmate_write_ready(void)
+void tmate_write_ready(struct tmate_session *session)
 {
+	PACK(session);
 	pack(array, 1);
 	pack(int, TMATE_OUT_READY);
 }
 
-void tmate_sync_layout(void)
+void tmate_sync_layout(struct tmate_session *session, struct session *s)
 {
-	struct session *s;
+	PACK(session);
 	struct winlink *wl;
 	struct window *w;
 	struct window_pane *wp;
@@ -54,13 +66,12 @@ void tmate_sync_layout(void)
 	 */
 
 	/*
-	 * We only allow one session, it makes our lives easier.
-	 * Especially when the HTML5 client will come along.
-	 * We make no distinction between a winlink and its window except
-	 * that we send the winlink idx to draw the status bar properly.
+	 * If no tmux session was provided, fall back to the first one.
+	 * This preserves backward compatibility with callers that don't
+	 * have a session reference handy.
 	 */
-
-	s = RB_MIN(sessions, &sessions);
+	if (!s)
+		s = RB_MIN(sessions, &sessions);
 	if (!s)
 		return;
 
@@ -142,8 +153,10 @@ void tmate_sync_layout(void)
 
 #define TMATE_MAX_PTY_SIZE (16*1024)
 
-void tmate_pty_data(struct window_pane *wp, const char *buf, size_t len)
+void tmate_pty_data(struct tmate_session *session, struct window_pane *wp,
+		    const char *buf, size_t len)
 {
+	PACK(session);
 	size_t to_write;
 
 	while (len > 0) {
@@ -185,7 +198,8 @@ int tmate_should_replicate_cmd(const struct cmd_entry *cmd)
 
 #define sc (&session->saved_tmux_cmds)
 #define SAVED_TMUX_CMD_INITIAL_SIZE 256
-static void __tmate_exec_cmd_args(int argc, const char **argv);
+static void __tmate_exec_cmd_args(struct tmate_session *session,
+				  int argc, const char **argv);
 
 static void append_saved_cmd(struct tmate_session *session,
 			     int argc, const char **argv)
@@ -211,7 +225,8 @@ static void replay_saved_cmd(struct tmate_session *session)
 {
 	unsigned int i;
 	for (i = 0; i < sc->tail; i++)
-		__tmate_exec_cmd_args(sc->cmds[i].argc, (const char **)sc->cmds[i].argv);
+		__tmate_exec_cmd_args(session, sc->cmds[i].argc,
+				      (const char **)sc->cmds[i].argv);
 }
 #undef sc
 
@@ -237,8 +252,10 @@ static void extract_cmd(struct cmd *cmd, int *_argc, char ***_argv)
 	free(cmdline);
 }
 
-static void __tmate_exec_cmd_args(int argc, const char **argv)
+static void __tmate_exec_cmd_args(struct tmate_session *session,
+				  int argc, const char **argv)
 {
+	PACK(session);
 	int i;
 
 	pack(array, argc + 1);
@@ -248,40 +265,47 @@ static void __tmate_exec_cmd_args(int argc, const char **argv)
 		pack(string, argv[i]);
 }
 
-void tmate_exec_cmd_args(int argc, const char **argv)
+void tmate_exec_cmd_args(struct tmate_session *session,
+			 int argc, const char **argv)
 {
-	__tmate_exec_cmd_args(argc, argv);
-	append_saved_cmd(&tmate_session, argc, argv);
+	__tmate_exec_cmd_args(session, argc, argv);
+	append_saved_cmd(session, argc, argv);
 }
 
-void tmate_set_val(const char *name, const char *value)
+void tmate_set_val(struct tmate_session *session,
+		   const char *name, const char *value)
 {
 	char *buf;
 	xasprintf(&buf, "%s=%s", name, value);
-	tmate_exec_cmd_args(3, (const char *[]){"set-option", "tmtv-set", buf});
+	tmate_exec_cmd_args(session, 3,
+			    (const char *[]){"set-option", "tmtv-set", buf});
 	free(buf);
 }
 
-void tmate_exec_cmd(struct cmd *cmd)
+void tmate_exec_cmd(struct tmate_session *session, struct cmd *cmd)
 {
 	int argc;
 	char **argv;
 
 	extract_cmd(cmd, &argc, &argv);
-	tmate_exec_cmd_args(argc, (const char **)argv);
+	tmate_exec_cmd_args(session, argc, (const char **)argv);
 	cmd_free_argv(argc, argv);
 }
 
-void tmate_failed_cmd(int client_id, const char *cause)
+void tmate_failed_cmd(struct tmate_session *session,
+		      int client_id, const char *cause)
 {
+	PACK(session);
 	pack(array, 3);
 	pack(int, TMATE_OUT_FAILED_CMD);
 	pack(int, client_id);
 	pack(string, cause);
 }
 
-void tmate_status(const char *left, const char *right)
+void tmate_status(struct tmate_session *session,
+		  const char *left, const char *right)
 {
+	PACK(session);
 	static char *old_left, *old_right;
 
 	if (old_left  && !strcmp(old_left,  left) &&
@@ -322,7 +346,7 @@ void tmate_expand_status(void)
 	right = format_expand_time(ft, options_get_string(s->options,
 	    "status-right"));
 
-	tmate_status(left, right);
+	tmate_status(&tmate_session, left, right);
 
 	free(right);
 	free(left);
@@ -357,8 +381,10 @@ void tmate_start_status_timer(struct tmate_session *session)
 	evtimer_add(session->ev_status_timer, &tv);
 }
 
-void tmate_sync_copy_mode(struct window_pane *wp)
+void tmate_sync_copy_mode(struct tmate_session *session,
+			  struct window_pane *wp)
 {
+	PACK(session);
 	struct window_mode_entry *wme;
 
 	pack(array, 3);
@@ -381,21 +407,26 @@ void tmate_sync_copy_mode(struct window_pane *wp)
 	pack(array, 0);
 }
 
-void tmate_write_copy_mode(struct window_pane *wp, const char *str)
+void tmate_write_copy_mode(struct tmate_session *session,
+			   struct window_pane *wp, const char *str)
 {
+	PACK(session);
 	pack(array, 3);
 	pack(int, TMATE_OUT_WRITE_COPY_MODE);
 	pack(int, wp->id);
 	pack(string, str);
 }
 
-void tmate_write_fin(void)
+void tmate_write_fin(struct tmate_session *session)
 {
+	PACK(session);
 	pack(array, 1);
 	pack(int, TMATE_OUT_FIN);
 }
 
-static void do_snapshot_grid(struct grid *grid, unsigned int max_history_lines)
+static void do_snapshot_grid(struct tmate_encoder *__enc,
+			     struct grid *grid,
+			     unsigned int max_history_lines)
 {
 	struct grid_line *line;
 	struct grid_cell gc;
@@ -446,7 +477,9 @@ static void do_snapshot_grid(struct grid *grid, unsigned int max_history_lines)
 
 }
 
-static void do_snapshot_pane(struct window_pane *wp, unsigned int max_history_lines)
+static void do_snapshot_pane(struct tmate_encoder *__enc,
+			     struct window_pane *wp,
+			     unsigned int max_history_lines)
 {
 	struct screen *screen = &wp->base;
 
@@ -458,21 +491,23 @@ static void do_snapshot_pane(struct window_pane *wp, unsigned int max_history_li
 	pack(array, 3);
 	pack(int, screen->cx);
 	pack(int, screen->cy);
-	do_snapshot_grid(screen->grid, max_history_lines);
+	do_snapshot_grid(__enc, screen->grid, max_history_lines);
 
 	if (wp->base.saved_grid) {
 		pack(array, 3);
 		pack(int, wp->base.saved_cx);
 		pack(int, wp->base.saved_cy);
-		do_snapshot_grid(wp->base.saved_grid, max_history_lines);
+		do_snapshot_grid(__enc, wp->base.saved_grid, max_history_lines);
 	} else {
 		pack(nil);
 	}
 }
 
-static void tmate_send_session_snapshot(unsigned int max_history_lines)
+static void tmate_send_session_snapshot(struct tmate_session *session,
+					struct session *s,
+					unsigned int max_history_lines)
 {
-	struct session *s;
+	PACK(session);
 	struct winlink *wl;
 	struct window *w;
 	struct window_pane *pane;
@@ -481,7 +516,11 @@ static void tmate_send_session_snapshot(unsigned int max_history_lines)
 	pack(array, 2);
 	pack(int, TMATE_OUT_SNAPSHOT);
 
-	s = RB_MIN(sessions, &sessions);
+	/*
+	 * If no tmux session was provided, fall back to the first one.
+	 */
+	if (!s)
+		s = RB_MIN(sessions, &sessions);
 	if (!s)
 		tmate_fatal("no session?");
 
@@ -502,12 +541,13 @@ static void tmate_send_session_snapshot(unsigned int max_history_lines)
 			continue;
 
 		TAILQ_FOREACH(pane, &w->panes, entry)
-			do_snapshot_pane(pane, max_history_lines);
+			do_snapshot_pane(__enc, pane, max_history_lines);
 	}
 }
 
 static void tmate_send_reconnection_data(struct tmate_session *session)
 {
+	PACK(session);
 	if (!session->reconnection_data)
 		return;
 
@@ -524,15 +564,16 @@ void tmate_send_reconnection_state(struct tmate_session *session)
 	tmate_encoder_destroy(&session->encoder);
 	tmate_encoder_init(&session->encoder, NULL, session);
 
-	tmate_write_header();
+	tmate_write_header(session);
 	tmate_send_reconnection_data(session);
 	replay_saved_cmd(session);
 	/* TODO send all option variables */
-	tmate_write_uname();
-	tmate_write_ready();
+	tmate_write_uname(session);
+	tmate_write_ready(session);
 
-	tmate_sync_layout();
-	tmate_send_session_snapshot(RECONNECTION_MAX_HISTORY_LINE);
+	tmate_sync_layout(session, NULL);
+	tmate_send_session_snapshot(session, NULL,
+				    RECONNECTION_MAX_HISTORY_LINE);
 
 	/* Send current status so late-joining viewers get it immediately */
 	tmate_expand_status();

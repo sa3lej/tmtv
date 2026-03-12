@@ -17,7 +17,7 @@ MSGPACK_LIBS := $(shell pkg-config --libs msgpack-c 2>/dev/null || pkg-config --
 LIBSSH_CFLAGS := $(shell pkg-config --cflags libssh 2>/dev/null)
 LIBEVENT_CFLAGS := $(shell pkg-config --cflags libevent 2>/dev/null)
 
-UNIT_TESTS = test-msgpack test-version-compare
+UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session
 SERVER_TESTS = test-server-header test-session-tmate-ptr
 TMTV ?= ../tmtv
 
@@ -40,6 +40,12 @@ test-msgpack: test-msgpack.c test-harness.h
 
 test-version-compare: test-version-compare.c test-harness.h
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+test-tmate-env: test-tmate-env.c test-harness.h ../tmate-env.c ../tmate.h
+	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -include ../tmate-env.c -o $@ $< $(LDFLAGS)
+
+test-find-session: test-find-session.c test-harness.h ../tmux.h ../tmate.h
+	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
 
 # Extract DEFS and CPPFLAGS from parent Makefile (configure-generated flags)
 PARENT_DEFS := $(shell $(MAKE) -C .. -n -p 2>/dev/null | grep '^DEFS = ' | head -1 | sed 's/^DEFS = //')

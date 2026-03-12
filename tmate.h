@@ -81,22 +81,28 @@ extern void unpack_array(struct tmate_unpacker *uk, struct tmate_unpacker *neste
 
 struct tmate_session;
 
-extern void tmate_write_header(void);
-extern void tmate_write_uname(void);
-extern void tmate_write_ready(void);
-extern void tmate_sync_layout(void);
-extern void tmate_pty_data(struct window_pane *wp, const char *buf, size_t len);
+extern void tmate_write_header(struct tmate_session *session);
+extern void tmate_write_uname(struct tmate_session *session);
+extern void tmate_write_ready(struct tmate_session *session);
+extern void tmate_sync_layout(struct tmate_session *session,
+			      struct session *s);
+extern void tmate_pty_data(struct tmate_session *session,
+			   struct window_pane *wp, const char *buf, size_t len);
 extern int tmate_should_replicate_cmd(const struct cmd_entry *cmd);
-extern void tmate_set_val(const char *name, const char *value);
-extern void tmate_exec_cmd_args(int argc, const char **argv);
-extern void tmate_exec_cmd(struct cmd *cmd);
-extern void tmate_failed_cmd(int client_id, const char *cause);
-extern void tmate_status(const char *left, const char *right);
-extern void tmate_expand_status(void);
-extern void tmate_start_status_timer(struct tmate_session *session);
-extern void tmate_sync_copy_mode(struct window_pane *wp);
-extern void tmate_write_copy_mode(struct window_pane *wp, const char *str);
-extern void tmate_write_fin(void);
+extern void tmate_set_val(struct tmate_session *session,
+			  const char *name, const char *value);
+extern void tmate_exec_cmd_args(struct tmate_session *session,
+				int argc, const char **argv);
+extern void tmate_exec_cmd(struct tmate_session *session, struct cmd *cmd);
+extern void tmate_failed_cmd(struct tmate_session *session,
+			     int client_id, const char *cause);
+extern void tmate_status(struct tmate_session *session,
+			 const char *left, const char *right);
+extern void tmate_sync_copy_mode(struct tmate_session *session,
+				 struct window_pane *wp);
+extern void tmate_write_copy_mode(struct tmate_session *session,
+				  struct window_pane *wp, const char *str);
+extern void tmate_write_fin(struct tmate_session *session);
 extern void tmate_send_reconnection_state(struct tmate_session *session);
 
 /* tmate-decoder.c */
@@ -104,6 +110,7 @@ extern void tmate_send_reconnection_state(struct tmate_session *session);
 struct tmate_session;
 extern void tmate_dispatch_slave_message(struct tmate_session *session,
 					 struct tmate_unpacker *uk);
+extern struct session *tmate_find_session(struct tmate_session *ts);
 
 /* tmate-ssh-client.c */
 
@@ -154,6 +161,15 @@ extern void connect_ssh_client(struct tmate_ssh_client *client);
 extern struct tmate_ssh_client *tmate_ssh_client_alloc(struct tmate_session *session,
 						       const char *server_ip);
 
+/* tmate-env.c */
+
+struct tmate_env {
+	TAILQ_ENTRY(tmate_env) entry;
+	char *name;
+	char *value;
+};
+TAILQ_HEAD(tmate_env_list, tmate_env);
+
 /* tmate-session.c */
 
 struct tmate_session {
@@ -166,6 +182,9 @@ struct tmate_session {
 
 	/* True when the slave has sent all the environment variables */
 	int tmate_env_ready;
+
+	/* Per-session tmate environment variables (format variables) */
+	struct tmate_env_list env;
 
 	int min_sx;
 	int min_sy;
@@ -224,9 +243,10 @@ extern void printflike(1, 2) tmate_status_message(const char *fmt, ...);
 
 /* tmate-env.c */
 
-extern int tmate_has_received_env(void);
-extern void tmate_set_env(const char *name, const char *value);
-extern void tmate_format(struct format_tree *ft);
+extern void tmate_set_env(struct tmate_session *session,
+			   const char *name, const char *value);
+extern void tmate_format(struct tmate_session *session,
+			  struct format_tree *ft);
 
 #ifdef TMATE_SERVER_BUILD
 /* tmate-auth-keys.c (server build only) */
