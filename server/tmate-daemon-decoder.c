@@ -37,17 +37,14 @@ void tmate_send_web_url(struct tmate_session *session)
 	const char *url_token = session->session_token_named ?
 				session->session_token_named :
 				session->session_token;
-	char *web_url, *short_url;
-	xasprintf(&web_url, "https://%s/s/%s",
+	const char *path = session->link_ttl > 0 ? "j" : "s";
+	char *url;
+	xasprintf(&url, "https://%s/%s/%s",
 		  tmate_settings->tmate_host,
-		  url_token);
-	xasprintf(&short_url, "https://%s/j/%s",
-		  tmate_settings->tmate_host,
-		  url_token);
-	tmate_notify("web session: %s", short_url);
-	tmate_set_env("tmtv_web", short_url);
-	free(web_url);
-	free(short_url);
+		  path, url_token);
+	tmate_notify("web session: %s", url);
+	tmate_set_env("tmtv_web", url);
+	free(url);
 }
 
 #define AUTHORIZED_KEYS_ONLY_ERROR_MSG_1 "Server requires authorized_keys but none are given."
@@ -529,7 +526,7 @@ static void tmate_failed_cmd(__unused struct tmate_session *session,
 	free(cause);
 }
 
-static void tmate_status(__unused struct tmate_session *session,
+static void tmate_status(struct tmate_session *session,
 			 struct tmate_unpacker *uk)
 {
 	struct client *c;
@@ -541,6 +538,14 @@ static void tmate_status(__unused struct tmate_session *session,
 
 	TAILQ_FOREACH(c, &clients, entry)
 		c->flags |= CLIENT_REDRAWSTATUS;
+
+	/* Broadcast status to web viewers via SSE */
+	if (tmate_has_websocket()) {
+		_pack(&session->websocket_encoder, array, 3);
+		_pack(&session->websocket_encoder, int, TMATE_OUT_STATUS);
+		_pack(&session->websocket_encoder, string, tmate_left_status ? tmate_left_status : "");
+		_pack(&session->websocket_encoder, string, tmate_right_status ? tmate_right_status : "");
+	}
 }
 
 static void tmate_sync_copy_mode(__unused struct tmate_session *session,
