@@ -526,8 +526,10 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 	token = s->session_token_named;
 	if (token) {
 		tlen = strlen(token);
-		if (tlen == token_only_len && memcmp(path, token, tlen) == 0)
+		if (tlen == token_only_len && memcmp(path, token, tlen) == 0) {
+			wc->readonly = true;
 			return 0;
+		}
 	}
 
 	/* Check RW named token */
@@ -1015,6 +1017,8 @@ static void ws_client_free(struct ws_client *wc)
 		tmate_broadcast_viewer_count(session);
 }
 
+static void on_ws_client_event(struct bufferevent *, short, void *);
+
 /* Deferred free: flush the write buffer (e.g. a 403 response) before
  * closing the connection.  Without this, bufferevent_free() destroys
  * the socket before the response reaches the client. */
@@ -1026,8 +1030,10 @@ static void on_ws_client_flush(__unused struct bufferevent *bev, void *arg)
 
 static void ws_client_free_after_flush(struct ws_client *wc)
 {
-	/* Disable read callback, set write callback to free after flush */
-	bufferevent_setcb(wc->bev, NULL, on_ws_client_flush, NULL, wc);
+	/* Disable read callback, set write callback to free after flush.
+	 * Keep error callback to free on disconnect/timeout during flush. */
+	bufferevent_setcb(wc->bev, NULL, on_ws_client_flush,
+			  on_ws_client_event, wc);
 	bufferevent_enable(wc->bev, EV_WRITE);
 }
 
@@ -1165,7 +1171,9 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		if (ret == 2) {
 			/* POST input — handle the body */
 			wc->handshake_done = true;
-			bufferevent_set_timeouts(wc->bev, NULL, NULL);
+			/* Keep a short timeout for POST body (prevent slowloris) */
+			struct timeval post_tv = { 5, 0 };
+			bufferevent_set_timeouts(wc->bev, &post_tv, NULL);
 			tmate_info("POST input request from %s viewer",
 				   wc->readonly ? "RO" : "RW");
 			handle_post_input(wc);
