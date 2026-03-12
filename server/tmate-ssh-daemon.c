@@ -25,6 +25,9 @@ static int on_ssh_channel_read(__unused ssh_session _session,
 	char *buf;
 	size_t len;
 
+	/* Track PTY activity for idle timeout */
+	session->last_pty_activity = time(NULL);
+
 	while (total_len) {
 		tmate_decoder_get_buffer(&session->daemon_decoder, &buf, &len);
 
@@ -175,6 +178,92 @@ static void create_session_ro_symlink(struct tmate_session *session)
 	free(session_ro_path);
 }
 
+/*
+ * Idle timeout / max lifetime timer.
+ * Runs every 30s in the daemon event loop and terminates the session if:
+ *  - idle_timeout > 0 and no PTY data for that many seconds with no viewers
+ *  - max_lifetime > 0 and the session has been alive for that many seconds
+ */
+#define IDLE_CHECK_INTERVAL_SEC 30
+
+static int count_all_viewers(struct tmate_session *session)
+{
+	int ssh_rw = 0, ssh_ro = 0, web = 0;
+	struct client *c;
+	struct ws_client *wc;
+
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (!(c->flags & CLIENT_IDENTIFIED))
+			continue;
+		if (c->readonly)
+			ssh_ro++;
+		else
+			ssh_rw++;
+	}
+
+	if (tmate_has_websocket()) {
+		TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+			if (wc->handshake_done && !wc->is_post)
+				web++;
+		}
+	}
+
+	return ssh_rw + ssh_ro + web;
+}
+
+static void on_idle_timer(__unused evutil_socket_t fd,
+			  __unused short what, void *arg)
+{
+	struct tmate_session *session = arg;
+	time_t now = time(NULL);
+	int max_lifetime = tmate_settings->max_lifetime;
+	int idle_timeout = tmate_settings->idle_timeout;
+
+	/* Check max lifetime first — unconditional */
+	if (max_lifetime > 0 &&
+	    now - session->session_start >= max_lifetime) {
+		tmate_info("Session exceeded max lifetime (%ds), terminating",
+			   max_lifetime);
+		tmate_notify("Session ended: max lifetime (%ds) reached",
+			     max_lifetime);
+		request_server_termination();
+		return;
+	}
+
+	/* Check idle timeout — only when no viewers are connected */
+	if (idle_timeout > 0 &&
+	    now - session->last_pty_activity >= idle_timeout &&
+	    count_all_viewers(session) == 0) {
+		tmate_info("Session idle for %ds with no viewers, terminating",
+			   idle_timeout);
+		tmate_notify("Session ended: idle timeout (%ds) with no viewers",
+			     idle_timeout);
+		request_server_termination();
+		return;
+	}
+}
+
+static void setup_idle_timer(struct tmate_session *session)
+{
+	if (tmate_settings->idle_timeout <= 0 &&
+	    tmate_settings->max_lifetime <= 0)
+		return;
+
+	session->session_start = time(NULL);
+	session->last_pty_activity = session->session_start;
+
+	struct timeval tv = { IDLE_CHECK_INTERVAL_SEC, 0 };
+	session->ev_idle_timer = event_new(session->ev_base, -1,
+					   EV_PERSIST, on_idle_timer,
+					   session);
+	if (session->ev_idle_timer) {
+		event_add(session->ev_idle_timer, &tv);
+		tmate_info("Idle timer started (idle=%ds, lifetime=%ds)",
+			   tmate_settings->idle_timeout,
+			   tmate_settings->max_lifetime);
+	}
+}
+
 extern int server_fd;
 
 /*
@@ -290,6 +379,9 @@ void tmate_spawn_daemon(struct tmate_session *session)
 
 	/* Set up IPC receiver to accept SSE fds from main process */
 	tmate_setup_ipc_receiver(session);
+
+	/* Start idle/lifetime timer if configured */
+	setup_idle_timer(session);
 
 	signal(SIGTERM, handle_sigterm);
 
