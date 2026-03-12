@@ -46,6 +46,32 @@
 #define SSE_MAX_HEADER_SIZE 4096
 #define SSE_HANDSHAKE_TIMEOUT_SEC 5
 #define SSE_MAX_CLIENTS_PER_SESSION 50
+#define SSE_WRITE_TIMEOUT_SEC 60
+#define SSE_WRITE_BUFFER_MAX (1024 * 1024)  /* 1 MB */
+
+/*
+ * Enable TCP keepalive on a socket so dead peers behind NAT are
+ * detected within ~60 seconds (idle=30, interval=10, 3 probes).
+ */
+static void sse_enable_tcp_keepalive(int fd)
+{
+	int val;
+
+	val = 1;
+	setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val));
+#ifdef TCP_KEEPIDLE
+	val = 30;
+	setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &val, sizeof(val));
+#endif
+#ifdef TCP_KEEPINTVL
+	val = 10;
+	setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &val, sizeof(val));
+#endif
+#ifdef TCP_KEEPCNT
+	val = 3;
+	setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &val, sizeof(val));
+#endif
+}
 
 /* Forward declaration */
 static void sse_send_data(struct bufferevent *bev,
@@ -1174,8 +1200,18 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		}
 
 		wc->handshake_done = true;
-		/* Clear handshake timeout — connection is established */
-		bufferevent_set_timeouts(wc->bev, NULL, NULL);
+		/* Replace handshake read timeout with a write-side timeout.
+		 * If the client cannot accept data within 60s, it's dead. */
+		{
+			struct timeval write_tv = { SSE_WRITE_TIMEOUT_SEC, 0 };
+			bufferevent_set_timeouts(wc->bev, NULL, &write_tv);
+		}
+		/* Enable TCP keepalive to detect dead peers behind NAT */
+		{
+			int fd = bufferevent_getfd(wc->bev);
+			if (fd >= 0)
+				sse_enable_tcp_keepalive(fd);
+		}
 		tmate_info("SSE client connected (%s)",
 			   wc->readonly ? "RO" : "RW");
 
@@ -1365,12 +1401,23 @@ void tmate_setup_ipc_receiver(struct tmate_session *session)
 	tmate_info("IPC receiver registered on fd=%d", session->ipc_fd);
 }
 
+/*
+ * Check if an SSE client's write buffer has grown beyond the high
+ * watermark.  Returns true if the client is lagging and should be
+ * disconnected.
+ */
+static bool sse_client_over_watermark(struct ws_client *wc)
+{
+	struct evbuffer *out = bufferevent_get_output(wc->bev);
+	return evbuffer_get_length(out) > SSE_WRITE_BUFFER_MAX;
+}
+
 /* --- Encoder broadcast callback --- */
 
 static void on_websocket_encoder_write(void *userdata, struct evbuffer *buffer)
 {
 	struct tmate_session *session = userdata;
-	struct ws_client *wc;
+	struct ws_client *wc, *tmp;
 	size_t len;
 	unsigned char *data;
 
@@ -1383,9 +1430,16 @@ static void on_websocket_encoder_write(void *userdata, struct evbuffer *buffer)
 	/* Store in replay buffer for new clients */
 	pty_replay_append(data, len);
 
-	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
-		if (wc->handshake_done && !wc->is_post)
-			sse_send_data(wc->bev, data, len);
+	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp) {
+		if (!wc->handshake_done || wc->is_post)
+			continue;
+		if (sse_client_over_watermark(wc)) {
+			tmate_info("SSE client over write buffer watermark, "
+				   "disconnecting");
+			ws_client_free(wc);
+			continue;
+		}
+		sse_send_data(wc->bev, data, len);
 	}
 
 	evbuffer_drain(buffer, len);
@@ -1548,7 +1602,7 @@ void tmate_viewer_left(struct client *c)
 void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 				     struct tmate_unpacker *uk)
 {
-	struct ws_client *wc;
+	struct ws_client *wc, *tmp;
 	msgpack_sbuffer sbuf;
 	msgpack_packer pk;
 	int i;
@@ -1573,9 +1627,16 @@ void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 	pty_replay_append((unsigned char *)sbuf.data, sbuf.size);
 
 	/* Broadcast to all connected SSE clients (skip POST) */
-	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
-		if (wc->handshake_done && !wc->is_post)
-			sse_send_data(wc->bev, (unsigned char *)sbuf.data, sbuf.size);
+	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp) {
+		if (!wc->handshake_done || wc->is_post)
+			continue;
+		if (sse_client_over_watermark(wc)) {
+			tmate_info("SSE client over write buffer watermark, "
+				   "disconnecting");
+			ws_client_free(wc);
+			continue;
+		}
+		sse_send_data(wc->bev, (unsigned char *)sbuf.data, sbuf.size);
 	}
 
 	msgpack_sbuffer_destroy(&sbuf);

@@ -38,6 +38,7 @@
 set -e
 
 TEST_HOST="${TEST_HOST:-localhost}"
+TEST_SSH_USER="${TEST_SSH_USER:-root}"
 TEST_SSH_PORT="${TEST_SSH_PORT:-22}"
 TMTV_PORT="${TMTV_PORT:-2222}"
 SSE_PORT="${SSE_PORT:-4002}"
@@ -96,13 +97,17 @@ skip() {
 	printf "  %-55s SKIP\n" "$1"
 }
 
-# Run command on the test host (locally via sudo, or via SSH as root)
+# Run command on the test host (locally via sudo, or via SSH)
+# When TEST_SSH_USER is not root, commands are run via sudo.
 remote() {
 	if [ "$LOCAL" = "true" ]; then
 		sudo sh -c "$*" 2>/dev/null
 	else
+		SUDO_PREFIX=""
+		[ "$TEST_SSH_USER" != "root" ] && SUDO_PREFIX="sudo "
 		ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-			-p "$TEST_SSH_PORT" "root@$TEST_HOST" "$@" 2>/dev/null
+			-p "$TEST_SSH_PORT" "${TEST_SSH_USER}@$TEST_HOST" \
+			"${SUDO_PREFIX}sh -c '$*'" 2>/dev/null
 	fi
 }
 
@@ -159,6 +164,43 @@ if echo "$CLIENT_VER" | grep -q "tmtv\|tmux"; then
 	pass "tmtv client -V outputs version"
 else
 	fail "tmtv client -V outputs version" "got: $CLIENT_VER"
+fi
+
+# -------------------------------------------------------
+# Test: Health check endpoint (/healthz)
+# -------------------------------------------------------
+HEALTH_RESP=$(curl -s -m 3 "$SSE_BASE/healthz" 2>/dev/null || echo "")
+if echo "$HEALTH_RESP" | grep -q '"status":"ok"'; then
+	pass "healthz returns status ok"
+else
+	fail "healthz returns status ok" "got: $HEALTH_RESP"
+fi
+
+# Verify JSON fields: version, uptime_seconds, active_sessions
+if echo "$HEALTH_RESP" | grep -q '"version":"[0-9]'; then
+	pass "healthz includes version"
+else
+	fail "healthz includes version" "got: $HEALTH_RESP"
+fi
+
+if echo "$HEALTH_RESP" | grep -q '"uptime_seconds":[0-9]'; then
+	pass "healthz includes uptime_seconds"
+else
+	fail "healthz includes uptime_seconds" "got: $HEALTH_RESP"
+fi
+
+if echo "$HEALTH_RESP" | grep -q '"active_sessions":[0-9]'; then
+	pass "healthz includes active_sessions"
+else
+	fail "healthz includes active_sessions" "got: $HEALTH_RESP"
+fi
+
+# Verify correct Content-Type header
+HEALTH_CTYPE=$(curl -s -m 3 -o /dev/null -w "%{content_type}" "$SSE_BASE/healthz" 2>/dev/null || echo "")
+if echo "$HEALTH_CTYPE" | grep -q "application/json"; then
+	pass "healthz returns application/json"
+else
+	fail "healthz returns application/json" "got: $HEALTH_CTYPE"
 fi
 
 # -------------------------------------------------------

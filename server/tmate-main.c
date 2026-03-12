@@ -36,6 +36,8 @@ struct tmate_settings _tmate_settings = {
 	.log_level      	= 0,
 	.use_proxy_protocol	= false,
 	.authorized_keys_only	= false,
+	.idle_timeout		= 0,
+	.max_lifetime		= 0,
 };
 
 struct tmate_settings *tmate_settings = &_tmate_settings;
@@ -51,7 +53,7 @@ void request_server_termination(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "usage: tmtv-server [-A] [-b ip] [-h hostname] [-k keys_dir] [-p listen_port] [-q ssh_port_advertized] [-V] [-w web_port] [-z sse_port] [-x] [-v]\n");
+	fprintf(stderr, "usage: tmtv-server [-A] [-b ip] [-h hostname] [-k keys_dir] [-L max_lifetime] [-p listen_port] [-q ssh_port_advertized] [-T idle_timeout] [-V] [-w web_port] [-z sse_port] [-x] [-v]\n");
 }
 
 static char* get_full_hostname(void)
@@ -122,7 +124,7 @@ int main(int argc, char **argv, char **envp)
 {
 	int opt;
 
-	while ((opt = getopt(argc, argv, "Ab:h:k:p:q:Vw:z:xv")) != -1) {
+	while ((opt = getopt(argc, argv, "Ab:h:k:L:p:q:T:Vw:z:xv")) != -1) {
 		switch (opt) {
 		case 'V':
 			printf("tmtv-server %s (based on tmux %s)\n",
@@ -140,11 +142,17 @@ int main(int argc, char **argv, char **envp)
 		case 'k':
 			tmate_settings->keys_dir = xstrdup(optarg);
 			break;
+		case 'L':
+			tmate_settings->max_lifetime = atoi(optarg);
+			break;
 		case 'p':
 			tmate_settings->ssh_port = atoi(optarg);
 			break;
 		case 'q':
 			tmate_settings->ssh_port_advertized = atoi(optarg);
+			break;
+		case 'T':
+			tmate_settings->idle_timeout = atoi(optarg);
 			break;
 		case 'w':
 			tmate_settings->web_port = atoi(optarg);
@@ -258,13 +266,16 @@ int main(int argc, char **argv, char **envp)
 	}
 
 	tmate_info("tmtv-server %s starting: ssh_port=%d sse_port=%d "
-		   "bind=%s proxy_protocol=%s authorized_keys_only=%s",
+		   "bind=%s proxy_protocol=%s authorized_keys_only=%s "
+		   "idle_timeout=%ds max_lifetime=%ds",
 		   TMTV_VERSION,
 		   tmate_settings->ssh_port,
 		   tmate_settings->websocket_port,
 		   tmate_settings->bind_addr ? tmate_settings->bind_addr : "*",
 		   tmate_settings->use_proxy_protocol ? "on" : "off",
-		   tmate_settings->authorized_keys_only ? "on" : "off");
+		   tmate_settings->authorized_keys_only ? "on" : "off",
+		   tmate_settings->idle_timeout,
+		   tmate_settings->max_lifetime);
 
 	tmate_ssh_server_main(tmate_session,
 			      tmate_settings->keys_dir, tmate_settings->bind_addr, tmate_settings->ssh_port);

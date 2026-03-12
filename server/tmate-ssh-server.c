@@ -574,10 +574,22 @@ static ssh_bind prepare_ssh(const char *keys_dir, const char *bind_addr, int por
 
 static volatile sig_atomic_t pending_gc = 0;
 static volatile sig_atomic_t active_children = 0;
+static time_t server_start_time;
 
-/* Dead child pids collected in signal handler, processed in main loop */
-#define MAX_DEAD_PIDS 64
-static volatile pid_t dead_pids[MAX_DEAD_PIDS];
+int tmate_server_get_active_sessions(void)
+{
+	return (int)active_children;
+}
+
+time_t tmate_server_get_start_time(void)
+{
+	return server_start_time;
+}
+
+/* Dead child pids collected in signal handler, processed in main loop.
+ * Must be at least MAX_CHILDREN to avoid overflow if all children die
+ * between poll() iterations. */
+static volatile pid_t dead_pids[MAX_CHILDREN];
 static volatile sig_atomic_t dead_pid_count = 0;
 
 static void handle_sigchld(__unused int sig)
@@ -588,7 +600,7 @@ static void handle_sigchld(__unused int sig)
 	while ((pid = waitpid(WAIT_ANY, &status, WNOHANG)) > 0) {
 		if (active_children > 0)
 			active_children--;
-		if (dead_pid_count < MAX_DEAD_PIDS)
+		if (dead_pid_count < MAX_CHILDREN)
 			dead_pids[dead_pid_count++] = pid;
 	}
 
@@ -735,6 +747,8 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 
 	tmate_catch_sigsegv();
 
+	server_start_time = time(NULL);
+
 	sse_registry_init(&sse_reg);
 
 	/* Use sigaction without SA_RESTART so poll() returns EINTR
@@ -819,11 +833,17 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 			nfds++;
 		}
 
-		int ret = poll(pfds, nfds, -1);
+		int ret = poll(pfds, nfds, 60000);
 		if (ret < 0) {
 			if (errno == EINTR)
 				continue;
 			tmate_fatal("Error in poll: %s", strerror(errno));
+		}
+		if (ret == 0) {
+			/* Periodic GC on timeout — catches stale entries
+			 * even when no children die (e.g. unclean exit). */
+			gc_stale_sessions();
+			continue;
 		}
 
 		/* Check IPC fds for registration messages (process first
