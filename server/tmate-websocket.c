@@ -1067,18 +1067,39 @@ static void sse_send_fin(struct bufferevent *bev)
 
 void tmate_disconnect_ws_clients(struct tmate_session *session)
 {
+	tmate_send_fin_to_ws_clients(session);
+
 	struct ws_client *wc, *tmp;
-
-	/* Send FIN to each client before disconnecting so the browser
-	 * can show "session ended" instead of retrying forever. */
-	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
-		if (wc->handshake_done && !wc->is_post)
-			sse_send_fin(wc->bev);
-	}
-
 	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp)
 		ws_client_free(wc);
 	tmate_debug("All SSE clients disconnected (web sharing disabled)");
+}
+
+void tmate_send_fin_to_ws_clients(struct tmate_session *session)
+{
+	struct ws_client *wc;
+	int fd;
+
+	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+		if (!wc->handshake_done || wc->is_post)
+			continue;
+		sse_send_fin(wc->bev);
+		/* Flush the FIN to the kernel socket buffer so it survives
+		 * process exit.  bufferevent_flush() pushes the write buffer
+		 * into the fd via the underlying evbuffer. */
+		fd = bufferevent_getfd(wc->bev);
+		if (fd >= 0) {
+			struct evbuffer *out = bufferevent_get_output(wc->bev);
+			if (out && evbuffer_get_length(out) > 0) {
+				/* Write directly to the fd to bypass event loop */
+				unsigned char *data;
+				size_t len = evbuffer_get_length(out);
+				data = evbuffer_pullup(out, len);
+				if (data)
+					write(fd, data, len);
+			}
+		}
+	}
 }
 
 /*
