@@ -48,6 +48,7 @@ jobs:
           cd tests && make all
 
       - name: Run integration tests (ephemeral server)
+        timeout-minutes: 5
         continue-on-error: true
         run: |
           # Install expect for SSH tests
