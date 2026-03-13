@@ -295,7 +295,23 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $REMOTE_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 6
+
+# Wait for the SSH connection to stabilize.
+# The client may cycle through 2-3 connections on startup (~2s each).
+# We wait until the token stops changing for 3 seconds.
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$TESTID 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1))
+		[ "$_stable" -ge 3 ] && break
+	else
+		_stable=0
+	fi
+	_prev_tok="$_cur_tok"
+done
 
 # Verify session is running
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null" | grep -q "main"; then
@@ -1116,7 +1132,16 @@ remote "cp $AUTONUM_CONF1 $AUTONUM_CONF2"
 AUTONUM_SOCK1="/tmp/tmtv-autonum1-$$"
 AUTONUM_SOCK2="/tmp/tmtv-autonum2-$$"
 remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -S $AUTONUM_SOCK1 -f $AUTONUM_CONF1 new-session -d -s auto1' /dev/null </dev/null >/dev/null 2>&1 &"
-sleep 6
+# Wait for first session to stabilize
+_prev_tok=""; _stable=0
+for _wait in $(seq 1 15); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/autonum 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
 
 # Check first session got the name
 if remote "test -L $SESSIONS_DIR/autonum"; then
@@ -1124,7 +1149,16 @@ if remote "test -L $SESSIONS_DIR/autonum"; then
 
 	# Start second client on separate socket (creates separate SSH connection)
 	remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -S $AUTONUM_SOCK2 -f $AUTONUM_CONF2 new-session -d -s auto2' /dev/null </dev/null >/dev/null 2>&1 &"
-	sleep 6
+	# Wait for second session to stabilize with auto-numbered name
+	_prev_tok=""; _stable=0
+	for _wait in $(seq 1 15); do
+		sleep 1
+		_cur_tok=$(remote "readlink $SESSIONS_DIR/autonum-1 2>/dev/null" || echo "")
+		if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+			_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+		else _stable=0; fi
+		_prev_tok="$_cur_tok"
+	done
 
 	# Second session should get auto-numbered name
 	if remote "test -L $SESSIONS_DIR/autonum-1"; then
