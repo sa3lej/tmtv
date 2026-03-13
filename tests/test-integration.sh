@@ -238,21 +238,23 @@ cleanup() {
 	# Kill any lingering expect/SSH processes from tests
 	remote "pkill -9 -f 'expect.*${TMTV_PORT}'" 2>/dev/null || true
 	remote "pkill -9 -f 'ssh.*-p.*${TMTV_PORT}'" 2>/dev/null || true
-	# Kill any test sessions
+	# Kill any test sessions (default socket and all custom test sockets)
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server 2>/dev/null" || true
+	remote "for sock in /tmp/tmtv-*-$$; do TERM=xterm-256color $REMOTE_TMTV -S \$sock kill-server 2>/dev/null; done" || true
+	# Kill any tmtv processes spawned from test configs
+	remote "pkill -9 -f '.tmtv-test-.*\.conf'" 2>/dev/null || true
 	# Clean up all temp configs from this test run
 	remote "rm -f /tmp/.tmtv-test-*-$TESTID.conf" 2>/dev/null || true
 	remote "rm -f $REMOTE_CONF" 2>/dev/null || true
+	remote "rm -f /tmp/tmtv-*-$$" 2>/dev/null || true
 }
 trap cleanup EXIT
 
-# Global timeout safety net for CI — prevent indefinite hangs.
+# Global timeout safety net — prevent indefinite hangs in CI and manual runs.
 # Individual tests have their own timeouts, but this catches anything missed.
-if [ -n "${CI:-}" ]; then
-	_CI_TIMEOUT=240
-	( sleep "$_CI_TIMEOUT" && echo "" && echo "FATAL: Test suite exceeded ${_CI_TIMEOUT}s global timeout" >&2 && kill -TERM $$ 2>/dev/null ) &
-	_GLOBAL_TIMER_PID=$!
-fi
+_CI_TIMEOUT=${TMTV_TEST_TIMEOUT:-240}
+( sleep "$_CI_TIMEOUT" && echo "" && echo "FATAL: Test suite exceeded ${_CI_TIMEOUT}s global timeout" >&2 && kill -TERM $$ 2>/dev/null ) &
+_GLOBAL_TIMER_PID=$!
 
 echo ""
 if [ "$WEB_HOST" != "$TEST_HOST" ]; then
@@ -408,7 +410,9 @@ fi
 # -------------------------------------------------------
 # Test: Named session registered
 # -------------------------------------------------------
-# Check if named symlink exists (readlink follows symlinks, stat checks existence)
+# Wait for symlink to appear (server-side registration is async)
+wait_for 10 1 "named session symlink appears" \
+	"remote 'test -L $SESSIONS_DIR/$TESTID'"
 if remote "test -L $SESSIONS_DIR/$TESTID"; then
 	pass "named session symlink created"
 	SESSION_NAME="$TESTID"
