@@ -2343,6 +2343,76 @@ remote "rm -f $RAPID_CONF" 2>/dev/null || true
 wait_for 5 1 "server stopped after rapid tests" \
 	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
+# -------------------------------------------------------
+# Test: Large PTY output — session survives burst > 128KB
+# -------------------------------------------------------
+# Regression test for tmtv-wht.1 (P0): large PTY bursts (e.g.
+# from AI tools) used to hit TMATE_MAX_MESSAGE_SIZE=128KB
+# and kill the session with tmate_fatal. After the fix the
+# limit is 2MB and oversized messages are discarded gracefully.
+LPTY_CONF="/tmp/.tmtv-test-lpty-$TESTID.conf"
+LPTY_SESSNAME="lpty$TESTID"
+remote "cat > $LPTY_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$LPTY_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $LPTY_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+
+LPTY_TOKEN=""
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$LPTY_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1))
+		[ "$_stable" -ge 3 ] && LPTY_TOKEN="$_cur_tok" && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+if [ -n "$LPTY_TOKEN" ]; then
+	# Generate ~200KB of output in one burst (well above old 128KB limit)
+	remote_tmtv "send-keys -t main:0 'dd if=/dev/urandom bs=1024 count=200 2>/dev/null | base64' Enter"
+	sleep 5
+
+	# Session must still be alive — verify we can capture pane output
+	_lpty_alive=$(remote_tmtv "display-message -p -t main:0 '#S'" 2>/dev/null || echo "")
+	if [ "$_lpty_alive" = "main" ]; then
+		pass "large PTY burst (200KB): session survived"
+	else
+		fail "large PTY burst (200KB): session survived" \
+			"session dead or unresponsive after burst"
+	fi
+
+	# Verify normal operation continues after the burst
+	LPTY_MARKER="POSTBURST_${TESTID}"
+	remote_tmtv "send-keys -t main:0 'echo $LPTY_MARKER' Enter"
+	sleep 2
+	_lpty_cap=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
+	if echo "$_lpty_cap" | grep -q "$LPTY_MARKER"; then
+		pass "large PTY burst: normal output works after burst"
+	else
+		fail "large PTY burst: normal output works after burst" \
+			"marker '$LPTY_MARKER' not found in pane"
+	fi
+else
+	skip "large PTY burst (200KB): session survived" "could not create session"
+	skip "large PTY burst: normal output works after burst" "could not create session"
+fi
+
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $LPTY_CONF" 2>/dev/null || true
+wait_for 5 1 "server stopped after lpty tests" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+
 # === INPUT LATENCY BENCHMARKS ===
 #
 # Measure actual round-trip latency for SSH and web input paths.
