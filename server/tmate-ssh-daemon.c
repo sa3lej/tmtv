@@ -470,9 +470,42 @@ void tmate_register_session_name(struct tmate_session *session,
 	/*
 	 * Auto-increment: if "name" is taken, try "name-1", "name-2", etc.
 	 * This supports multiple sessions sharing the same base name.
+	 *
+	 * Before auto-numbering, check if the existing symlink points to a
+	 * dead socket. This happens when the client reconnects — the first
+	 * daemon's atexit cleanup hasn't run yet, but the socket is already
+	 * closed. Remove stale symlinks to let the reconnecting client
+	 * reclaim its name.
 	 */
 	actual_name = xstrdup(name);
 	xasprintf(&ro_named, "ro-%s", actual_name);
+
+	/* Check if existing symlink is stale (points to dead socket) */
+	if (fstatat(session->sessions_dir_fd, actual_name, &st,
+		    AT_SYMLINK_NOFOLLOW) == 0) {
+		char target[TMATE_TOKEN_LEN + 1];
+		ssize_t len = readlinkat(session->sessions_dir_fd, actual_name,
+					 target, sizeof(target) - 1);
+		if (len > 0) {
+			target[len] = '\0';
+			/* Check if the target socket is alive */
+			struct stat sock_st;
+			if (fstatat(session->sessions_dir_fd, target, &sock_st,
+				    0) < 0) {
+				/* Target socket is dead — remove stale symlinks */
+				char *stale_ro;
+				xasprintf(&stale_ro, "ro-%s", actual_name);
+				unlinkat(session->sessions_dir_fd, actual_name, 0);
+				unlinkat(session->sessions_dir_fd, stale_ro, 0);
+				/* Also remove RW symlink (XXXXX-name pattern) */
+				/* We don't know the exact prefix, skip it —
+				 * it will be cleaned by the dying daemon */
+				free(stale_ro);
+				tmate_info("Reclaimed stale session name: %s",
+					   actual_name);
+			}
+		}
+	}
 
 	for (suffix = 1;
 	     fstatat(session->sessions_dir_fd, actual_name, &st, AT_SYMLINK_NOFOLLOW) == 0 ||
