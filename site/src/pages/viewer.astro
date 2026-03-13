@@ -75,12 +75,6 @@ import Viewer from '../layouts/Viewer.astro';
       </div>
     </div>
 
-    <div id="tmux-status" class="tmux-status">
-      <span id="tmux-status-left"></span>
-      <span id="tmux-status-center"></span>
-      <span id="tmux-status-right"></span>
-    </div>
-
     <div class="tv-legs">
       <div class="tv-leg"></div>
       <div class="tv-leg"></div>
@@ -160,17 +154,6 @@ import Viewer from '../layouts/Viewer.astro';
   .terminal-container {
     background: #191d27; position: relative; flex: 0 0 auto; overflow: hidden;
   }
-  .pane-border { position: absolute; background: #2a3040; z-index: 2; }
-
-  .tmux-status {
-    background: #005f00; color: #e0e0e0;
-    font-family: "JetBrains Mono", monospace; font-size: 14px; line-height: 20px;
-    padding: 1px 4px; display: flex; justify-content: space-between;
-    min-height: 20px; white-space: nowrap; overflow: hidden;
-  }
-  #tmux-status-left { color: #ffffff; font-weight: bold; flex: 0 0 auto; }
-  #tmux-status-center { color: #e0e0e0; flex: 1 1 auto; }
-  #tmux-status-right { color: #d0d0d0; flex: 0 0 auto; text-align: right; }
 
   /* scanlines removed — caused visible banding artifacts */
   .xterm-viewport::-webkit-scrollbar { display: none; }
@@ -184,7 +167,6 @@ import Viewer from '../layouts/Viewer.astro';
       radial-gradient(ellipse at 50% 50%, rgba(30, 25, 15, 0.6) 0%, transparent 80%);
   }
   .theme-tv .titlebar { display: none; }
-  .theme-tv .tmux-status { display: none; }
   .theme-tv .terminal-wrap {
     border-radius: 40px 40px 34px 34px; overflow: visible;
     box-shadow: 0 6px 40px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
