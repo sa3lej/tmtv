@@ -1237,6 +1237,10 @@ static void count_ssh_viewers(int *rw, int *ro)
 	TAILQ_FOREACH(c, &clients, entry) {
 		if (!(c->flags & CLIENT_IDENTIFIED))
 			continue;
+		/* Exclude the virtual PTY client from viewer counts */
+		if (tmate_session->vpty_active &&
+		    c->pid == tmate_session->vpty_child_pid)
+			continue;
 		if (c->readonly)
 			(*ro)++;
 		else
@@ -2253,6 +2257,10 @@ void tmate_notify_client_join(__unused struct tmate_session *session,
 	tmate_info("Client joined (pid=%d)", c->pid);
 
 	if (!tmate_has_websocket())
+		return;
+
+	/* Skip the virtual PTY client — it's not a real viewer */
+	if (session->vpty_active && c->pid == session->vpty_child_pid)
 		return;
 
 	c->flags |= CLIENT_TMATE_NOTIFIED_JOIN;

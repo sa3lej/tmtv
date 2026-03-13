@@ -205,6 +205,10 @@ static int count_all_viewers(struct tmate_session *session)
 	TAILQ_FOREACH(c, &clients, entry) {
 		if (!(c->flags & CLIENT_IDENTIFIED))
 			continue;
+		/* Exclude the virtual PTY client from viewer counts */
+		if (session->vpty_active &&
+		    c->pid == session->vpty_child_pid)
+			continue;
 		if (c->readonly)
 			ssh_ro++;
 		else
