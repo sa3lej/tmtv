@@ -2650,39 +2650,47 @@ fi
 # -------------------------------------------------------
 # Test: SSH RW multi-keystroke latency — 5 echoes, min/avg/max
 # -------------------------------------------------------
-# Sends 5 unique markers via SSH RW (expect), measures each
-# echo latency individually, and reports min/avg/max.
-# Fails if average exceeds 1500ms.
+# Connects as an SSH RW viewer and measures real keystroke-to-echo
+# latency through the tmtv relay. Uses a unique output prefix (>>)
+# that only appears in the shell output line, not the command echo,
+# to avoid matching the send itself.
+# Fails if average exceeds 500ms.
 if [ -n "$BENCH_RW_TOKEN" ]; then
 	remote "cat > /tmp/tmtv-ssh-bench.exp << 'EXPECT'
-set timeout 10
-spawn ssh -o StrictHostKeyChecking=no -p TMTV_PORT RW_TOKEN@127.0.0.1
-# Wait for shell prompt to appear
-sleep 3
+set timeout 15
+spawn ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p TMTV_PORT RW_TOKEN@127.0.0.1
+
+# Wait for shell prompt — look for $ or > prompt character
+expect {
+    timeout { puts \"SSH_BENCH_ERROR=no_prompt\"; exit 1 }
+    -re {[$#>] }
+}
+
+# Disable terminal echo and prompt to get clean output
+send \"export PS1=''; stty -echo\r\"
+sleep 1
 
 set results {}
-for {set i 1} {$i <= 5} {incr i} {
-    set marker "SSHBM${i}_TESTID"
+for {set i 1} {\$i <= 5} {incr i} {
+    set tag \"BM\${i}\"
     set start_ms [clock milliseconds]
-    send "echo $marker\r"
+    send \"echo >>\$tag\r\"
     expect {
         timeout {
             lappend results -1
-            continue
         }
-        "$marker" {
+        \">>\$tag\" {
             set end_ms [clock milliseconds]
-            set elapsed [expr {$end_ms - $start_ms}]
-            lappend results $elapsed
+            set elapsed [expr {\$end_ms - \$start_ms}]
+            lappend results \$elapsed
         }
     }
-    sleep 0.3
+    sleep 0.2
 }
 
-# Output all results on one line
-puts "SSH_BENCH_RESULTS=[join $results ,]"
-sleep 0.5
-close
+puts \"SSH_BENCH_RESULTS=[join \$results ,]\"
+send \"exit\r\"
+expect eof
 wait
 EXPECT
 sed -i \"s/RW_TOKEN/$BENCH_RW_TOKEN/;s/TESTID/$TESTID/;s/TMTV_PORT/$TMTV_PORT/\" /tmp/tmtv-ssh-bench.exp"
@@ -2714,11 +2722,11 @@ sed -i \"s/RW_TOKEN/$BENCH_RW_TOKEN/;s/TESTID/$TESTID/;s/TMTV_PORT/$TMTV_PORT/\"
 
 		if [ "$_count" -gt 0 ]; then
 			_avg=$((_sum / _count))
-			if [ "$_avg" -lt 1500 ] 2>/dev/null; then
+			if [ "$_avg" -lt 500 ] 2>/dev/null; then
 				pass "SSH multi-keystroke latency (min=${_min}ms avg=${_avg}ms max=${_max}ms, n=${_count})"
 			else
 				fail "SSH multi-keystroke latency" \
-					"avg ${_avg}ms exceeds 1500ms (min=${_min}ms max=${_max}ms, n=${_count})"
+					"avg ${_avg}ms exceeds 500ms (min=${_min}ms max=${_max}ms, n=${_count})"
 			fi
 		else
 			fail "SSH multi-keystroke latency" "all 5 keystrokes timed out"
