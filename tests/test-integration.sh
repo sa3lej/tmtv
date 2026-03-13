@@ -2679,7 +2679,8 @@ CONF"
 		# -------------------------------------------------------
 		SB_CHECK=$(remote_tmtv "show-options -wv pane-scrollbars" 2>/dev/null || echo "")
 		# pane-scrollbars may not exist in all builds; just check the option is recognized
-		SB_LIST=$(remote_tmtv "show-options -w" 2>/dev/null | grep -c "pane-scrollbars" || echo "0")
+		SB_LIST=$(remote_tmtv "show-options -w" 2>/dev/null | grep -c "pane-scrollbars" || true)
+		SB_LIST=${SB_LIST:-0}
 		if [ "$SB_LIST" -gt 0 ] || [ -n "$SB_CHECK" ]; then
 			pass "scrollbars: pane-scrollbars option exists"
 		else

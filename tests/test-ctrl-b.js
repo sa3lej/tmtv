@@ -25,11 +25,13 @@ if (!url) {
   const page = await browser.newPage();
 
   try {
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 15000 });
+    // Use 'domcontentloaded' — SSE connections are persistent, so
+    // 'networkidle' would timeout waiting for the stream to close.
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // --- Step 1: Terminal connects and renders ---
     const terminal = page.locator('.xterm-screen, #terminal-wrap canvas');
-    await terminal.first().waitFor({ state: 'visible', timeout: 15000 });
+    await terminal.first().waitFor({ state: 'visible', timeout: 30000 });
     await page.screenshot({ path: screenshotDir + '/ctrl-b-1-connected.png' });
     console.log('PASS step 1: terminal connected');
 
