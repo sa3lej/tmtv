@@ -88,6 +88,11 @@ static void tmate_daemon_init(struct tmate_session *session)
 	tmate_encoder_init(&session->daemon_encoder, on_daemon_encoder_write, session);
 	tmate_decoder_init(&session->daemon_decoder, on_daemon_decoder_read, session);
 
+	/* Input socket defaults: disabled, mirror on (keys go to both PTY and socket) */
+	session->input_mode_enabled = false;
+	session->input_mirror = true;
+	session->next_viewer_id = 0;
+
 	tmate_init_websocket(session);
 }
 
@@ -100,6 +105,10 @@ static void cleanup_session_files(void)
 {
 	struct tmate_session *s = tmate_session;
 	int dirfd = s->sessions_dir_fd;
+
+	/* Kill virtual PTY client if running (async-signal-safe: kill only) */
+	if (s->vpty_child_pid > 0)
+		kill(s->vpty_child_pid, SIGTERM);
 
 	if (dirfd < 0)
 		return;
@@ -195,6 +204,10 @@ static int count_all_viewers(struct tmate_session *session)
 
 	TAILQ_FOREACH(c, &clients, entry) {
 		if (!(c->flags & CLIENT_IDENTIFIED))
+			continue;
+		/* Exclude the virtual PTY client from viewer counts */
+		if (session->vpty_active &&
+		    c->pid == session->vpty_child_pid)
 			continue;
 		if (c->readonly)
 			ssh_ro++;

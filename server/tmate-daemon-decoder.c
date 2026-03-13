@@ -293,9 +293,16 @@ static void tmate_sync_window_panes(struct window *w,
 
 	active_pane_id = unpack_int(w_uk);
 	wp = window_pane_find_by_id(active_pane_id);
-	if (!wp || wp->window != w)
-		tmate_fatal("Invalid active_pane_id recevied");
-	window_set_active_pane(w, wp, 0);
+	if (!wp || wp->window != w) {
+		/* Fall back to first pane instead of crashing.
+		 * This can happen transiently during window detach
+		 * when sync_layout fires with stale active pane state. */
+		tmate_info("Invalid active_pane_id %d, falling back to "
+			   "first pane", active_pane_id);
+		wp = TAILQ_FIRST(&w->panes);
+	}
+	if (wp)
+		window_set_active_pane(w, wp, 0);
 }
 
 static void tmate_sync_windows(struct session *s, int sx, int sy,
@@ -364,8 +371,19 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 	if (!wl)
 		tmate_fatal("no valid active window");
 
-	session_set_current(s, wl);
-	server_redraw_window(wl->window);
+	{
+		struct winlink *old_wl = s->curw;
+		session_set_current(s, wl);
+		server_redraw_window(wl->window);
+
+		/* When the active window changes, SSE viewers need a screen
+		 * dump of the new window's content.  PTY data is only sent
+		 * for new output, so without this, web viewers see a blank
+		 * screen after a window switch.
+		 * Skip when vpty is active — it sends full-screen output. */
+		if (old_wl != wl && !tmate_session->vpty_active)
+			sse_broadcast_screen_dump(tmate_session);
+	}
 }
 
 static void tmate_sync_layout(__unused struct tmate_session *session,
@@ -392,6 +410,10 @@ static void tmate_sync_layout(__unused struct tmate_session *session,
 	}
 
 	tmate_sync_windows(s, sx, sy, uk);
+
+	/* Resize the virtual PTY client to match the host's dimensions */
+	if (tmate_has_websocket())
+		sse_vpty_resize(session, sx, sy);
 }
 
 static void tmate_pty_data(__unused struct tmate_session *session,
@@ -716,6 +738,43 @@ static void tmate_snapshot(__unused struct tmate_session *session,
 	 */
 }
 
+static void tmate_input_mode(struct tmate_session *session,
+			     struct tmate_unpacker *uk)
+{
+	bool enabled = unpack_bool(uk);
+	bool mirror = unpack_bool(uk);
+
+	session->input_mode_enabled = enabled;
+	session->input_mirror = mirror;
+
+	tmate_info("Input mode: enabled=%d mirror=%d", enabled, mirror);
+
+	if (enabled) {
+		/* Send current viewer list to host */
+		struct client *c;
+		TAILQ_FOREACH(c, &clients, entry) {
+			if (!(c->flags & CLIENT_IDENTIFIED))
+				continue;
+			char name[64];
+			snprintf(name, sizeof(name), "ssh-%d", c->pid);
+			tmate_send_user_join(session, c->pid, name,
+					     c->readonly, "ssh");
+		}
+
+		if (tmate_has_websocket()) {
+			struct ws_client *wc;
+			TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+				if (wc->handshake_done && !wc->is_post &&
+				    wc->viewer_id > 0)
+					tmate_send_user_join(session,
+							     wc->viewer_id,
+							     wc->readonly ? "web-ro" : "web",
+							     wc->readonly, "web");
+			}
+		}
+	}
+}
+
 void tmate_dispatch_daemon_message(struct tmate_session *session,
 				   struct tmate_unpacker *uk)
 {
@@ -740,6 +799,7 @@ void tmate_dispatch_daemon_message(struct tmate_session *session,
 	dispatch(TMATE_OUT_SNAPSHOT,		tmate_snapshot);
 	dispatch(TMATE_OUT_EXEC_CMD,		tmate_exec_cmd);
 	dispatch(TMATE_OUT_UNAME,		tmate_uname);
+	dispatch(TMATE_OUT_INPUT_MODE,		tmate_input_mode);
 	default: tmate_fatal("Bad message type: %d", cmd);
 	}
 }
