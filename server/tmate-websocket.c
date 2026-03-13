@@ -15,11 +15,15 @@
  */
 
 #include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <sys/un.h>
+#include <sys/wait.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
+#include <signal.h>
 #ifndef IPPROTO_TCP
 #include <netinet/in.h>
 #endif
@@ -73,9 +77,11 @@ static void sse_enable_tcp_keepalive(int fd)
 #endif
 }
 
-/* Forward declaration */
+/* Forward declarations */
 static void sse_send_data(struct bufferevent *bev,
 			  const unsigned char *data, size_t len);
+static bool sse_client_over_watermark(struct ws_client *wc);
+static void ws_client_free(struct ws_client *wc);
 
 /* --- PTY replay buffer ---
  * Message-level ring buffer: each entry is a complete encoder write
@@ -149,6 +155,232 @@ static void pty_replay_send(struct bufferevent *bev)
 			sse_send_data(bev, pty_replay_msgs[idx].data,
 				      pty_replay_msgs[idx].len);
 	}
+}
+
+/* --- Virtual PTY client for full-screen SSE streaming ---
+ *
+ * Spawns a read-only tmux client (via fork + openpty + client_main)
+ * that captures the fully composed screen output — status bar, pane
+ * borders, everything — just like an SSH viewer sees it.  The master
+ * side of the PTY is read by the daemon and broadcast to SSE clients
+ * as TMATE_OUT_PTY_DATA with pane_id = -1 (full-screen marker).
+ *
+ * This replaces the per-pane grid dump approach with a pixel-perfect
+ * VT100 stream that matches what tmux would show on a real terminal.
+ */
+
+extern int server_fd;
+
+static void on_vpty_read(evutil_socket_t fd, short what, void *arg)
+{
+	struct tmate_session *session = arg;
+	struct ws_client *wc, *tmp;
+	unsigned char buf[16384];
+	ssize_t len;
+	msgpack_sbuffer sbuf;
+	msgpack_packer pk;
+
+	(void)what;
+
+	for (;;) {
+		len = read(fd, buf, sizeof(buf));
+		if (len < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return;
+			tmate_info("vpty read error: %s", strerror(errno));
+			sse_kill_virtual_client(session);
+			return;
+		}
+		if (len == 0) {
+			tmate_info("vpty EOF — child exited");
+			sse_kill_virtual_client(session);
+			return;
+		}
+
+		/* Wrap as [CTL_DEAMON_OUT_MSG, [OUT_PTY_DATA, -1, data]] */
+		msgpack_sbuffer_init(&sbuf);
+		msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+
+		msgpack_pack_array(&pk, 2);
+		msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+
+		msgpack_pack_array(&pk, 3);
+		msgpack_pack_int(&pk, TMATE_OUT_PTY_DATA);
+		msgpack_pack_int(&pk, -1);  /* pane_id -1 = full screen */
+		msgpack_pack_bin(&pk, len);
+		msgpack_pack_bin_body(&pk, buf, len);
+
+		/* Store in replay buffer for late-joining clients */
+		pty_replay_append((unsigned char *)sbuf.data, sbuf.size);
+
+		/* Broadcast to all connected SSE clients */
+		TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp) {
+			if (!wc->handshake_done || wc->is_post)
+				continue;
+			if (sse_client_over_watermark(wc)) {
+				tmate_info("SSE client over watermark, "
+					   "disconnecting");
+				ws_client_free(wc);
+				continue;
+			}
+			sse_send_data(wc->bev,
+				      (unsigned char *)sbuf.data, sbuf.size);
+		}
+
+		msgpack_sbuffer_destroy(&sbuf);
+	}
+}
+
+void sse_spawn_virtual_client(struct tmate_session *session)
+{
+	int master_fd, slave_fd;
+	pid_t pid;
+	struct sockaddr_un sa;
+	int sock_fd;
+
+	if (session->vpty_active) {
+		tmate_debug("vpty already active, skipping spawn");
+		return;
+	}
+
+	if (openpty(&master_fd, &slave_fd, NULL, NULL, NULL) < 0) {
+		tmate_info("vpty: openpty failed: %s", strerror(errno));
+		return;
+	}
+
+	/* Set initial terminal size from websocket or defaults */
+	{
+		struct session *s = RB_MIN(sessions, &sessions);
+		struct winsize ws;
+		memset(&ws, 0, sizeof(ws));
+		if (s && s->curw && s->curw->window) {
+			ws.ws_col = s->curw->window->sx;
+			ws.ws_row = s->curw->window->sy;
+		} else {
+			ws.ws_col = 80;
+			ws.ws_row = 24;
+		}
+		ioctl(slave_fd, TIOCSWINSZ, &ws);
+	}
+
+	pid = fork();
+	if (pid < 0) {
+		tmate_info("vpty: fork failed: %s", strerror(errno));
+		close(master_fd);
+		close(slave_fd);
+		return;
+	}
+
+	if (pid == 0) {
+		/* Child: connect to tmux socket and run client_main */
+
+		/* Redirect stdio to slave PTY */
+		dup2(slave_fd, STDIN_FILENO);
+		dup2(slave_fd, STDOUT_FILENO);
+		dup2(slave_fd, STDERR_FILENO);
+		if (slave_fd > STDERR_FILENO)
+			close(slave_fd);
+		close(master_fd);
+
+		/* Connect to the tmux socket */
+		memset(&sa, 0, sizeof(sa));
+		sa.sun_family = AF_UNIX;
+		strlcpy(sa.sun_path, socket_path, sizeof(sa.sun_path));
+
+		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (sock_fd < 0)
+			_exit(1);
+
+		if (connect(sock_fd, (struct sockaddr *)&sa,
+			    sizeof(sa)) < 0) {
+			close(sock_fd);
+			_exit(1);
+		}
+
+		server_fd = sock_fd;
+
+		setup_ncurse(STDIN_FILENO, "xterm-256color");
+		setenv("TERM", "xterm-256color", 1);
+
+		close_fds_except((int[]){STDIN_FILENO, STDOUT_FILENO,
+					  STDERR_FILENO, sock_fd}, 4);
+
+		event_reinit(session->ev_base);
+
+		/* Attach read-only */
+		char *argv_ro[] = {(char *)"attach", (char *)"-r", NULL};
+		int ret = client_main(session->ev_base, 2, argv_ro,
+				      CLIENT_UTF8, 0);
+		_exit(ret);
+	}
+
+	/* Parent: store master fd and register read event */
+	close(slave_fd);
+
+	session->vpty_master_fd = master_fd;
+	session->vpty_child_pid = pid;
+	session->vpty_active = true;
+
+	/* Set non-blocking */
+	setblocking(master_fd, 0);
+
+	session->ev_vpty_read = event_new(session->ev_base, master_fd,
+					   EV_READ | EV_PERSIST,
+					   on_vpty_read, session);
+	event_add(session->ev_vpty_read, NULL);
+
+	/* Clear the replay buffer — old per-pane data is no longer
+	 * relevant since the vpty sends full-screen data */
+	pty_replay_init();
+
+	tmate_info("Virtual PTY client spawned (pid=%d, master_fd=%d)",
+		   pid, master_fd);
+}
+
+void sse_kill_virtual_client(struct tmate_session *session)
+{
+	if (!session->vpty_active)
+		return;
+
+	if (session->ev_vpty_read) {
+		event_del(session->ev_vpty_read);
+		event_free(session->ev_vpty_read);
+		session->ev_vpty_read = NULL;
+	}
+
+	if (session->vpty_master_fd >= 0) {
+		close(session->vpty_master_fd);
+		session->vpty_master_fd = -1;
+	}
+
+	if (session->vpty_child_pid > 0) {
+		kill(session->vpty_child_pid, SIGTERM);
+		waitpid(session->vpty_child_pid, NULL, WNOHANG);
+		session->vpty_child_pid = -1;
+	}
+
+	session->vpty_active = false;
+	tmate_info("Virtual PTY client killed");
+}
+
+void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy)
+{
+	struct winsize ws;
+
+	if (!session->vpty_active || session->vpty_master_fd < 0)
+		return;
+
+	memset(&ws, 0, sizeof(ws));
+	ws.ws_col = sx;
+	ws.ws_row = sy;
+
+	if (ioctl(session->vpty_master_fd, TIOCSWINSZ, &ws) < 0)
+		tmate_info("vpty resize ioctl failed: %s", strerror(errno));
+
+	if (session->vpty_child_pid > 0)
+		kill(session->vpty_child_pid, SIGWINCH);
+
+	tmate_debug("vpty resized to %ux%u", sx, sy);
 }
 
 #define pack(what, ...) _pack(&tmate_session->websocket_encoder, what, ##__VA_ARGS__)
@@ -464,6 +696,23 @@ static void sse_send_screen_dump(struct bufferevent *bev)
 	TAILQ_FOREACH(wp, &w->panes, entry) {
 		if (wp->screen)
 			sse_send_pane_dump(bev, wp);
+	}
+}
+
+/*
+ * Broadcast screen dump of the current active window to all SSE clients.
+ * Called when the active window changes so web viewers see the new content.
+ */
+void sse_broadcast_screen_dump(struct tmate_session *session)
+{
+	struct ws_client *wc;
+
+	if (!tmate_has_websocket())
+		return;
+
+	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+		if (wc->handshake_done && !wc->is_post)
+			sse_send_screen_dump(wc->bev);
 	}
 }
 
@@ -988,6 +1237,10 @@ static void count_ssh_viewers(int *rw, int *ro)
 	TAILQ_FOREACH(c, &clients, entry) {
 		if (!(c->flags & CLIENT_IDENTIFIED))
 			continue;
+		/* Exclude the virtual PTY client from viewer counts */
+		if (tmate_session->vpty_active &&
+		    c->pid == tmate_session->vpty_child_pid)
+			continue;
 		if (c->readonly)
 			(*ro)++;
 		else
@@ -1055,6 +1308,9 @@ static void ws_client_free(struct ws_client *wc)
 {
 	struct tmate_session *session = wc->session;
 	bool was_connected = wc->handshake_done;
+
+	if (was_connected && session->input_mode_enabled && wc->viewer_id > 0)
+		tmate_send_user_leave(session, wc->viewer_id);
 
 	tmate_info("SSE client disconnected");
 	TAILQ_REMOVE(&session->ws_clients, wc, entry);
@@ -1373,6 +1629,15 @@ tmate_web_input_key(int pane_id, key_code key)
 	key_code prefix, prefix2, normalized;
 	int have_ssh_client;
 
+	if (tmate_session->input_mode_enabled) {
+		/* Send per-user input event to host client.
+		 * Web viewer ID 0 for now (TODO: track per-request). */
+		int web_id = 0;
+		tmate_send_user_input(tmate_session, web_id, pane_id, key);
+		if (!tmate_session->input_mirror)
+			return;
+	}
+
 	/*
 	 * Normalize early — both paths need this for prefix detection
 	 * and binding lookup.
@@ -1608,17 +1873,32 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		tmate_info("SSE client connected (%s)",
 			   wc->readonly ? "RO" : "RW");
 
+		wc->viewer_id = ++wc->session->next_viewer_id;
+
+		/* Spawn virtual PTY client on first SSE viewer */
+		if (!wc->session->vpty_active)
+			sse_spawn_virtual_client(wc->session);
+
 		/* Send session mode so browser knows RW/RO and input status */
 		sse_send_session_mode(wc->bev, wc->readonly,
 				      wc->session->web_input_enabled);
-		/* Send layout sync so browser knows terminal size + window names */
-		sse_send_sync_layout(wc->bev);
-		/* Send current screen state from tmux grid */
-		sse_send_screen_dump(wc->bev);
-		/* Send current status bar so web viewers see it immediately */
-		sse_send_current_status(wc->bev);
+
+		if (wc->session->vpty_active) {
+			/* vpty mode: replay buffered full-screen data */
+			pty_replay_send(wc->bev);
+		} else {
+			/* Fallback: per-pane grid dump */
+			sse_send_sync_layout(wc->bev);
+			sse_send_screen_dump(wc->bev);
+			sse_send_current_status(wc->bev);
+		}
 		/* Broadcast updated viewer counts to all clients */
 		tmate_broadcast_viewer_count(wc->session);
+		if (wc->session->input_mode_enabled) {
+			tmate_send_user_join(wc->session, wc->viewer_id,
+					     wc->readonly ? "web-ro" : "web",
+					     wc->readonly, "web");
+		}
 		return;
 	}
 
@@ -1979,6 +2259,10 @@ void tmate_notify_client_join(__unused struct tmate_session *session,
 	if (!tmate_has_websocket())
 		return;
 
+	/* Skip the virtual PTY client — it's not a real viewer */
+	if (session->vpty_active && c->pid == session->vpty_child_pid)
+		return;
+
 	c->flags |= CLIENT_TMATE_NOTIFIED_JOIN;
 
 	pack(array, 5);
@@ -1989,6 +2273,13 @@ void tmate_notify_client_join(__unused struct tmate_session *session,
 	pack(boolean, c->readonly);
 
 	tmate_broadcast_viewer_count(session);
+
+	if (session->input_mode_enabled) {
+		char name[64];
+		snprintf(name, sizeof(name), "ssh-%d", c->pid);
+		tmate_send_user_join(session, c->pid, name,
+				     c->readonly, "ssh");
+	}
 }
 
 void tmate_notify_client_left(__unused struct tmate_session *session,
@@ -2006,6 +2297,9 @@ void tmate_notify_client_left(__unused struct tmate_session *session,
 		return;
 
 	c->flags &= ~CLIENT_TMATE_NOTIFIED_JOIN;
+
+	if (session->input_mode_enabled)
+		tmate_send_user_leave(session, c->pid);
 
 	pack(array, 2);
 	pack(int, TMATE_CTL_CLIENT_LEFT);
@@ -2035,6 +2329,25 @@ void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 
 	if (!tmate_has_websocket())
 		return;
+
+	/*
+	 * When the virtual PTY client is active, it produces a full-screen
+	 * VT100 stream that replaces per-pane rendering.  Skip messages
+	 * that would duplicate or conflict with the vpty output.
+	 * We still forward viewer_count, session_mode, fin, ready, and
+	 * input_mode — these are control messages the browser needs.
+	 */
+	if (session->vpty_active && uk->argc > 0 &&
+	    uk->argv[0].type == MSGPACK_OBJECT_POSITIVE_INTEGER) {
+		int cmd = (int)uk->argv[0].via.u64;
+		if (cmd == TMATE_OUT_PTY_DATA ||
+		    cmd == TMATE_OUT_STATUS ||
+		    cmd == TMATE_OUT_SYNC_LAYOUT ||
+		    cmd == TMATE_OUT_SYNC_COPY_MODE ||
+		    cmd == TMATE_OUT_WRITE_COPY_MODE ||
+		    cmd == TMATE_OUT_SNAPSHOT)
+			return;
+	}
 
 	/* Pack the message into a temporary buffer and send directly
 	 * to all SSE clients, bypassing the encoder event mechanism
@@ -2098,6 +2411,11 @@ void tmate_init_websocket(struct tmate_session *session)
 	session->websocket_sy = -1;
 	session->ws_listen_fd = -1;
 	session->ev_ipc = NULL;
+
+	session->vpty_master_fd = -1;
+	session->vpty_child_pid = -1;
+	session->ev_vpty_read = NULL;
+	session->vpty_active = false;
 
 	TAILQ_INIT(&session->ws_clients);
 

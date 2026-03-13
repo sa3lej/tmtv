@@ -212,6 +212,14 @@ Session URLs are available as tmux format variables:
 
 Example: `tmtv display-message -p '#{tmtv_web}'`
 
+## Per-user input API
+
+tmtv exposes a Unix socket (`TMTV_INPUT_SOCKET`) that programs running inside a session can connect to for per-user input events. Each viewer gets a unique identity, enabling multiplayer terminal games, in-session chat, and collaborative tools where you need to know *who* typed *what*.
+
+Programs can subscribe to viewer join/leave notifications, receive per-user keystrokes, and control whether keys are mirrored to the terminal or captured exclusively.
+
+See [docs/input-socket.md](docs/input-socket.md) for the wire protocol, message types, and examples.
+
 ## Status bar
 
 tmtv prepends live viewer counts to the standard tmux status bar. The default `status-right` is:

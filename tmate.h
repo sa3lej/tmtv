@@ -233,6 +233,17 @@ extern void tmtv_recording_resize(u_int width, u_int height);
 extern void tmtv_recording_stop(void);
 extern int  tmtv_recording_active(void);
 
+/* tmate-input-socket.c */
+extern void tmtv_input_socket_create(void);
+extern void tmtv_input_socket_start(struct event_base *base);
+extern void tmtv_input_socket_cleanup(void);
+extern void tmtv_input_on_user_join(int user_id, const char *name,
+				     bool readonly, const char *type);
+extern void tmtv_input_on_user_leave(int user_id);
+extern void tmtv_input_on_user_input(int user_id, int pane_id, key_code key);
+extern void tmtv_input_send_mode(bool enabled, bool mirror);
+extern bool tmtv_input_has_subscribers(void);
+
 /* tmate-debug.c */
 extern void tmate_print_stack_trace(void);
 extern void tmate_catch_sigsegv(void);

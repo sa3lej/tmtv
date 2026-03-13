@@ -174,6 +174,17 @@ fi
 # --- Step 3: Deploy binaries ---
 
 if [ "$MODE" = "full" ] || [ "$MODE" = "binary-only" ]; then
+    step "Cleaning up existing sessions"
+
+    # Kill ALL tmtv client sessions so they don't reconnect after server restart
+    # and grab session name slots that interfere with tests
+    remote "TERM=xterm-256color /usr/local/bin/tmtv kill-server 2>/dev/null" || true
+    sleep 2
+
+    # Clean up stale session symlinks
+    remote "rm -f /tmp/tmtv/sessions/* 2>/dev/null" || true
+    ok "Existing sessions cleaned up"
+
     step "Deploying binaries"
 
     # Upload to /tmp/ first (avoids "text file busy" errors)
@@ -197,6 +208,34 @@ if [ "$MODE" = "full" ] || [ "$MODE" = "binary-only" ]; then
     sleep 2
 
     ok "Binary deploy complete"
+
+    step "Verifying clean environment"
+
+    # Check sessions directory is empty (no stale symlinks)
+    STALE_SESSIONS=$(remote "ls /tmp/tmtv/sessions/ 2>/dev/null | wc -l" || echo "0")
+    if [ "$STALE_SESSIONS" = "0" ]; then
+        ok "Sessions directory is clean"
+    else
+        echo "    WARNING: $STALE_SESSIONS stale session symlinks in /tmp/tmtv/sessions/"
+        remote "rm -f /tmp/tmtv/sessions/* 2>/dev/null" || true
+        ok "Cleaned up stale session symlinks"
+    fi
+
+    # Check tmtv-server is running
+    if remote "sudo systemctl is-active tmtv-server" >/dev/null 2>&1; then
+        ok "tmtv-server is running"
+    else
+        err "tmtv-server is not active after deploy"
+        exit 4
+    fi
+
+    # Check no tmtv client sessions are running
+    if remote "pgrep -f 'tmtv new-session\|tmtv -f'" >/dev/null 2>&1; then
+        echo "    WARNING: tmtv client processes still running, killing them"
+        remote "pkill -9 -f 'tmtv new-session\|tmtv -f'" 2>/dev/null || true
+        sleep 1
+    fi
+    ok "No tmtv client sessions running"
 fi
 
 # --- Step 4: Deploy web assets ---
@@ -295,6 +334,20 @@ if [ "$SKIP_TESTS" = "true" ]; then
 elif [ "$MODE" = "binary-only" ] || [ "$MODE" = "web-only" ]; then
     info "Skipping tests (deploy mode: $MODE)"
 else
+    step "Cleaning up existing sessions before tests"
+
+    # Kill any existing tmtv client sessions that could interfere with tests.
+    # The user's own tmtv session (from ~/.tmtv.conf) may reconnect after
+    # server restart and grab session name slots, causing test failures.
+    remote "TERM=xterm-256color /usr/local/bin/tmtv kill-server 2>/dev/null" || true
+    sleep 2
+    remote "rm -f /tmp/tmtv/sessions/* 2>/dev/null" || true
+
+    # Kill any lingering tmtv client processes
+    remote "pkill -9 -f 'tmtv new-session\|tmtv -f' 2>/dev/null" || true
+    sleep 1
+    ok "Sessions cleaned up"
+
     step "Running integration tests on staging"
 
     # Upload latest test scripts (auto-discover all test-*.sh and test-*.js)

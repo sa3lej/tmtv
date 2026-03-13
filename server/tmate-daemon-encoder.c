@@ -261,3 +261,43 @@ void tmate_send_mc_obj(msgpack_object *obj)
 {
 	pack(object, *obj);
 }
+
+int tmate_intercept_input_key(int pid, key_code key)
+{
+	if (!tmate_session->input_mode_enabled)
+		return 0;
+
+	tmate_send_user_input(tmate_session, pid, -1, key);
+	if (!tmate_session->input_mirror)
+		return 1; /* suppress normal key processing */
+	return 0;
+}
+
+void tmate_send_user_join(struct tmate_session *session,
+			  int user_id, const char *name,
+			  bool readonly, const char *type)
+{
+	_pack(&session->daemon_encoder, array, 5);
+	_pack(&session->daemon_encoder, int, TMATE_IN_USER_JOIN);
+	_pack(&session->daemon_encoder, int, user_id);
+	_pack(&session->daemon_encoder, string, name);
+	_pack(&session->daemon_encoder, boolean, readonly);
+	_pack(&session->daemon_encoder, string, type);
+}
+
+void tmate_send_user_leave(struct tmate_session *session, int user_id)
+{
+	_pack(&session->daemon_encoder, array, 2);
+	_pack(&session->daemon_encoder, int, TMATE_IN_USER_LEAVE);
+	_pack(&session->daemon_encoder, int, user_id);
+}
+
+void tmate_send_user_input(struct tmate_session *session,
+			   int user_id, int pane_id, key_code key)
+{
+	_pack(&session->daemon_encoder, array, 4);
+	_pack(&session->daemon_encoder, int, TMATE_IN_USER_INPUT);
+	_pack(&session->daemon_encoder, int, user_id);
+	_pack(&session->daemon_encoder, int, pane_id);
+	_pack(&session->daemon_encoder, unsigned_int, (unsigned int)key);
+}

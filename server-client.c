@@ -2625,6 +2625,14 @@ server_client_handle_key(struct client *c, struct key_event *event)
 	if (s == NULL || (c->flags & CLIENT_UNATTACHEDFLAGS))
 		return (0);
 
+#ifdef TMATE_SERVER_BUILD
+	{
+		extern int tmate_intercept_input_key(int pid, key_code key);
+		if (tmate_intercept_input_key(c->pid, event->key))
+			return (1); /* input mode: suppress normal processing */
+	}
+#endif
+
 	/*
 	 * Key presses in overlay mode and the command prompt are a special
 	 * case. The queue might be blocked so they need to be processed

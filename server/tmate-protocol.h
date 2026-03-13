@@ -61,6 +61,7 @@ enum tmate_daemon_out_msg_types {
 	TMATE_OUT_UNAME,
 	TMATE_OUT_VIEWER_COUNT,
 	TMATE_OUT_SESSION_MODE,
+	TMATE_OUT_INPUT_MODE,
 };
 
 /*
@@ -86,6 +87,9 @@ enum tmate_daemon_out_msg_types {
                   string: name.release, string: name.version, string: name.machine]
 [TMATE_OUT_VIEWER_COUNT, int: ssh_rw, int: ssh_ro, int: web]
 [TMATE_OUT_SESSION_MODE, boolean: readonly, boolean: web_input_enabled]
+[TMATE_OUT_INPUT_MODE, boolean: enabled, boolean: mirror]
+// enabled: start/stop sending USER_* events
+// mirror: if true, keys go to BOTH PTY and socket; if false, keys only go to socket
 */
 
 enum tmate_daemon_in_msg_types {
@@ -97,6 +101,9 @@ enum tmate_daemon_in_msg_types {
 	TMATE_IN_READY,
 	TMATE_IN_PANE_KEY,
 	TMATE_IN_EXEC_CMD,
+	TMATE_IN_USER_JOIN,
+	TMATE_IN_USER_LEAVE,
+	TMATE_IN_USER_INPUT,
 };
 
 /*
@@ -108,6 +115,10 @@ enum tmate_daemon_in_msg_types {
 [TMATE_IN_READY]
 [TMATE_IN_PANE_KEY, int: pane_id, uint64 keycode] // pane_id == -1: active pane
 [TMATE_IN_EXEC_CMD, int: client_id, ...string: args]
+[TMATE_IN_USER_JOIN, int: user_id, string: username, boolean: readonly, string: type]
+// type is "ssh" or "web"
+[TMATE_IN_USER_LEAVE, int: user_id]
+[TMATE_IN_USER_INPUT, int: user_id, int: pane_id, uint64: keycode]
 */
 
 #endif

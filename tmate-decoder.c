@@ -198,6 +198,38 @@ static void handle_set_env(struct tmate_session *session,
 	free(value);
 }
 
+static void handle_user_join(__unused struct tmate_session *session,
+			     struct tmate_unpacker *uk)
+{
+	int user_id = unpack_int(uk);
+	char *name = unpack_string(uk);
+	bool readonly = unpack_bool(uk);
+	char *type = unpack_string(uk);
+
+	tmtv_input_on_user_join(user_id, name, readonly, type);
+
+	free(name);
+	free(type);
+}
+
+static void handle_user_leave(__unused struct tmate_session *session,
+			      struct tmate_unpacker *uk)
+{
+	int user_id = unpack_int(uk);
+
+	tmtv_input_on_user_leave(user_id);
+}
+
+static void handle_user_input(__unused struct tmate_session *session,
+			      struct tmate_unpacker *uk)
+{
+	int user_id = unpack_int(uk);
+	int pane_id = unpack_int(uk);
+	key_code key = (key_code)unpack_int(uk);
+
+	tmtv_input_on_user_input(user_id, pane_id, key);
+}
+
 static void handle_ready(struct tmate_session *session,
 			 __unused struct tmate_unpacker *uk)
 {
@@ -234,6 +266,9 @@ void tmate_dispatch_slave_message(struct tmate_session *session,
 	dispatch(TMATE_IN_READY,		handle_ready);
 	dispatch(TMATE_IN_PANE_KEY,		handle_pane_key);
 	dispatch(TMATE_IN_EXEC_CMD,		handle_exec_cmd);
+	dispatch(TMATE_IN_USER_JOIN,		handle_user_join);
+	dispatch(TMATE_IN_USER_LEAVE,		handle_user_leave);
+	dispatch(TMATE_IN_USER_INPUT,		handle_user_input);
 	default: tmate_info("Bad message type: %d", cmd);
 	}
 }
