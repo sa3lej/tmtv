@@ -379,8 +379,9 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 		/* When the active window changes, SSE viewers need a screen
 		 * dump of the new window's content.  PTY data is only sent
 		 * for new output, so without this, web viewers see a blank
-		 * screen after a window switch. */
-		if (old_wl != wl)
+		 * screen after a window switch.
+		 * Skip when vpty is active — it sends full-screen output. */
+		if (old_wl != wl && !tmate_session->vpty_active)
 			sse_broadcast_screen_dump(tmate_session);
 	}
 }
@@ -409,6 +410,10 @@ static void tmate_sync_layout(__unused struct tmate_session *session,
 	}
 
 	tmate_sync_windows(s, sx, sy, uk);
+
+	/* Resize the virtual PTY client to match the host's dimensions */
+	if (tmate_has_websocket())
+		sse_vpty_resize(session, sx, sy);
 }
 
 static void tmate_pty_data(__unused struct tmate_session *session,

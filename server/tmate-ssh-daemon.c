@@ -106,6 +106,10 @@ static void cleanup_session_files(void)
 	struct tmate_session *s = tmate_session;
 	int dirfd = s->sessions_dir_fd;
 
+	/* Kill virtual PTY client if running (async-signal-safe: kill only) */
+	if (s->vpty_child_pid > 0)
+		kill(s->vpty_child_pid, SIGTERM);
+
 	if (dirfd < 0)
 		return;
 

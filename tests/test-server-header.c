@@ -42,8 +42,16 @@ TEST(session_struct_fields)
 	s.client_protocol_version = TMATE_PROTOCOL_VERSION;
 	s.fin_received = false;
 
+	/* Virtual PTY client fields */
+	s.vpty_master_fd = -1;
+	s.vpty_child_pid = -1;
+	s.ev_vpty_read = NULL;
+	s.vpty_active = false;
+
 	ASSERT(s.ssh_client.role == TMATE_ROLE_DAEMON);
 	ASSERT(s.client_protocol_version == TMATE_PROTOCOL_VERSION);
+	ASSERT(s.vpty_master_fd == -1);
+	ASSERT(s.vpty_active == false);
 }
 
 /* Verify tmate_settings struct */

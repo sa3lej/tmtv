@@ -304,6 +304,12 @@ struct tmate_session {
 	struct event *ev_idle_timer; /* periodic timer for idle/lifetime checks */
 	int link_ttl;             /* per-session TTL in seconds, 0 = no limit */
 
+	/* virtual PTY client for full-screen SSE streaming */
+	int vpty_master_fd;
+	pid_t vpty_child_pid;
+	struct event *ev_vpty_read;
+	bool vpty_active;	/* true once child is running */
+
 	/* only for role client-pty */
 	int pty;
 	struct event *ev_pty;		/* libevent2: heap-allocated */
@@ -355,6 +361,10 @@ extern void tmate_bind_websocket_socket(struct tmate_session *session);
 extern void tmate_start_websocket_listener(struct tmate_session *session);
 extern void tmate_websocket_accept_fd(struct tmate_session *session, int fd);
 extern void tmate_setup_ipc_receiver(struct tmate_session *session);
+
+extern void sse_spawn_virtual_client(struct tmate_session *session);
+extern void sse_kill_virtual_client(struct tmate_session *session);
+extern void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy);
 
 static inline bool tmate_has_websocket(void)
 {

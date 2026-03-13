@@ -56,6 +56,8 @@
   var contentRows = 24;
   var panes = {};
   var pendingData = {};
+  var fullScreenTerm = null;    /* single xterm.js instance for full-screen mode */
+  var fullScreenMode = false;   /* true when receiving pane_id=-1 data */
   var cellW = 0, cellH = 0;
   var fontSize = 14;
   var cellRatioW = 0, cellRatioH = 0;
@@ -226,8 +228,13 @@
 
   function sizeToServer() {
     computeFontSize();
-    var contentW = Math.ceil(serverCols * cellW);
-    var contentH = Math.ceil(contentRows * cellH);
+
+    /* In full-screen mode, use the full terminal dimensions (including status row) */
+    var effectiveCols = serverCols;
+    var effectiveRows = fullScreenMode ? (fullScreenTerm ? fullScreenTerm.rows : contentRows) : contentRows;
+
+    var contentW = Math.ceil(effectiveCols * cellW);
+    var contentH = Math.ceil(effectiveRows * cellH);
     var wrap = document.getElementById('terminal-wrap');
 
     if (currentTheme === 'tv') {
@@ -239,12 +246,19 @@
       wrap.style.height = Math.min(cabinetH, maxH) + 'px';
       container.style.height = contentH + 'px';
     } else {
-      var totalH = 38 + contentH + 20;
+      /* In full-screen mode, no HTML status bar — skip the +38/+20 for it */
+      var statusH = fullScreenMode ? 0 : 58;
+      var totalH = statusH + contentH;
       var maxW = window.innerWidth - 32;
       var maxH = window.innerHeight - 32;
       wrap.style.width = Math.min(contentW, maxW) + 'px';
       wrap.style.height = Math.min(totalH, maxH) + 'px';
       container.style.height = contentH + 'px';
+    }
+
+    /* Update font size on the full-screen terminal if it changed */
+    if (fullScreenMode && fullScreenTerm && fullScreenTerm.options.fontSize !== fontSize) {
+      fullScreenTerm.options.fontSize = fontSize;
     }
   }
 
@@ -493,6 +507,15 @@
   }
 
   function enableTerminalInput() {
+    /* Full-screen mode: bind input to the single terminal */
+    if (fullScreenMode && fullScreenTerm) {
+      fullScreenTerm.options.disableStdin = false;
+      if (!fullScreenTerm._inputBound) {
+        fullScreenTerm._inputBound = true;
+        fullScreenTerm.onData(function(data) { queueInput(data); });
+      }
+    }
+    /* Legacy per-pane mode */
     for (var id in panes) {
       var p = panes[id];
       if (p && p.term) {
@@ -501,6 +524,72 @@
       }
     }
   }
+  function enterFullScreenMode() {
+    fullScreenMode = true;
+
+    /* Destroy all per-pane terminals */
+    for (var id in panes) {
+      if (panes[id].term) panes[id].term.dispose();
+      if (panes[id].el) panes[id].el.remove();
+    }
+    panes = {};
+    paneCount = 0;
+    pendingData = {};
+
+    /* Remove pane borders */
+    var borders = container.querySelectorAll('.pane-border');
+    for (var i = 0; i < borders.length; i++) borders[i].remove();
+
+    /* Hide the HTML status bar (tmux renders it in the terminal now) */
+    var statusBar = document.getElementById('tmux-status');
+    if (statusBar) statusBar.style.display = 'none';
+
+    /* Create single full-screen terminal.
+     * serverRows is the pane area; add 1 for the tmux status bar row. */
+    var cols = serverCols || 80;
+    var rows = (serverRows || 24) + 1;
+    contentRows = rows;
+    computeFontSize();
+
+    fullScreenTerm = createPaneTerminal(cols, rows);
+
+    var el = document.createElement('div');
+    el.id = 'fullscreen-term';
+    el.style.position = 'absolute';
+    el.style.left = '0';
+    el.style.top = '0';
+    el.style.width = '100%';
+    el.style.height = '100%';
+    container.appendChild(el);
+
+    fullScreenTerm.open(el);
+
+    /* Bind input if web input is active */
+    if (!sessionReadonly && webInputEnabled) {
+      fullScreenTerm.options.disableStdin = false;
+      fullScreenTerm._inputBound = true;
+      fullScreenTerm.onData(function(data) { queueInput(data); });
+    }
+
+    /* Prevent browser from intercepting terminal keys */
+    fullScreenTerm.attachCustomKeyEventHandler(function(ev) {
+      if (ev.ctrlKey) {
+        if (ev.shiftKey && (ev.key === 'C' || ev.key === 'V')) return true;
+        ev.preventDefault();
+        return true;
+      }
+      var navKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                     'Home', 'End', 'PageUp', 'PageDown', 'Tab'];
+      if (navKeys.indexOf(ev.key) >= 0) {
+        ev.preventDefault();
+        return true;
+      }
+      return true;
+    });
+
+    sizeToServer();
+  }
+
   var sessionPassword = sessionStorage.getItem('tmtv_pw_' + (sessionToken || '')) || '';
 
   function showPasswordPrompt(isRetry) {
@@ -705,18 +794,27 @@
         if (inner.length >= 3) {
           var paneId = inner[1];
           var ptyData = inner[2];
-          var pane = panes[paneId];
-          if (pane) {
-            pane.term.write(ptyData instanceof Uint8Array ? ptyData : String(ptyData));
-            if (pane.needsRefresh) {
-              pane.needsRefresh = false;
-              (function(p) {
-                setTimeout(function() { p.term.refresh(0, p.sy - 1); }, 50);
-              })(pane);
+          if (paneId === -1) {
+            /* Full-screen mode: write to single terminal */
+            if (!fullScreenMode) enterFullScreenMode();
+            if (fullScreenTerm && ptyData) {
+              fullScreenTerm.write(ptyData instanceof Uint8Array ? ptyData : new Uint8Array(ptyData));
             }
           } else {
-            if (!pendingData[paneId]) pendingData[paneId] = [];
-            pendingData[paneId].push(ptyData);
+            /* Legacy per-pane mode */
+            var pane = panes[paneId];
+            if (pane) {
+              pane.term.write(ptyData instanceof Uint8Array ? ptyData : String(ptyData));
+              if (pane.needsRefresh) {
+                pane.needsRefresh = false;
+                (function(p) {
+                  setTimeout(function() { p.term.refresh(0, p.sy - 1); }, 50);
+                })(pane);
+              }
+            } else {
+              if (!pendingData[paneId]) pendingData[paneId] = [];
+              pendingData[paneId].push(ptyData);
+            }
           }
         }
         break;
@@ -727,15 +825,35 @@
             serverCols = sx; serverRows = sy;
             window.serverCols = sx; window.serverRows = sy;
           }
-          if (inner.length >= 5) {
-            updateWindowList(inner[3], inner[4]);
-            updatePaneLayout(inner[3], inner[4]);
+          if (fullScreenMode) {
+            /* In full-screen mode, resize the terminal to match.
+             * +1 row for the tmux status bar rendered in-terminal. */
+            if (fullScreenTerm && sx > 0 && sy > 0) {
+              var newRows = sy + 1;
+              contentRows = newRows;
+              if (fullScreenTerm.cols !== sx || fullScreenTerm.rows !== newRows) {
+                fullScreenTerm.resize(sx, newRows);
+              }
+            }
+            /* Still update window list for the tab/window indicator */
+            if (inner.length >= 5) {
+              updateWindowList(inner[3], inner[4]);
+            }
+            sizeToServer();
+          } else {
+            /* Legacy per-pane mode */
+            if (inner.length >= 5) {
+              updateWindowList(inner[3], inner[4]);
+              updatePaneLayout(inner[3], inner[4]);
+            }
+            sizeToServer();
           }
-          sizeToServer();
         }
         break;
       case OUT_STATUS:
-        if (inner.length >= 3) {
+        if (!fullScreenMode && inner.length >= 3) {
+          /* Only render HTML status bar in legacy per-pane mode.
+           * In full-screen mode, tmux renders the status bar in the terminal. */
           var leftEl = document.getElementById('tmux-status-left');
           var rightEl = document.getElementById('tmux-status-right');
           if (leftEl && inner[1] != null) leftEl.innerHTML = renderStatusMarkup(toStr(inner[1]));
