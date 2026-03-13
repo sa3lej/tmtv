@@ -193,18 +193,21 @@ wait_token_stable() {
 
 # Wait for a condition to become true. Polls every INTERVAL seconds up to TIMEOUT.
 # Usage: wait_for TIMEOUT INTERVAL DESCRIPTION COMMAND
-# Returns 0 on success, 1 on timeout.
+# Sets _wf_ok=true on success, _wf_ok=false on timeout.
+# Always returns 0 (safe under set -e). Callers check $_wf_ok.
 wait_for() {
 	_wf_timeout="$1"; _wf_interval="$2"; _wf_desc="$3"; shift 3
 	_wf_elapsed=0
+	_wf_ok=false
 	while [ "$_wf_elapsed" -lt "$_wf_timeout" ]; do
 		if eval "$@" >/dev/null 2>&1; then
+			_wf_ok=true
 			return 0
 		fi
 		sleep "$_wf_interval"
 		_wf_elapsed=$((_wf_elapsed + _wf_interval))
 	done
-	return 1
+	return 0
 }
 
 # Wait for RW token to stabilize and return it
