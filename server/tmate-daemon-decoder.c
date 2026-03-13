@@ -293,9 +293,16 @@ static void tmate_sync_window_panes(struct window *w,
 
 	active_pane_id = unpack_int(w_uk);
 	wp = window_pane_find_by_id(active_pane_id);
-	if (!wp || wp->window != w)
-		tmate_fatal("Invalid active_pane_id recevied");
-	window_set_active_pane(w, wp, 0);
+	if (!wp || wp->window != w) {
+		/* Fall back to first pane instead of crashing.
+		 * This can happen transiently during window detach
+		 * when sync_layout fires with stale active pane state. */
+		tmate_info("Invalid active_pane_id %d, falling back to "
+			   "first pane", active_pane_id);
+		wp = TAILQ_FIRST(&w->panes);
+	}
+	if (wp)
+		window_set_active_pane(w, wp, 0);
 }
 
 static void tmate_sync_windows(struct session *s, int sx, int sy,

@@ -139,6 +139,9 @@ void tmate_sync_layout(struct tmate_session *session, struct session *s)
 				active_pane_id = wp->id;
 			}
 
+			/* Remember first pane as fallback */
+			if (active_pane_id == -1)
+				active_pane_id = wp->id;
 		}
 		pack(int, active_pane_id);
 	}
