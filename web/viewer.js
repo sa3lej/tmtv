@@ -262,6 +262,109 @@
     }
   }
 
+  /* tmux colour256 → CSS hex (standard xterm-256 palette) */
+  var colour256 = [
+    '#000000','#800000','#008000','#808000','#000080','#800080','#008080','#c0c0c0',
+    '#808080','#ff0000','#00ff00','#ffff00','#0000ff','#ff00ff','#00ffff','#ffffff',
+    '#000000','#00005f','#000087','#0000af','#0000d7','#0000ff','#005f00','#005f5f',
+    '#005f87','#005faf','#005fd7','#005fff','#008700','#00875f','#008787','#0087af',
+    '#0087d7','#0087ff','#00af00','#00af5f','#00af87','#00afaf','#00afd7','#00afff',
+    '#00d700','#00d75f','#00d787','#00d7af','#00d7d7','#00d7ff','#00ff00','#00ff5f',
+    '#00ff87','#00ffaf','#00ffd7','#00ffff','#5f0000','#5f005f','#5f0087','#5f00af',
+    '#5f00d7','#5f00ff','#5f5f00','#5f5f5f','#5f5f87','#5f5faf','#5f5fd7','#5f5fff',
+    '#5f8700','#5f875f','#5f8787','#5f87af','#5f87d7','#5f87ff','#5faf00','#5faf5f',
+    '#5faf87','#5fafaf','#5fafd7','#5fafff','#5fd700','#5fd75f','#5fd787','#5fd7af',
+    '#5fd7d7','#5fd7ff','#5fff00','#5fff5f','#5fff87','#5fffaf','#5fffd7','#5fffff',
+    '#870000','#87005f','#870087','#8700af','#8700d7','#8700ff','#875f00','#875f5f',
+    '#875f87','#875faf','#875fd7','#875fff','#878700','#87875f','#878787','#8787af',
+    '#8787d7','#8787ff','#87af00','#87af5f','#87af87','#87afaf','#87afd7','#87afff',
+    '#87d700','#87d75f','#87d787','#87d7af','#87d7d7','#87d7ff','#87ff00','#87ff5f',
+    '#87ff87','#87ffaf','#87ffd7','#87ffff','#af0000','#af005f','#af0087','#af00af',
+    '#af00d7','#af00ff','#af5f00','#af5f5f','#af5f87','#af5faf','#af5fd7','#af5fff',
+    '#af8700','#af875f','#af8787','#af87af','#af87d7','#af87ff','#afaf00','#afaf5f',
+    '#afaf87','#afafaf','#afafd7','#afafff','#afd700','#afd75f','#afd787','#afd7af',
+    '#afd7d7','#afd7ff','#afff00','#afff5f','#afff87','#afffaf','#afffd7','#afffff',
+    '#d70000','#d7005f','#d70087','#d700af','#d700d7','#d700ff','#d75f00','#d75f5f',
+    '#d75f87','#d75faf','#d75fd7','#d75fff','#d78700','#d7875f','#d78787','#d787af',
+    '#d787d7','#d787ff','#d7af00','#d7af5f','#d7af87','#d7afaf','#d7afd7','#d7afff',
+    '#d7d700','#d7d75f','#d7d787','#d7d7af','#d7d7d7','#d7d7ff','#d7ff00','#d7ff5f',
+    '#d7ff87','#d7ffaf','#d7ffd7','#d7ffff','#ff0000','#ff005f','#ff0087','#ff00af',
+    '#ff00d7','#ff00ff','#ff5f00','#ff5f5f','#ff5f87','#ff5faf','#ff5fd7','#ff5fff',
+    '#ff8700','#ff875f','#ff8787','#ff87af','#ff87d7','#ff87ff','#ffaf00','#ffaf5f',
+    '#ffaf87','#ffafaf','#ffafd7','#ffafff','#ffd700','#ffd75f','#ffd787','#ffd7af',
+    '#ffd7d7','#ffd7ff','#ffff00','#ffff5f','#ffff87','#ffffaf','#ffffd7','#ffffff',
+    '#080808','#121212','#1c1c1c','#262626','#303030','#3a3a3a','#444444','#4e4e4e',
+    '#585858','#626262','#6c6c6c','#767676','#808080','#8a8a8a','#949494','#9e9e9e',
+    '#a8a8a8','#b2b2b2','#bcbcbc','#c6c6c6','#d0d0d0','#dadada','#e4e4e4','#eeeeee'
+  ];
+
+  var tmuxNamedColors = {
+    'black': '#000000', 'red': '#800000', 'green': '#008000', 'yellow': '#808000',
+    'blue': '#000080', 'magenta': '#800080', 'cyan': '#008080', 'white': '#c0c0c0',
+    'brightblack': '#808080', 'brightred': '#ff0000', 'brightgreen': '#00ff00',
+    'brightyellow': '#ffff00', 'brightblue': '#0000ff', 'brightmagenta': '#ff00ff',
+    'brightcyan': '#00ffff', 'brightwhite': '#ffffff'
+  };
+
+  function resolveColor(c) {
+    if (!c) return '';
+    c = c.trim().toLowerCase();
+    if (c === 'default' || c === 'terminal') return '';
+    if (c.charAt(0) === '#' && c.length === 7) return c;
+    var m = c.match(/^colou?r(\d+)$/);
+    if (m) { var n = parseInt(m[1], 10); return n < 256 ? colour256[n] : ''; }
+    return tmuxNamedColors[c] || '';
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* Parse tmux #[style] markup and return HTML with inline styles */
+  function renderStatusMarkup(raw) {
+    var parts = raw.split(/(#\[[^\]]*\])/);
+    var fg = '', bg = '', bold = false, italic = false, dim = false;
+    var html = '';
+    for (var i = 0; i < parts.length; i++) {
+      var part = parts[i];
+      var sm = part.match(/^#\[([^\]]*)\]$/);
+      if (sm) {
+        var attrs = sm[1].split(',');
+        for (var j = 0; j < attrs.length; j++) {
+          var a = attrs[j].trim().toLowerCase();
+          if (a === 'default' || a === 'none') { fg = ''; bg = ''; bold = false; italic = false; dim = false; }
+          else if (a === 'bold') bold = true;
+          else if (a === 'nobold') bold = false;
+          else if (a === 'italics') italic = true;
+          else if (a === 'noitalics') italic = false;
+          else if (a === 'dim') dim = true;
+          else if (a === 'nodim') dim = false;
+          else {
+            var kv = a.match(/^(fg|bg)=(.+)$/);
+            if (kv) {
+              var color = resolveColor(kv[2]);
+              if (kv[1] === 'fg') fg = color;
+              else bg = color;
+            }
+          }
+        }
+      } else if (part) {
+        var style = '';
+        if (fg) style += 'color:' + fg + ';';
+        if (bg) style += 'background:' + bg + ';';
+        if (bold) style += 'font-weight:bold;';
+        if (italic) style += 'font-style:italic;';
+        if (dim) style += 'opacity:0.6;';
+        if (style) {
+          html += '<span style="' + style + '">' + escapeHtml(part) + '</span>';
+        } else {
+          html += escapeHtml(part);
+        }
+      }
+    }
+    return html;
+  }
+
   function updateWindowList(windows, activeIdx) {
     if (!Array.isArray(windows)) return;
     var parts = [];
@@ -635,8 +738,8 @@
         if (inner.length >= 3) {
           var leftEl = document.getElementById('tmux-status-left');
           var rightEl = document.getElementById('tmux-status-right');
-          if (leftEl && inner[1] != null) leftEl.textContent = toStr(inner[1]);
-          if (rightEl && inner[2] != null) rightEl.textContent = toStr(inner[2]);
+          if (leftEl && inner[1] != null) leftEl.innerHTML = renderStatusMarkup(toStr(inner[1]));
+          if (rightEl && inner[2] != null) rightEl.innerHTML = renderStatusMarkup(toStr(inner[2]));
         }
         break;
       case OUT_VIEWER_COUNT:
