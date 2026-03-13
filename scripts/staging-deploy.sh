@@ -314,6 +314,10 @@ else
         err "Failed to upload test-ctrl-b.js"
         exit 5
     }
+    scp $SCP_OPTS "$REPO_ROOT/tests/test-session-lobby.js" "${STAGING_TARGET}:/tmp/test-session-lobby.js" || {
+        err "Failed to upload test-session-lobby.js"
+        exit 5
+    }
 
     # Build test command
     TEST_FLAGS="--local"
@@ -330,6 +334,15 @@ else
     else
         err "Integration tests FAILED"
         exit 5
+    fi
+
+    # Fetch latency report if it exists
+    LATENCY_REPORT=$(remote "cat /tmp/tmtv-latency-report.txt 2>/dev/null" || echo "")
+    if [ -n "$LATENCY_REPORT" ]; then
+        echo ""
+        step "Latency Report"
+        echo "$LATENCY_REPORT"
+        echo ""
     fi
 fi
 
