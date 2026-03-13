@@ -806,8 +806,13 @@ static int sse_do_handshake(struct ws_client *wc)
 	if (is_post_method) {
 		/* CSRF protection: require X-Tmtv-Input header.
 		 * This forces a CORS preflight for cross-origin requests,
-		 * preventing malicious websites from injecting keystrokes. */
-		if (!strcasestr(data, "x-tmtv-input:")) {
+		 * preventing malicious websites from injecting keystrokes.
+		 * Search headers only (not body) with bounded length. */
+		char saved_end = *header_end;
+		*header_end = '\0';
+		int has_csrf = (strcasestr(data, "x-tmtv-input:") != NULL);
+		*header_end = saved_end;
+		if (!has_csrf) {
 			static const char *reject_csrf =
 				"HTTP/1.1 400 Bad Request\r\n"
 				"Content-Length: 0\r\n"
