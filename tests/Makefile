@@ -18,7 +18,7 @@ LIBSSH_CFLAGS := $(shell pkg-config --cflags libssh 2>/dev/null)
 LIBEVENT_CFLAGS := $(shell pkg-config --cflags libevent 2>/dev/null)
 
 UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session
-SERVER_TESTS = test-server-header test-session-tmate-ptr
+SERVER_TESTS = test-server-header test-session-tmate-ptr test-sse-mux
 TMTV ?= ../tmtv
 
 .PHONY: all unit server-unit functional hooks session-cleanup integration clean
@@ -57,6 +57,9 @@ test-server-header: test-server-header.c test-harness.h ../server/tmate.h ../ser
 
 test-session-tmate-ptr: test-session-tmate-ptr.c test-harness.h ../tmux.h ../tmate.h
 	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
+
+test-sse-mux: test-sse-mux.c test-harness.h
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 functional:
 	@echo ""
