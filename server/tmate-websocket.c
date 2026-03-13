@@ -1193,8 +1193,15 @@ void tmate_send_fin_to_ws_clients(struct tmate_session *session)
  * to block dangerous commands (detach-client, kill-session, etc.) before
  * they reach server_client_handle_key(). Safe prefix keys are forwarded
  * to the SSH client's key handler normally.
+ *
+ * IMPORTANT: We must NOT forward the prefix key to the SSH client
+ * until we've verified that the follow-up key is safe.  Otherwise,
+ * the SSH client enters prefix mode and the next key (after a blocked
+ * one) bypasses our filter entirely.  The prefix is deferred in
+ * web_input_deferred_prefix and only sent when the follow-up is safe.
  */
 static int web_input_in_prefix;
+static key_code web_input_deferred_prefix;  /* raw prefix key for deferred send */
 
 /*
  * Commands that must NEVER be executed via web input.
@@ -1391,6 +1398,12 @@ tmate_web_input_key(int pane_id, key_code key)
 
 		/* Second press of prefix sends the prefix key itself */
 		if (normalized == prefix || normalized == prefix2) {
+			/*
+			 * Forward deferred prefix (enters prefix mode),
+			 * then this key (triggers send-prefix binding).
+			 */
+			web_input_forward_to_ssh_client(pane_id,
+			    web_input_deferred_prefix);
 			if (!web_input_forward_to_ssh_client(pane_id, key))
 				tmate_client_pane_key(pane_id, key);
 			return;
@@ -1399,6 +1412,8 @@ tmate_web_input_key(int pane_id, key_code key)
 		/*
 		 * Check if this prefix binding is dangerous.
 		 * Block it regardless of whether an SSH client exists.
+		 * Because we deferred the prefix key, the SSH client is
+		 * NOT in prefix mode — simply dropping both keys is safe.
 		 */
 		bd = web_input_get_prefix_binding(normalized);
 		if (bd != NULL && web_input_binding_is_blocked(bd)) {
@@ -1407,12 +1422,13 @@ tmate_web_input_key(int pane_id, key_code key)
 		}
 
 		/*
-		 * Safe prefix key — dispatch through the appropriate path.
-		 * SSH client path: forward through server_client_handle_key
-		 * which will see the client already in prefix table and
-		 * dispatch the binding.
+		 * Safe prefix key — forward the deferred prefix first
+		 * (puts the SSH client into prefix mode), then the
+		 * follow-up key (dispatched from the prefix table).
 		 * No-client path: dispatch the binding ourselves.
 		 */
+		web_input_forward_to_ssh_client(pane_id,
+		    web_input_deferred_prefix);
 		have_ssh_client =
 		    web_input_forward_to_ssh_client(pane_id, key);
 		if (!have_ssh_client) {
@@ -1428,10 +1444,13 @@ tmate_web_input_key(int pane_id, key_code key)
 		    "entering prefix mode");
 		web_input_in_prefix = 1;
 		/*
-		 * Also forward the prefix key to the SSH client so its
-		 * internal state machine switches to the prefix table.
+		 * Defer the prefix key — do NOT forward it to the SSH
+		 * client yet.  We must first see the follow-up key and
+		 * verify it isn't dangerous.  If we forwarded now, the
+		 * SSH client would enter prefix mode and the next key
+		 * after a blocked one would bypass our filter.
 		 */
-		web_input_forward_to_ssh_client(pane_id, key);
+		web_input_deferred_prefix = key;
 		return;
 	}
 
