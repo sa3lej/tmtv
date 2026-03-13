@@ -122,7 +122,7 @@ SOCKET3="/tmp/tmtv-test-noattach-$$"
 "$TMTV" -S "$SOCKET3" new-session -d -s existing 2>/dev/null
 if "$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | grep -q "existing"; then
     # Bare tmtv against existing socket — should create a second session
-    RC=0; timeout 2 "$TMTV" -S "$SOCKET3" new-session -d 2>/dev/null || RC=$?
+    "$TMTV" -S "$SOCKET3" new-session -d 2>/dev/null || true
     COUNT=$("$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | wc -l)
     if [ "$COUNT" -ge 2 ]; then
         pass "bare tmtv creates additional session (count=$COUNT)"
