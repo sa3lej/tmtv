@@ -371,8 +371,18 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 	if (!wl)
 		tmate_fatal("no valid active window");
 
-	session_set_current(s, wl);
-	server_redraw_window(wl->window);
+	{
+		struct winlink *old_wl = s->curw;
+		session_set_current(s, wl);
+		server_redraw_window(wl->window);
+
+		/* When the active window changes, SSE viewers need a screen
+		 * dump of the new window's content.  PTY data is only sent
+		 * for new output, so without this, web viewers see a blank
+		 * screen after a window switch. */
+		if (old_wl != wl)
+			sse_broadcast_screen_dump(tmate_session);
+	}
 }
 
 static void tmate_sync_layout(__unused struct tmate_session *session,

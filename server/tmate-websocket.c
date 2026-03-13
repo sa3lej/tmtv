@@ -467,6 +467,23 @@ static void sse_send_screen_dump(struct bufferevent *bev)
 	}
 }
 
+/*
+ * Broadcast screen dump of the current active window to all SSE clients.
+ * Called when the active window changes so web viewers see the new content.
+ */
+void sse_broadcast_screen_dump(struct tmate_session *session)
+{
+	struct ws_client *wc;
+
+	if (!tmate_has_websocket())
+		return;
+
+	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+		if (wc->handshake_done && !wc->is_post)
+			sse_send_screen_dump(wc->bev);
+	}
+}
+
 /* --- HTTP request parsing (minimal: just wait for headers) --- */
 
 /* Find needle in haystack, searching at most slen bytes */

@@ -345,6 +345,7 @@ extern void tmate_websocket_exec(struct tmate_session *session, const char *comm
 extern void tmate_notify_client_join(struct tmate_session *s, struct client *c);
 extern void tmate_notify_client_left(struct tmate_session *s, struct client *c);
 extern void tmate_broadcast_viewer_count(struct tmate_session *session);
+extern void sse_broadcast_screen_dump(struct tmate_session *session);
 
 extern void tmate_send_websocket_daemon_msg(struct tmate_session *session,
 					struct tmate_unpacker *uk);
