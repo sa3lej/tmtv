@@ -162,5 +162,13 @@ fatalx(const char *msg, ...)
 	log_vwrite(msg, ap, "fatal: ");
 	va_end(ap);
 
+	/* Also write to stderr so journalctl captures daemon crashes */
+	va_start(ap, msg);
+	fprintf(stderr, "fatalx: ");
+	vfprintf(stderr, msg, ap);
+	fprintf(stderr, "\n");
+	fflush(stderr);
+	va_end(ap);
+
 	exit(1);
 }

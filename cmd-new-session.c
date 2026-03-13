@@ -29,6 +29,11 @@
 
 /*
  * Create a new session and attach to the current terminal unless -d is given.
+ *
+ * Multi-session support (v1.4.0):
+ * Multiple tmux sessions are allowed. Only the first session gets a tmate
+ * sharing connection; additional sessions work locally. Per-session sharing
+ * (each session with its own SSH/web tokens) is a future enhancement.
  */
 
 #define NEW_SESSION_TEMPLATE "#{session_name}:"
@@ -277,7 +282,7 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 	}
 	s = session_create(prefix, newname, cwd, env, oo, tiop);
 	if (s == NULL) {
-		cmdq_error(item, "multiple sessions are not supported");
+		cmdq_error(item, "failed to create session");
 		environ_free(env);
 		options_free(oo);
 		goto fail;

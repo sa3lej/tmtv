@@ -1445,6 +1445,10 @@ struct session {
 
 	int		 references;
 
+#ifdef TMATE
+	struct tmate_session *tmate;
+#endif
+
 	TAILQ_ENTRY(session) gentry;
 	RB_ENTRY(session)    entry;
 };

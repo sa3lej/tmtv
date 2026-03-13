@@ -26,6 +26,23 @@
 
 /*
  * List all sessions.
+ *
+ * Multi-session sharing status (tmtv-02u.11):
+ * When multi-session support is complete, the default template should
+ * include tmate sharing status per session. The planned template:
+ *
+ *   "#{session_name}: #{session_windows} windows "
+ *   "(created #{t:session_created})"
+ *   "#{?tmate_ssh, [sharing: #{tmate_ssh}],}"
+ *   "#{?session_attached, (attached),}"
+ *
+ * This requires tmate format variables (tmate_ssh, tmate_web, etc.) to
+ * be scoped per tmux session (tmtv-02u.10), so that each session's
+ * format tree contains only its own sharing URLs.
+ *
+ * `tmtv list-sessions` will then show:
+ *   0: 2 windows (created ...) [sharing: ssh ...@tmtv.se] (attached)
+ *   debug: 1 windows (created ...) [sharing: ssh ...@tmtv.se]
  */
 
 #define LIST_SESSIONS_TEMPLATE				\

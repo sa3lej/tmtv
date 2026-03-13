@@ -140,6 +140,69 @@ else
     pass "binary embeds version string ($EMBEDDED_VER)"
 fi
 
+# Test 13: tmate_expand_status symbol linked (detached status fix)
+if nm "$TMTV" 2>/dev/null | grep -q "tmate_expand_status"; then
+    pass "tmate_expand_status symbol linked"
+else
+    fail "tmate_expand_status symbol linked" "symbol not found in binary"
+fi
+
+# Test 14: tmate_start_status_timer symbol linked (detached status fix)
+if nm "$TMTV" 2>/dev/null | grep -q "tmate_start_status_timer"; then
+    pass "tmate_start_status_timer symbol linked"
+else
+    fail "tmate_start_status_timer symbol linked" "symbol not found in binary"
+fi
+
+# Test 15: status-left is readable in detached session (core scenario)
+# This validates that detached sessions have status options available
+# for the periodic timer to expand
+OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g status-left 2>/dev/null || echo "MISSING")
+if echo "$OUTPUT" | grep -q "status-left"; then
+    pass "status-left option accessible in detached session"
+else
+    fail "status-left option accessible in detached session" "got: $OUTPUT"
+fi
+
+# Test 16: status-right is readable in detached session
+OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g status-right 2>/dev/null || echo "MISSING")
+if echo "$OUTPUT" | grep -q "status-right"; then
+    pass "status-right option accessible in detached session"
+else
+    fail "status-right option accessible in detached session" "got: $OUTPUT"
+fi
+
+# Test 17: tmate_env_list type and env functions present (per-session refactoring)
+if nm "$TMTV" 2>/dev/null | grep -q "tmate_set_env"; then
+    pass "tmate_set_env symbol linked"
+else
+    fail "tmate_set_env symbol linked" "symbol not found in binary"
+fi
+
+# Test 18: tmate_find_session symbol present (per-session lookup)
+if nm "$TMTV" 2>/dev/null | grep -q "tmate_find_session"; then
+    pass "tmate_find_session symbol linked"
+else
+    fail "tmate_find_session symbol linked" "symbol not found in binary"
+fi
+
+# Test 19: tmate_write_header symbol present (session-aware encoding)
+if nm "$TMTV" 2>/dev/null | grep -q "tmate_write_header"; then
+    pass "tmate_write_header symbol linked (session-aware)"
+else
+    fail "tmate_write_header symbol linked (session-aware)" "symbol not found in binary"
+fi
+
+# Test 20: per-session env vars work at runtime (set and read back)
+"$TMTV" -S "$SOCKET" new-session -d -s envtest 2>/dev/null || true
+"$TMTV" -S "$SOCKET" set-option -t envtest tmtv-session-name "test-session-42" 2>/dev/null
+OUTPUT=$("$TMTV" -S "$SOCKET" show-option -t envtest tmtv-session-name 2>/dev/null || echo "MISSING")
+if echo "$OUTPUT" | grep -q "test-session-42"; then
+    pass "per-session tmtv-session-name set/get works"
+else
+    fail "per-session tmtv-session-name set/get works" "got: $OUTPUT"
+fi
+
 # Cleanup
 "$TMTV" -S "$SOCKET" kill-server 2>/dev/null || true
 

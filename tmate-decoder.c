@@ -1,6 +1,27 @@
 #include "tmate.h"
 #include "tmate-protocol.h"
 
+/*
+ * Find the tmux session associated with a tmate_session.
+ * Searches the sessions tree for a session whose ->tmate pointer matches.
+ * Falls back to RB_MIN (first session) for backward compatibility when
+ * sessions haven't been linked yet (e.g., during early startup).
+ * Returns NULL if no sessions exist.
+ */
+struct session *
+tmate_find_session(struct tmate_session *ts)
+{
+	struct session *s;
+
+	RB_FOREACH(s, sessions, &sessions) {
+		if (s->tmate == ts)
+			return (s);
+	}
+
+	/* Fallback: no session linked yet, use first available. */
+	return (RB_MIN(sessions, &sessions));
+}
+
 static void handle_notify(struct tmate_session *session,
 			  struct tmate_unpacker *uk)
 {
@@ -17,7 +38,7 @@ static void handle_notify(struct tmate_session *session,
 	free(msg);
 }
 
-static void handle_legacy_pane_key(__unused struct tmate_session *_session,
+static void handle_legacy_pane_key(struct tmate_session *session,
 				   struct tmate_unpacker *uk)
 {
 	struct session *s;
@@ -26,7 +47,7 @@ static void handle_legacy_pane_key(__unused struct tmate_session *_session,
 
 	int key = unpack_int(uk);
 
-	s = RB_MIN(sessions, &sessions);
+	s = tmate_find_session(session);
 	if (!s)
 		return;
 
@@ -55,7 +76,7 @@ static struct window_pane *find_window_pane(struct session *s, int pane_id)
 	return w->active;
 }
 
-static void handle_pane_key(__unused struct tmate_session *_session,
+static void handle_pane_key(struct tmate_session *session,
 			    struct tmate_unpacker *uk)
 {
 	struct session *s;
@@ -64,7 +85,7 @@ static void handle_pane_key(__unused struct tmate_session *_session,
 	int pane_id = unpack_int(uk);
 	key_code key = unpack_int(uk);
 
-	s = RB_MIN(sessions, &sessions);
+	s = tmate_find_session(session);
 	if (!s)
 		return;
 
@@ -96,7 +117,7 @@ static void handle_exec_cmd_str(__unused struct tmate_session *session,
 	memset(&pi, 0, sizeof pi);
 	pr = cmd_parse_from_string(cmd_str, &pi);
 	if (pr->status == CMD_PARSE_ERROR) {
-		tmate_failed_cmd(client_id, pr->error);
+		tmate_failed_cmd(&tmate_session, client_id, pr->error);
 		free(pr->error);
 		goto out;
 	}
@@ -142,7 +163,7 @@ static void handle_exec_cmd(__unused struct tmate_session *session,
 	memset(&pi, 0, sizeof pi);
 	pr = cmd_parse_from_string(cmd_str, &pi);
 	if (pr->status == CMD_PARSE_ERROR) {
-		tmate_failed_cmd(client_id, pr->error);
+		tmate_failed_cmd(&tmate_session, client_id, pr->error);
 		free(pr->error);
 		goto out;
 	}
@@ -170,7 +191,7 @@ static void handle_set_env(struct tmate_session *session,
 	char *name = unpack_string(uk);
 	char *value = unpack_string(uk);
 
-	tmate_set_env(name, value);
+	tmate_set_env(session, name, value);
 	maybe_save_reconnection_data(session, name, value);
 
 	free(name);
@@ -190,7 +211,7 @@ static void handle_ready(struct tmate_session *session,
 	 * but we skip the overlay to avoid spamming the user.
 	 */
 	{
-		struct session *s = RB_MIN(sessions, &sessions);
+		struct session *s = tmate_find_session(session);
 		if (s != NULL) {
 			if (!session->reconnected)
 				cfg_show_causes(s);

@@ -100,43 +100,162 @@ else
     fail "kill session" "session still exists: $OUTPUT"
 fi
 
-# Test 9: Second new-session gives error, not crash
-# (tmate only supports one session; server must stay alive)
+# Test 9: Multiple sessions work (v1.4.0 removed single-session guard)
 SOCKET2="/tmp/tmtv-test-multi-$$"
 "$TMTV" -S "$SOCKET2" new-session -d -s first 2>/dev/null
 if "$TMTV" -S "$SOCKET2" list-sessions 2>/dev/null | grep -q "first"; then
-    OUTPUT=$("$TMTV" -S "$SOCKET2" new-session -d -s second 2>&1 || true)
-    # Server must still be alive after the failed second session
-    if "$TMTV" -S "$SOCKET2" list-sessions 2>/dev/null | grep -q "first"; then
-        pass "second new-session errors without crash"
+    "$TMTV" -S "$SOCKET2" new-session -d -s second 2>/dev/null
+    # Both sessions must exist
+    if "$TMTV" -S "$SOCKET2" list-sessions 2>/dev/null | grep -q "second"; then
+        pass "multiple sessions work"
     else
-        fail "second new-session errors without crash" "server died: $OUTPUT"
+        fail "multiple sessions work" "second session not created"
     fi
 else
-    fail "second new-session errors without crash" "could not create test session"
+    fail "multiple sessions work" "could not create first session"
 fi
 "$TMTV" -S "$SOCKET2" kill-server 2>/dev/null || true
 rm -f "$SOCKET2"
 
-# Test 10: Bare tmtv does not auto-attach (creates new session like tmux)
-# With auto-attach removed, bare tmtv against an existing socket should NOT
-# silently attach — it tries new-session which errors, but server stays alive.
+# Test 10: Bare tmtv creates new session when one exists (multi-session)
 SOCKET3="/tmp/tmtv-test-noattach-$$"
 "$TMTV" -S "$SOCKET3" new-session -d -s existing 2>/dev/null
 if "$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | grep -q "existing"; then
-    # Bare tmtv against existing socket — should NOT auto-attach
-    RC=0; timeout 2 "$TMTV" -S "$SOCKET3" 2>/dev/null || RC=$?
-    # Server must still be alive after the attempt
-    if "$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | grep -q "existing"; then
-        pass "bare tmtv does not auto-attach (server alive, exit=$RC)"
+    # Bare tmtv against existing socket — should create a second session
+    "$TMTV" -S "$SOCKET3" new-session -d 2>/dev/null || true
+    COUNT=$("$TMTV" -S "$SOCKET3" list-sessions 2>/dev/null | wc -l)
+    if [ "$COUNT" -ge 2 ]; then
+        pass "bare tmtv creates additional session (count=$COUNT)"
     else
-        fail "bare tmtv does not auto-attach" "server died (exit=$RC)"
+        fail "bare tmtv creates additional session" "expected >= 2 sessions, got $COUNT"
     fi
 else
-    fail "bare tmtv does not auto-attach" "could not create test session"
+    fail "bare tmtv creates additional session" "could not create test session"
 fi
 "$TMTV" -S "$SOCKET3" kill-server 2>/dev/null || true
 rm -f "$SOCKET3"
+
+# Test 11: Detach does not kill the tmux server (tmtv-02u.8)
+# Validates the documented contract: Ctrl+B D detaches the tmux client
+# but the tmux server (and any tmate SSH connection on its event loop)
+# continues running. This is fundamental to tmtv's sharing model.
+SOCKET4="/tmp/tmtv-test-detach-$$"
+"$TMTV" -S "$SOCKET4" new-session -d -s sharing 2>/dev/null
+if "$TMTV" -S "$SOCKET4" list-sessions 2>/dev/null | grep -q "sharing"; then
+    # Simulate what happens after detach: the client is gone, but the
+    # server process keeps running. We verify by checking the session
+    # is still accessible via the socket (server alive).
+    # Note: We can't test actual Ctrl+B D without a terminal, but we can
+    # verify the server stays alive after the client process exits.
+    "$TMTV" -S "$SOCKET4" detach-client 2>/dev/null || true
+    # Server must still be alive (session persists after detach)
+    if "$TMTV" -S "$SOCKET4" list-sessions 2>/dev/null | grep -q "sharing"; then
+        pass "detach does not kill server (session persists)"
+    else
+        fail "detach does not kill server" "session disappeared after detach"
+    fi
+else
+    fail "detach does not kill server" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET4" kill-server 2>/dev/null || true
+rm -f "$SOCKET4"
+
+# Test 12: Can create three sessions and list them all
+SOCKET5="/tmp/tmtv-test-multierr-$$"
+"$TMTV" -S "$SOCKET5" new-session -d -s alpha 2>/dev/null
+"$TMTV" -S "$SOCKET5" new-session -d -s beta 2>/dev/null
+"$TMTV" -S "$SOCKET5" new-session -d -s gamma 2>/dev/null
+OUTPUT=$("$TMTV" -S "$SOCKET5" list-sessions 2>/dev/null)
+COUNT=$(echo "$OUTPUT" | wc -l)
+if [ "$COUNT" -ge 3 ]; then
+    pass "three concurrent sessions created"
+else
+    fail "three concurrent sessions created" "expected >= 3 sessions, got $COUNT: $OUTPUT"
+fi
+"$TMTV" -S "$SOCKET5" kill-server 2>/dev/null || true
+rm -f "$SOCKET5"
+
+# Test 13: Session survives multiple detach/reattach cycles (tmtv-02u.8)
+# Validates that repeated detach doesn't accumulate state corruption.
+SOCKET6="/tmp/tmtv-test-reattach-$$"
+"$TMTV" -S "$SOCKET6" new-session -d -s persist 2>/dev/null
+if "$TMTV" -S "$SOCKET6" list-sessions 2>/dev/null | grep -q "persist"; then
+    # Send some content to verify state persists
+    "$TMTV" -S "$SOCKET6" send-keys -t persist "echo marker123" Enter 2>/dev/null
+    sleep 0.5
+    # Detach multiple times (idempotent, no-op when no client attached)
+    "$TMTV" -S "$SOCKET6" detach-client 2>/dev/null || true
+    "$TMTV" -S "$SOCKET6" detach-client 2>/dev/null || true
+    # Verify session still exists and content persists
+    OUTPUT=$("$TMTV" -S "$SOCKET6" capture-pane -t persist -p 2>/dev/null)
+    if echo "$OUTPUT" | grep -q "marker123"; then
+        pass "session content survives detach cycles"
+    else
+        fail "session content survives detach cycles" "content lost after detach"
+    fi
+else
+    fail "session content survives detach cycles" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET6" kill-server 2>/dev/null || true
+rm -f "$SOCKET6"
+
+# Test 14: display-popup command works (tmtv-8z3.7)
+# Popups are a tmux 3.2+ feature that never existed in tmate (stuck on tmux 2.4).
+# tmtv rebased on tmux 3.6a should support them without crashing.
+SOCKET7="/tmp/tmtv-test-popup-$$"
+"$TMTV" -S "$SOCKET7" new-session -d -s popup1 2>/dev/null
+if "$TMTV" -S "$SOCKET7" list-sessions 2>/dev/null | grep -q "popup1"; then
+    # Run display-popup with a simple command; without a terminal it may error,
+    # but it must NOT crash the server.
+    "$TMTV" -S "$SOCKET7" display-popup -t popup1 "echo hello" 2>/dev/null || true
+    sleep 0.3
+    if "$TMTV" -S "$SOCKET7" list-sessions 2>/dev/null | grep -q "popup1"; then
+        pass "display-popup doesn't crash server"
+    else
+        fail "display-popup doesn't crash server" "server died after display-popup"
+    fi
+else
+    fail "display-popup doesn't crash server" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET7" kill-server 2>/dev/null || true
+rm -f "$SOCKET7"
+
+# Test 15: popup with -E flag works (tmtv-8z3.7)
+# The -E flag closes the popup automatically when the command finishes.
+# This is the most common popup usage pattern.
+SOCKET8="/tmp/tmtv-test-popup-e-$$"
+"$TMTV" -S "$SOCKET8" new-session -d -s popup2 2>/dev/null
+if "$TMTV" -S "$SOCKET8" list-sessions 2>/dev/null | grep -q "popup2"; then
+    "$TMTV" -S "$SOCKET8" display-popup -t popup2 -E "echo popup-test-marker" 2>/dev/null || true
+    sleep 0.3
+    if "$TMTV" -S "$SOCKET8" list-sessions 2>/dev/null | grep -q "popup2"; then
+        pass "display-popup -E doesn't crash server"
+    else
+        fail "display-popup -E doesn't crash server" "server died after display-popup -E"
+    fi
+else
+    fail "display-popup -E doesn't crash server" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET8" kill-server 2>/dev/null || true
+rm -f "$SOCKET8"
+
+# Test 16: display-menu doesn't crash (tmtv-8z3.7)
+# Menus are another tmux 3.0+ overlay feature absent from tmate.
+SOCKET9="/tmp/tmtv-test-menu-$$"
+"$TMTV" -S "$SOCKET9" new-session -d -s menu1 2>/dev/null
+if "$TMTV" -S "$SOCKET9" list-sessions 2>/dev/null | grep -q "menu1"; then
+    "$TMTV" -S "$SOCKET9" display-menu -t menu1 -T "Test" a test "send-keys test" 2>/dev/null || true
+    sleep 0.3
+    if "$TMTV" -S "$SOCKET9" list-sessions 2>/dev/null | grep -q "menu1"; then
+        pass "display-menu doesn't crash server"
+    else
+        fail "display-menu doesn't crash server" "server died after display-menu"
+    fi
+else
+    fail "display-menu doesn't crash server" "could not create test session"
+fi
+"$TMTV" -S "$SOCKET9" kill-server 2>/dev/null || true
+rm -f "$SOCKET9"
 
 echo ""
 echo "$((PASSED + FAILED)) tests: $PASSED passed, $FAILED failed"

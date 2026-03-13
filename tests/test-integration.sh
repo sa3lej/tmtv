@@ -156,6 +156,55 @@ remote_tmtv() {
 	remote "TERM=xterm-256color $REMOTE_TMTV $*"
 }
 
+# Read session token with retries (client may reconnect, briefly removing symlinks)
+read_token() {
+	_name="$1"
+	_try=0
+	while [ "$_try" -lt 5 ]; do
+		_tok=$(remote "readlink $SESSIONS_DIR/$_name 2>/dev/null" || echo "")
+		if [ -n "$_tok" ]; then
+			echo "$_tok"
+			return 0
+		fi
+		_try=$((_try + 1))
+		sleep 1
+	done
+	echo ""
+	return 1
+}
+
+# Wait for token to stabilize after an operation that may trigger reconnection
+wait_token_stable() {
+	_name="$1"
+	_prev=$(read_token "$_name")
+	_stable=0
+	for _w in $(seq 1 10); do
+		sleep 1
+		_cur=$(read_token "$_name")
+		if [ -n "$_cur" ] && [ "$_cur" = "$_prev" ]; then
+			_stable=$((_stable + 1))
+			[ "$_stable" -ge 2 ] && break
+		else
+			_stable=0
+		fi
+		_prev="$_cur"
+	done
+}
+
+# Wait for RW token to stabilize and return it
+read_rw_token_stable() {
+	_name="$1"
+	wait_token_stable "$_name"
+	_rw=""
+	_try=0
+	while [ "$_try" -lt 5 ] && [ -z "$_rw" ]; do
+		_rw=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" | grep -E "^[0-9]+-$_name$" | head -1 || echo "")
+		[ -z "$_rw" ] && sleep 1
+		_try=$((_try + 1))
+	done
+	echo "$_rw"
+}
+
 # Generate unique session name for this test run
 TESTID="t$$"
 
@@ -278,7 +327,23 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $REMOTE_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
+
+# Wait for the SSH connection to stabilize.
+# The client may cycle through 2-3 connections on startup (~2s each).
+# We wait until the token stops changing for 3 seconds.
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$TESTID 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1))
+		[ "$_stable" -ge 3 ] && break
+	else
+		_stable=0
+	fi
+	_prev_tok="$_cur_tok"
+done
 
 # Verify session is running
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null" | grep -q "main"; then
@@ -313,7 +378,7 @@ SESSIONS_DIR="/tmp/tmtv/sessions"
 if remote "test -L $SESSIONS_DIR/$TESTID"; then
 	pass "named session symlink created"
 	SESSION_NAME="$TESTID"
-	TOKEN=$(remote "readlink $SESSIONS_DIR/$TESTID" || echo "")
+	TOKEN=$(read_token "$TESTID")
 else
 	fail "named session symlink created" "symlink '$TESTID' not found in $SESSIONS_DIR"
 fi
@@ -333,10 +398,8 @@ fi
 # -------------------------------------------------------
 # Test: SSE endpoint responds (WEB RO basic)
 # -------------------------------------------------------
-# TOKEN was set above from readlink; if empty, try again
-if [ -z "$TOKEN" ]; then
-	TOKEN=$(remote "readlink $SESSIONS_DIR/$TESTID 2>/dev/null" || echo "")
-fi
+# Always re-read token — client may have reconnected and gotten a new one
+TOKEN=$(read_token "$TESTID")
 
 if [ -n "$TOKEN" ]; then
 	# Test SSE endpoint returns event-stream content type
@@ -516,9 +579,10 @@ fi
 # -------------------------------------------------------
 # Test: SSH RW — connect, type, verify text appears
 # -------------------------------------------------------
+# Wait for token to stabilize after previous operations (split-window, send-keys)
+RW_TOKEN=$(read_rw_token_stable "$TESTID")
+TOKEN=$(read_token "$TESTID")
 if [ -n "$TOKEN" ]; then
-	RW_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" | grep -E "^[0-9]+-$TESTID$" | head -1 || echo "")
-
 	if [ -n "$RW_TOKEN" ]; then
 		# First go back to pane 0 for a clean slate
 		remote_tmtv "select-pane -t main.0"
@@ -570,6 +634,8 @@ fi
 # -------------------------------------------------------
 # Test: SSH RW — create pane via tmux split-window command
 # -------------------------------------------------------
+# Re-read RW token after stabilization in case client reconnected
+RW_TOKEN=$(read_rw_token_stable "$TESTID")
 if [ -n "$RW_TOKEN" ]; then
 	# Record pane count before
 	PANES_BEFORE=$(remote_tmtv "list-panes -t main" 2>/dev/null | wc -l)
@@ -614,6 +680,7 @@ rm -f /tmp/tmtv-split.exp"
 	fi
 
 	# Verify SSE still delivers data after pane operations
+	TOKEN=$(read_token "$TESTID")
 	if [ -n "$TOKEN" ]; then
 		SSE_AFTER=$(curl -s -m 3 "$SSE_BASE/$TOKEN" \
 			2>/dev/null || echo "")
@@ -757,6 +824,7 @@ if [ -n "$TOKEN" ]; then
 
 	# Verify W:N in status bar reflects actual web viewers.
 	# Connect an SSE client, then check W via format variable.
+	TOKEN=$(read_token "$TESTID")
 	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
 	WEB_CURL_PID=$!
 	sleep 3
@@ -845,18 +913,22 @@ fi
 # Test: Web sharing toggle (disable)
 # -------------------------------------------------------
 if [ "$QUICK" = "false" ] && [ -n "$TOKEN" ]; then
-	remote_tmtv "set-option -t main tmtv-set tmtv-web-sharing=off"
-	sleep 2
+	# Use the proper tmux option name — client-side interceptor in
+	# cmd-set-option.c sends it to the server via tmate_set_val.
+	remote_tmtv "set-option -g tmtv-web-sharing off"
+	sleep 3
 
 	# When web sharing is off, new SSE connections should get disconnected
+	TOKEN=$(read_token "$TESTID")
 	SSE_CHECK=$(curl -s -m 2 "$SSE_BASE/$TOKEN" 2>/dev/null || echo "")
 	DATA_LINES=$(echo "$SSE_CHECK" | grep -c "^data:" || true)
 
 	# Re-enable for remaining tests
-	remote_tmtv "set-option -t main tmtv-set tmtv-web-sharing=on"
-	sleep 2
+	remote_tmtv "set-option -g tmtv-web-sharing on"
+	sleep 3
 
 	# After re-enable, SSE should work again
+	TOKEN=$(read_token "$TESTID")
 	SSE_REENABLE=$(curl -s -m 3 "$SSE_BASE/$TOKEN" 2>/dev/null || echo "")
 	if echo "$SSE_REENABLE" | grep -q "^data:"; then
 		pass "web sharing toggle (off then on)"
@@ -870,10 +942,15 @@ fi
 # -------------------------------------------------------
 # Test: Terminal resize propagates to SSE
 # -------------------------------------------------------
+TOKEN=$(read_token "$TESTID")
 if [ -n "$TOKEN" ]; then
 	# Resize the terminal to 100x30
 	remote_tmtv "resize-window -t main -x 100 -y 30"
 	sleep 2
+
+	# Re-read token after resize (may trigger reconnection)
+	wait_token_stable "$TESTID"
+	TOKEN=$(read_token "$TESTID")
 
 	# Capture SSE data — should contain layout sync with new dimensions
 	# The SSE stream sends binary msgpack; we check for non-empty data
@@ -906,6 +983,7 @@ fi
 # -------------------------------------------------------
 # Test: Multi-window SSE — switch window, SSE still streams
 # -------------------------------------------------------
+TOKEN=$(read_token "$TESTID")
 if [ -n "$TOKEN" ]; then
 	# We already have window 0 and testwin from earlier tests
 	remote_tmtv "select-window -t main:testwin"
@@ -915,6 +993,10 @@ if [ -n "$TOKEN" ]; then
 	WIN_MARKER="WINTST_$$"
 	remote_tmtv "send-keys 'echo $WIN_MARKER' Enter"
 	sleep 1
+
+	# Re-read token after operations (may trigger reconnection)
+	wait_token_stable "$TESTID"
+	TOKEN=$(read_token "$TESTID")
 
 	# Verify SSE still delivers data on the active window
 	SSE_WIN=$(curl -s -m 3 "$SSE_BASE/$TOKEN" \
@@ -944,11 +1026,16 @@ fi
 # -------------------------------------------------------
 # Test: SSE reconnect — new client gets screen dump
 # -------------------------------------------------------
+TOKEN=$(read_token "$TESTID")
 if [ -n "$TOKEN" ]; then
 	# Put a unique marker on screen
 	RECONNECT_MARKER="RECONN_$$"
 	remote_tmtv "send-keys -t main:0 'echo $RECONNECT_MARKER' Enter"
 	sleep 1
+
+	# Re-read token after send-keys (may trigger reconnection)
+	wait_token_stable "$TESTID"
+	TOKEN=$(read_token "$TESTID")
 
 	# Connect a fresh SSE client — should get screen dump with marker
 	SSE_RECONNECT=$(curl -s -m 4 "$SSE_BASE/$TOKEN" \
@@ -1020,22 +1107,22 @@ else
 fi
 
 # -------------------------------------------------------
-# Test: second new-session gives error, not crash
+# Test: multiple sessions work (v1.4.0 multi-session support)
 # -------------------------------------------------------
 remote "TERM=xterm-256color $REMOTE_TMTV new -d -s multi1" 2>/dev/null
 sleep 2
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "multi1"; then
-	remote "TERM=xterm-256color $REMOTE_TMTV new -d -s multi2" 2>/dev/null || true
+	remote "TERM=xterm-256color $REMOTE_TMTV new -d -s multi2" 2>/dev/null
 	sleep 1
-	# Server must still be alive after the failed second session
-	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "multi1"; then
-		pass "second new-session errors without crash"
+	# Both sessions must exist
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "multi2"; then
+		pass "second new-session creates multi2"
 	else
-		fail "second new-session errors without crash" "server died"
+		fail "second new-session creates multi2" "multi2 not found"
 	fi
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 else
-	fail "second new-session errors without crash" "could not create test session"
+	fail "second new-session creates multi2" "could not create test session"
 fi
 sleep 1
 
@@ -1059,6 +1146,72 @@ else
 	fail "bare tmtv auto-attaches to existing session" "could not create test session"
 fi
 sleep 1
+
+# -------------------------------------------------------
+# Test: named session auto-numbering (name, name-1, name-2)
+# -------------------------------------------------------
+# Start two tmtv clients with the same tmtv-session-name.
+# The server should auto-number: first gets "autonum", second gets "autonum-1".
+AUTONUM_CONF1="/tmp/.tmtv-test-auto1-$TESTID.conf"
+AUTONUM_CONF2="/tmp/.tmtv-test-auto2-$TESTID.conf"
+remote "cat > $AUTONUM_CONF1 << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"autonum\"
+set -g tmtv-web-sharing on
+CONF"
+remote "cp $AUTONUM_CONF1 $AUTONUM_CONF2"
+
+# Start first client (separate socket so each gets its own SSH connection)
+AUTONUM_SOCK1="/tmp/tmtv-autonum1-$$"
+AUTONUM_SOCK2="/tmp/tmtv-autonum2-$$"
+remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -S $AUTONUM_SOCK1 -f $AUTONUM_CONF1 new-session -d -s auto1' /dev/null </dev/null >/dev/null 2>&1 &"
+# Wait for first session to stabilize
+_prev_tok=""; _stable=0
+for _wait in $(seq 1 15); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/autonum 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+# Check first session got the name
+if remote "test -L $SESSIONS_DIR/autonum"; then
+	pass "auto-numbering: first session gets base name"
+
+	# Start second client on separate socket (creates separate SSH connection)
+	remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -S $AUTONUM_SOCK2 -f $AUTONUM_CONF2 new-session -d -s auto2' /dev/null </dev/null >/dev/null 2>&1 &"
+	# Wait for second session to stabilize with auto-numbered name
+	_prev_tok=""; _stable=0
+	for _wait in $(seq 1 15); do
+		sleep 1
+		_cur_tok=$(remote "readlink $SESSIONS_DIR/autonum-1 2>/dev/null" || echo "")
+		if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+			_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+		else _stable=0; fi
+		_prev_tok="$_cur_tok"
+	done
+
+	# Second session should get auto-numbered name
+	if remote "test -L $SESSIONS_DIR/autonum-1"; then
+		pass "auto-numbering: second session gets name-1"
+	else
+		# Debug: show what's in sessions dir
+		_contents=$(remote "ls -la $SESSIONS_DIR/ 2>/dev/null" || echo "(empty)")
+		fail "auto-numbering: second session gets name-1" "autonum-1 not found. Contents: $_contents"
+	fi
+else
+	fail "auto-numbering: first session gets base name" "autonum not found in $SESSIONS_DIR"
+	skip "auto-numbering: second session gets name-1"
+fi
+remote "TERM=xterm-256color $REMOTE_TMTV -S $AUTONUM_SOCK1 kill-server" 2>/dev/null || true
+remote "TERM=xterm-256color $REMOTE_TMTV -S $AUTONUM_SOCK2 kill-server" 2>/dev/null || true
+remote "rm -f $AUTONUM_CONF1 $AUTONUM_CONF2 $AUTONUM_SOCK1 $AUTONUM_SOCK2" 2>/dev/null || true
+sleep 2
 
 # -------------------------------------------------------
 # Test: tmtv reattach after detach works
@@ -1161,9 +1314,20 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $PW_CONF new-session -d -s pwtest' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
 
-PW_TOKEN=$(remote "readlink $SESSIONS_DIR/$PW_SESSNAME 2>/dev/null" || echo "")
+# Wait for token to stabilize
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$PW_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+PW_TOKEN=$(read_token "$PW_SESSNAME")
 PW_RO_TOKEN="ro-$PW_SESSNAME"
 
 if [ -n "$PW_TOKEN" ]; then
@@ -1285,16 +1449,24 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $ANON_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
 
-# Find the random RW token. For anonymous sessions (no name), the sessions dir
-# contains the random token socket plus an ro- symlink. We need the actual
-# socket, not the symlink — filter out ro- prefixed entries.
+# Wait for token to stabilize (SSH reconnection cycling)
 ANON_TOKEN=""
-for _i in 1 2 3 4 5; do
-	ANON_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | grep -v '^ro-' | head -1" || echo "")
-	[ -n "$ANON_TOKEN" ] && break
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
 	sleep 1
+	_cur_tok=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | grep -v '^ro-' | head -1" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1))
+		if [ "$_stable" -ge 3 ]; then
+			ANON_TOKEN="$_cur_tok"
+			break
+		fi
+	else
+		_stable=0
+	fi
+	_prev_tok="$_cur_tok"
 done
 
 if [ -n "$ANON_TOKEN" ]; then
@@ -1358,9 +1530,20 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $NAMED_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
 
-NAMED_RW_TOKEN=$(remote "readlink $SESSIONS_DIR/$NAMED_SESSNAME 2>/dev/null" || echo "")
+# Wait for token to stabilize
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$NAMED_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+NAMED_RW_TOKEN=$(read_token "$NAMED_SESSNAME")
 
 if [ -n "$NAMED_RW_TOKEN" ]; then
 	# POST via named token (bare name — the web URL)
@@ -1372,7 +1555,15 @@ if [ -n "$NAMED_RW_TOKEN" ]; then
 	fi
 
 	# POST via random RW token
+	echo "    DEBUG: NAMED_RW_TOKEN=$NAMED_RW_TOKEN (len=$(echo -n "$NAMED_RW_TOKEN" | wc -c))" >&2
+	echo "    DEBUG: POST URL=$SSE_BASE/$NAMED_RW_TOKEN/input" >&2
+	# First try a GET to verify the token is routable
+	_dbg_get_code=$(curl -s -m 3 -o /dev/null -w "%{http_code}" "$SSE_BASE/$NAMED_RW_TOKEN" 2>/dev/null) || true
+	echo "    DEBUG: GET $SSE_BASE/$NAMED_RW_TOKEN => HTTP $_dbg_get_code" >&2
+	_dbg_get_named=$(curl -s -m 3 -o /dev/null -w "%{http_code}" "$SSE_BASE/$NAMED_SESSNAME" 2>/dev/null) || true
+	echo "    DEBUG: GET $SSE_BASE/$NAMED_SESSNAME => HTTP $_dbg_get_named" >&2
 	NAMED_RW_CODE=$(wi_post "$SSE_BASE/$NAMED_RW_TOKEN/input")
+	echo "    DEBUG: POST $SSE_BASE/$NAMED_RW_TOKEN/input => HTTP $NAMED_RW_CODE" >&2
 	if [ "$NAMED_RW_CODE" = "200" ]; then
 		pass "named session: POST input via random RW token (200)"
 	else
@@ -1380,7 +1571,10 @@ if [ -n "$NAMED_RW_TOKEN" ]; then
 	fi
 
 	# POST via RO token must be rejected
+	_dbg_get_ro=$(curl -s -m 3 -o /dev/null -w "%{http_code}" "$SSE_BASE/ro-$NAMED_SESSNAME" 2>/dev/null) || true
+	echo "    DEBUG: GET $SSE_BASE/ro-$NAMED_SESSNAME => HTTP $_dbg_get_ro" >&2
 	NAMED_RO_CODE=$(wi_post "$SSE_BASE/ro-$NAMED_SESSNAME/input")
+	echo "    DEBUG: POST $SSE_BASE/ro-$NAMED_SESSNAME/input => HTTP $NAMED_RO_CODE" >&2
 	if [ "$NAMED_RO_CODE" = "403" ]; then
 		pass "named session: POST input via RO token rejected (403)"
 	else
@@ -1438,9 +1632,20 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $PWONLY_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
 
-PWONLY_TOKEN=$(remote "readlink $SESSIONS_DIR/$PWONLY_SESSNAME 2>/dev/null" || echo "")
+# Wait for token to stabilize
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$PWONLY_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+PWONLY_TOKEN=$(read_token "$PWONLY_SESSNAME")
 
 if [ -n "$PWONLY_TOKEN" ]; then
 	# POST via named token without password should be rejected (403)
@@ -1508,9 +1713,20 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $NPPW_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
 
-NPPW_RW_TOKEN=$(remote "readlink $SESSIONS_DIR/$NPPW_SESSNAME 2>/dev/null" || echo "")
+# Wait for token to stabilize
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$NPPW_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+NPPW_RW_TOKEN=$(read_token "$NPPW_SESSNAME")
 
 if [ -n "$NPPW_RW_TOKEN" ]; then
 	# POST via named token without password should be rejected
@@ -1583,9 +1799,20 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $WID_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
 
-WID_TOKEN=$(remote "readlink $SESSIONS_DIR/$WID_SESSNAME 2>/dev/null" || echo "")
+# Wait for token to stabilize
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$WID_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+WID_TOKEN=$(read_token "$WID_SESSNAME")
 
 if [ -n "$WID_TOKEN" ]; then
 	# POST rejected via named token (default off)
@@ -1637,13 +1864,24 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $CSRF_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
 
+# Wait for token to stabilize (anon session)
 CSRF_TOKEN=""
-for _i in 1 2 3 4 5; do
-	CSRF_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | grep -v '^ro-' | head -1" || echo "")
-	[ -n "$CSRF_TOKEN" ] && break
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
 	sleep 1
+	_cur_tok=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | grep -v '^ro-' | head -1" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1))
+		if [ "$_stable" -ge 3 ]; then
+			CSRF_TOKEN="$_cur_tok"
+			break
+		fi
+	else
+		_stable=0
+	fi
+	_prev_tok="$_cur_tok"
 done
 
 if [ -n "$CSRF_TOKEN" ]; then
@@ -1681,10 +1919,21 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $TTL_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
 
-# Verify session is alive immediately
-TTL_TOKEN=$(remote "readlink $SESSIONS_DIR/$TTL_SESSNAME 2>/dev/null" || echo "")
+# Wait for token to stabilize
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$TTL_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+# Verify session is alive
+TTL_TOKEN=$(read_token "$TTL_SESSNAME")
 if [ -n "$TTL_TOKEN" ]; then
 	pass "TTL session created with token"
 else
@@ -1790,9 +2039,20 @@ CONF"
 	remote "TERM=xterm-256color \
 		nohup script -qc '$REMOTE_TMTV -f $JURL_CONF new-session -d -s main' \
 		/dev/null </dev/null >/dev/null 2>&1 &"
-	sleep 4
 
-	JURL_TOKEN=$(remote "readlink $SESSIONS_DIR/$JURL_SESSNAME 2>/dev/null" || echo "")
+	# Wait for token to stabilize
+	_prev_tok=""
+	_stable=0
+	for _wait in $(seq 1 20); do
+		sleep 1
+		_cur_tok=$(remote "readlink $SESSIONS_DIR/$JURL_SESSNAME 2>/dev/null" || echo "")
+		if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+			_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+		else _stable=0; fi
+		_prev_tok="$_cur_tok"
+	done
+
+	JURL_TOKEN=$(read_token "$JURL_SESSNAME")
 
 	if [ -n "$JURL_TOKEN" ]; then
 		# Test /j/<token> returns 200
@@ -1821,6 +2081,195 @@ CONF"
 else
 	skip "short URL /j/<token> returns 200" "web not available"
 	skip "short URL /j/<token> serves viewer" "web not available"
+fi
+
+# -------------------------------------------------------
+# Test: SSE OUT_STATUS contains non-empty left and right
+# -------------------------------------------------------
+# OUT_STATUS (type 5) is sent by the client when the status bar
+# changes.  Before the fix in v1.3.8, the right side was always
+# empty because tmate_status() was never called from status_redraw().
+# Start a fresh session — previous sections may have killed the server.
+STATUS_CONF="/tmp/.tmtv-test-status-$TESTID.conf"
+STATUS_SESSNAME="status-$TESTID"
+remote "cat > $STATUS_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$STATUS_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $STATUS_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+
+# Wait for token to stabilize
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$STATUS_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+STATUS_TOKEN=$(read_token "$STATUS_SESSNAME")
+
+if [ -n "$STATUS_TOKEN" ]; then
+	# Trigger a status update — set a custom status-right, wait for
+	# the client to render it and send OUT_STATUS to the server.
+	remote "TERM=xterm-256color $REMOTE_TMTV -f $STATUS_CONF set-option -g status-right 'RIGHTTEST %H:%M'" 2>/dev/null || true
+	sleep 5
+
+	# Re-read token after status-right change (may have reconnected)
+	STATUS_TOKEN=$(read_token "$STATUS_SESSNAME")
+
+	# Capture ~5s of SSE data, extract data: lines, decode and
+	# look for OUT_STATUS messages with Python.
+	SSE_STATUS_RAW=$(curl -s -m 5 -N "$SSE_BASE/$STATUS_TOKEN" 2>/dev/null || echo "")
+	SSE_STATUS_RESULT=$(echo "$SSE_STATUS_RAW" | python3 -c '
+import sys, base64, struct
+
+# Minimal msgpack decoder — sufficient for arrays of ints and strings.
+def decode(buf, pos=0):
+    if pos >= len(buf):
+        return None, pos
+    b = buf[pos]
+    # fixint (0-127)
+    if b <= 0x7f:
+        return b, pos + 1
+    # fixstr
+    if 0xa0 <= b <= 0xbf:
+        n = b & 0x1f
+        return buf[pos+1:pos+1+n].decode("utf-8", "replace"), pos + 1 + n
+    # str 8
+    if b == 0xd9:
+        n = buf[pos+1]
+        return buf[pos+2:pos+2+n].decode("utf-8", "replace"), pos + 2 + n
+    # str 16
+    if b == 0xda:
+        n = struct.unpack(">H", buf[pos+1:pos+3])[0]
+        return buf[pos+3:pos+3+n].decode("utf-8", "replace"), pos + 3 + n
+    # fixarray
+    if 0x90 <= b <= 0x9f:
+        n = b & 0x0f
+        arr = []
+        p = pos + 1
+        for _ in range(n):
+            v, p = decode(buf, p)
+            arr.append(v)
+        return arr, p
+    # array 16
+    if b == 0xdc:
+        n = struct.unpack(">H", buf[pos+1:pos+3])[0]
+        arr = []
+        p = pos + 3
+        for _ in range(n):
+            v, p = decode(buf, p)
+            arr.append(v)
+        return arr, p
+    # bin 8 / bin 16 — skip
+    if b == 0xc4:
+        n = buf[pos+1]
+        return buf[pos+2:pos+2+n], pos + 2 + n
+    if b == 0xc5:
+        n = struct.unpack(">H", buf[pos+1:pos+3])[0]
+        return buf[pos+3:pos+3+n], pos + 3 + n
+    # uint 8
+    if b == 0xcc:
+        return buf[pos+1], pos + 2
+    # uint 16
+    if b == 0xcd:
+        return struct.unpack(">H", buf[pos+1:pos+3])[0], pos + 3
+    # int 8
+    if b == 0xd0:
+        return struct.unpack(">b", buf[pos+1:pos+2])[0], pos + 2
+    # negative fixint
+    if b >= 0xe0:
+        return b - 256, pos + 1
+    # nil
+    if b == 0xc0:
+        return None, pos + 1
+    # true/false
+    if b == 0xc2:
+        return False, pos + 1
+    if b == 0xc3:
+        return True, pos + 1
+    return None, pos + 1
+
+OUT_STATUS = 5
+CTL_DEAMON_OUT_MSG = 1
+found_left = ""
+found_right = ""
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line.startswith("data:"):
+        continue
+    try:
+        raw = base64.b64decode(line[5:])
+    except Exception:
+        continue
+    pos = 0
+    while pos < len(raw):
+        try:
+            msg, pos = decode(raw, pos)
+        except Exception:
+            break
+        if not isinstance(msg, list) or len(msg) < 2:
+            continue
+        if msg[0] == CTL_DEAMON_OUT_MSG and isinstance(msg[1], list):
+            inner = msg[1]
+            if len(inner) >= 3 and inner[0] == OUT_STATUS:
+                left = inner[1] if isinstance(inner[1], str) else ""
+                right = inner[2] if isinstance(inner[2], str) else ""
+                if left:
+                    found_left = left
+                if right:
+                    found_right = right
+
+if found_left and found_right:
+    print("OK left=" + found_left + " right=" + found_right)
+elif found_left:
+    print("PARTIAL left=" + found_left + " right=empty")
+elif found_right:
+    print("PARTIAL left=empty right=" + found_right)
+else:
+    print("NONE")
+' 2>/dev/null || echo "ERROR")
+
+	if echo "$SSE_STATUS_RESULT" | grep -q "^OK "; then
+		pass "SSE OUT_STATUS has non-empty left and right"
+	elif echo "$SSE_STATUS_RESULT" | grep -q "^PARTIAL.*right=empty"; then
+		fail "SSE OUT_STATUS has non-empty left and right" \
+			"right side empty: $SSE_STATUS_RESULT"
+	elif echo "$SSE_STATUS_RESULT" | grep -q "^NONE"; then
+		fail "SSE OUT_STATUS has non-empty left and right" \
+			"no OUT_STATUS messages found in SSE stream"
+	else
+		fail "SSE OUT_STATUS has non-empty left and right" \
+			"unexpected: $SSE_STATUS_RESULT"
+	fi
+
+	# Verify right side contains our test string
+	if echo "$SSE_STATUS_RESULT" | grep -q "RIGHTTEST"; then
+		pass "SSE OUT_STATUS right contains custom text"
+	else
+		fail "SSE OUT_STATUS right contains custom text" \
+			"RIGHTTEST not found: $SSE_STATUS_RESULT"
+	fi
+
+	# Cleanup: kill the status test session
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+	remote "rm -f $STATUS_CONF" 2>/dev/null || true
+	sleep 1
+else
+	skip "SSE OUT_STATUS has non-empty left and right" "could not create session"
+	skip "SSE OUT_STATUS right contains custom text" "could not create session"
 fi
 
 # -------------------------------------------------------
