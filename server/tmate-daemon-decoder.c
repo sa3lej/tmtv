@@ -404,8 +404,11 @@ static void tmate_pty_data(__unused struct tmate_session *session,
 	unpack_buffer(uk, &buf, &len);
 
 	wp = window_pane_find_by_id(id);
-	if (!wp)
-		tmate_fatal("can't find pane id=%d (pty_data)", id);
+	if (!wp) {
+		tmate_info("pty_data for unknown pane id=%d (len=%zu), "
+			   "discarding", id, len);
+		return;
+	}
 
 	input_parse_buffer(wp, (u_char *)buf, len);
 
@@ -575,8 +578,10 @@ static void tmate_write_copy_mode(__unused struct tmate_session *session,
 
 	id = unpack_int(uk);
 	wp = window_pane_find_by_id(id);
-	if (!wp)
-		tmate_fatal("can't find pane id=%d (copy_mode)", id);
+	if (!wp) {
+		tmate_info("copy_mode for unknown pane id=%d, discarding", id);
+		return;
+	}
 
 	str = unpack_string(uk);
 
@@ -655,8 +660,11 @@ static void restore_snapshot_pane(struct tmate_unpacker *uk)
 
 	id = unpack_int(uk);
 	wp = window_pane_find_by_id(id);
-	if (!wp)
-		tmate_fatal("can't find pane id=%d (snapshot restore)", id);
+	if (!wp) {
+		tmate_info("snapshot restore for unknown pane id=%d, "
+			   "discarding", id);
+		return;
+	}
 	screen = &wp->base;
 	screen_reinit(screen);
 	wp->flags |= PANE_REDRAW;

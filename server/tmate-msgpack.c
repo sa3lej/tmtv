@@ -315,16 +315,15 @@ void tmate_decoder_init(struct tmate_decoder *decoder, tmate_decoder_reader *rea
 void tmate_decoder_get_buffer(struct tmate_decoder *decoder,
 			      char **buf, size_t *len)
 {
+	/*
+	 * Log large partial messages but do NOT reset the unpacker — that
+	 * would corrupt the msgpack stream and cause connection resets.
+	 * The 2MB limit is generous enough for any real workload.  If we
+	 * ever hit it, let the message complete and process it normally.
+	 */
 	if (msgpack_unpacker_message_size(&decoder->unpacker) > TMATE_MAX_MESSAGE_SIZE) {
-		tmate_info("Oversized message (%zu bytes, limit %d) — discarding",
-			   msgpack_unpacker_message_size(&decoder->unpacker),
-			   TMATE_MAX_MESSAGE_SIZE);
-		msgpack_unpacker_reset(&decoder->unpacker);
-		msgpack_unpacker_reserve_buffer(&decoder->unpacker,
-						UNPACKER_RESERVE_SIZE);
-		*buf = msgpack_unpacker_buffer(&decoder->unpacker);
-		*len = msgpack_unpacker_buffer_capacity(&decoder->unpacker);
-		return;
+		tmate_info("Large message in progress (%zu bytes)",
+			   msgpack_unpacker_message_size(&decoder->unpacker));
 	}
 
 	if (!msgpack_unpacker_reserve_buffer(&decoder->unpacker, UNPACKER_RESERVE_SIZE))
