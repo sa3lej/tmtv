@@ -156,6 +156,23 @@ remote_tmtv() {
 	remote "TERM=xterm-256color $REMOTE_TMTV $*"
 }
 
+# Read session token with retries (client may reconnect, briefly removing symlinks)
+read_token() {
+	_name="$1"
+	_try=0
+	while [ "$_try" -lt 5 ]; do
+		_tok=$(remote "readlink $SESSIONS_DIR/$_name 2>/dev/null" || echo "")
+		if [ -n "$_tok" ]; then
+			echo "$_tok"
+			return 0
+		fi
+		_try=$((_try + 1))
+		sleep 1
+	done
+	echo ""
+	return 1
+}
+
 # Generate unique session name for this test run
 TESTID="t$$"
 
@@ -313,7 +330,7 @@ SESSIONS_DIR="/tmp/tmtv/sessions"
 if remote "test -L $SESSIONS_DIR/$TESTID"; then
 	pass "named session symlink created"
 	SESSION_NAME="$TESTID"
-	TOKEN=$(remote "readlink $SESSIONS_DIR/$TESTID" || echo "")
+	TOKEN=$(read_token "$TESTID")
 else
 	fail "named session symlink created" "symlink '$TESTID' not found in $SESSIONS_DIR"
 fi
@@ -334,7 +351,7 @@ fi
 # Test: SSE endpoint responds (WEB RO basic)
 # -------------------------------------------------------
 # Always re-read token — client may have reconnected and gotten a new one
-TOKEN=$(remote "readlink $SESSIONS_DIR/$TESTID 2>/dev/null" || echo "")
+TOKEN=$(read_token "$TESTID")
 
 if [ -n "$TOKEN" ]; then
 	# Test SSE endpoint returns event-stream content type
@@ -1075,30 +1092,35 @@ set -g tmtv-web-sharing on
 CONF"
 remote "cp $AUTONUM_CONF1 $AUTONUM_CONF2"
 
-# Start first client
-remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -f $AUTONUM_CONF1 new-session -d -s auto1' /dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
+# Start first client (separate socket so each gets its own SSH connection)
+AUTONUM_SOCK1="/tmp/tmtv-autonum1-$$"
+AUTONUM_SOCK2="/tmp/tmtv-autonum2-$$"
+remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -S $AUTONUM_SOCK1 -f $AUTONUM_CONF1 new-session -d -s auto1' /dev/null </dev/null >/dev/null 2>&1 &"
+sleep 6
 
 # Check first session got the name
 if remote "test -L $SESSIONS_DIR/autonum"; then
 	pass "auto-numbering: first session gets base name"
 
-	# Start second client with same session name
-	remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -f $AUTONUM_CONF2 new-session -d -s auto2' /dev/null </dev/null >/dev/null 2>&1 &"
-	sleep 4
+	# Start second client on separate socket (creates separate SSH connection)
+	remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -S $AUTONUM_SOCK2 -f $AUTONUM_CONF2 new-session -d -s auto2' /dev/null </dev/null >/dev/null 2>&1 &"
+	sleep 6
 
 	# Second session should get auto-numbered name
 	if remote "test -L $SESSIONS_DIR/autonum-1"; then
 		pass "auto-numbering: second session gets name-1"
 	else
-		fail "auto-numbering: second session gets name-1" "autonum-1 not found in $SESSIONS_DIR"
+		# Debug: show what's in sessions dir
+		_contents=$(remote "ls -la $SESSIONS_DIR/ 2>/dev/null" || echo "(empty)")
+		fail "auto-numbering: second session gets name-1" "autonum-1 not found. Contents: $_contents"
 	fi
 else
 	fail "auto-numbering: first session gets base name" "autonum not found in $SESSIONS_DIR"
 	skip "auto-numbering: second session gets name-1"
 fi
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
-remote "rm -f $AUTONUM_CONF1 $AUTONUM_CONF2" 2>/dev/null || true
+remote "TERM=xterm-256color $REMOTE_TMTV -S $AUTONUM_SOCK1 kill-server" 2>/dev/null || true
+remote "TERM=xterm-256color $REMOTE_TMTV -S $AUTONUM_SOCK2 kill-server" 2>/dev/null || true
+remote "rm -f $AUTONUM_CONF1 $AUTONUM_CONF2 $AUTONUM_SOCK1 $AUTONUM_SOCK2" 2>/dev/null || true
 sleep 2
 
 # -------------------------------------------------------
@@ -1204,7 +1226,7 @@ remote "TERM=xterm-256color \
 	/dev/null </dev/null >/dev/null 2>&1 &"
 sleep 4
 
-PW_TOKEN=$(remote "readlink $SESSIONS_DIR/$PW_SESSNAME 2>/dev/null" || echo "")
+PW_TOKEN=$(read_token "$PW_SESSNAME")
 PW_RO_TOKEN="ro-$PW_SESSNAME"
 
 if [ -n "$PW_TOKEN" ]; then
@@ -1401,7 +1423,7 @@ remote "TERM=xterm-256color \
 	/dev/null </dev/null >/dev/null 2>&1 &"
 sleep 4
 
-NAMED_RW_TOKEN=$(remote "readlink $SESSIONS_DIR/$NAMED_SESSNAME 2>/dev/null" || echo "")
+NAMED_RW_TOKEN=$(read_token "$NAMED_SESSNAME")
 
 if [ -n "$NAMED_RW_TOKEN" ]; then
 	# POST via named token (bare name — the web URL)
@@ -1481,7 +1503,7 @@ remote "TERM=xterm-256color \
 	/dev/null </dev/null >/dev/null 2>&1 &"
 sleep 4
 
-PWONLY_TOKEN=$(remote "readlink $SESSIONS_DIR/$PWONLY_SESSNAME 2>/dev/null" || echo "")
+PWONLY_TOKEN=$(read_token "$PWONLY_SESSNAME")
 
 if [ -n "$PWONLY_TOKEN" ]; then
 	# POST via named token without password should be rejected (403)
@@ -1551,7 +1573,7 @@ remote "TERM=xterm-256color \
 	/dev/null </dev/null >/dev/null 2>&1 &"
 sleep 4
 
-NPPW_RW_TOKEN=$(remote "readlink $SESSIONS_DIR/$NPPW_SESSNAME 2>/dev/null" || echo "")
+NPPW_RW_TOKEN=$(read_token "$NPPW_SESSNAME")
 
 if [ -n "$NPPW_RW_TOKEN" ]; then
 	# POST via named token without password should be rejected
@@ -1626,7 +1648,7 @@ remote "TERM=xterm-256color \
 	/dev/null </dev/null >/dev/null 2>&1 &"
 sleep 4
 
-WID_TOKEN=$(remote "readlink $SESSIONS_DIR/$WID_SESSNAME 2>/dev/null" || echo "")
+WID_TOKEN=$(read_token "$WID_SESSNAME")
 
 if [ -n "$WID_TOKEN" ]; then
 	# POST rejected via named token (default off)
@@ -1725,7 +1747,7 @@ remote "TERM=xterm-256color \
 sleep 4
 
 # Verify session is alive immediately
-TTL_TOKEN=$(remote "readlink $SESSIONS_DIR/$TTL_SESSNAME 2>/dev/null" || echo "")
+TTL_TOKEN=$(read_token "$TTL_SESSNAME")
 if [ -n "$TTL_TOKEN" ]; then
 	pass "TTL session created with token"
 else
@@ -1833,7 +1855,7 @@ CONF"
 		/dev/null </dev/null >/dev/null 2>&1 &"
 	sleep 4
 
-	JURL_TOKEN=$(remote "readlink $SESSIONS_DIR/$JURL_SESSNAME 2>/dev/null" || echo "")
+	JURL_TOKEN=$(read_token "$JURL_SESSNAME")
 
 	if [ -n "$JURL_TOKEN" ]; then
 		# Test /j/<token> returns 200
@@ -1887,7 +1909,7 @@ remote "TERM=xterm-256color \
 	/dev/null </dev/null >/dev/null 2>&1 &"
 sleep 4
 
-STATUS_TOKEN=$(remote "readlink $SESSIONS_DIR/$STATUS_SESSNAME 2>/dev/null" || echo "")
+STATUS_TOKEN=$(read_token "$STATUS_SESSNAME")
 
 if [ -n "$STATUS_TOKEN" ]; then
 	# Trigger a status update — set a custom status-right, wait for
