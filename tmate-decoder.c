@@ -80,7 +80,6 @@ static void handle_pane_key(struct tmate_session *session,
 			    struct tmate_unpacker *uk)
 {
 	struct session *s;
-	struct client *c;
 	struct window_pane *wp;
 
 	int pane_id = unpack_int(uk);
@@ -90,29 +89,6 @@ static void handle_pane_key(struct tmate_session *session,
 	if (!s)
 		return;
 
-	/*
-	 * Route through server_client_handle_key() so that prefix keys
-	 * (Ctrl+B), key bindings, and copy mode work correctly for web
-	 * input. Find the first attached RW client for this session.
-	 */
-	TAILQ_FOREACH(c, &clients, entry) {
-		if (c->session != s)
-			continue;
-		if (c->flags & CLIENT_UNATTACHEDFLAGS)
-			continue;
-		if (c->flags & CLIENT_READONLY)
-			continue;
-
-		struct key_event *event = xcalloc(1, sizeof *event);
-		event->key = key;
-		if (!server_client_handle_key(c, event)) {
-			free(event->buf);
-			free(event);
-		}
-		return;
-	}
-
-	/* No attached client — fall back to raw pane key */
 	wp = find_window_pane(s, pane_id);
 	if (!wp)
 		return;

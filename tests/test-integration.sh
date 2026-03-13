@@ -1133,7 +1133,8 @@ remote "TERM=xterm-256color $REMOTE_TMTV new -d -s existing1" 2>/dev/null
 sleep 2
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "existing1"; then
 	# Bare tmtv against existing server — should create a new session, not attach
-	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV" 2>/dev/null || true
+	# Use script to provide a pty (tmtv needs one for an interactive session)
+	remote "timeout 3 script -qc 'TERM=xterm-256color $REMOTE_TMTV' /dev/null </dev/null" 2>/dev/null || true
 	sleep 1
 	COUNT=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | wc -l)
 	if [ "$COUNT" -ge 2 ]; then
@@ -1510,18 +1511,20 @@ if [ -n "$ANON_TOKEN" ]; then
 	# First verify we start with 1 pane
 	PANE_COUNT_BEFORE=$(remote_tmtv "list-panes -t main" 2>/dev/null | wc -l)
 	# Send Ctrl+B (0x02) then % to trigger vertical split
-	printf '\x02' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
-		--data-binary @- "$SSE_BASE/$ANON_TOKEN/input" >/dev/null 2>&1
-	sleep 0.5
-	printf '%%' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
-		--data-binary @- "$SSE_BASE/$ANON_TOKEN/input" >/dev/null 2>&1
+	_ctrlb_rc=$(printf '\002' | curl -s -m 3 -o /dev/null -w "%{http_code}" \
+		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		--data-binary @- "$SSE_BASE/$ANON_TOKEN/input" 2>/dev/null)
+	sleep 1
+	_pct_rc=$(printf '%%' | curl -s -m 3 -o /dev/null -w "%{http_code}" \
+		-X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		--data-binary @- "$SSE_BASE/$ANON_TOKEN/input" 2>/dev/null)
 	sleep 2
 	PANE_COUNT_AFTER=$(remote_tmtv "list-panes -t main" 2>/dev/null | wc -l)
 	if [ "$PANE_COUNT_AFTER" -gt "$PANE_COUNT_BEFORE" ]; then
 		pass "anon session: Ctrl+B prefix works via web input (split pane)"
 	else
 		fail "anon session: Ctrl+B prefix works via web input (split pane)" \
-			"panes before=$PANE_COUNT_BEFORE after=$PANE_COUNT_AFTER"
+			"panes before=$PANE_COUNT_BEFORE after=$PANE_COUNT_AFTER (POST ctrlb=$_ctrlb_rc pct=$_pct_rc token=$ANON_TOKEN)"
 	fi
 
 	# Control key web input: Ctrl+B D detaches the tmux client
@@ -1540,7 +1543,7 @@ DEOF" 2>/dev/null
 		# Verify session exists before detach
 		SESS_BEFORE=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | wc -l)
 		# Send Ctrl+B then D (detach)
-		printf '\x02' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+		printf '\002' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
 		sleep 0.5
 		printf 'd' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
