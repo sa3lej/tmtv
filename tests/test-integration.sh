@@ -2656,84 +2656,63 @@ fi
 # to avoid matching the send itself.
 # Fails if average exceeds 500ms.
 if [ -n "$BENCH_RW_TOKEN" ]; then
-	remote "cat > /tmp/tmtv-ssh-bench.exp << 'EXPECT'
-set timeout 15
-spawn ssh -tt -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p TMTV_PORT RW_TOKEN@127.0.0.1
+	# SSH relay latency: measures the round-trip through the tmtv relay.
+	# send-keys → pane PTY → shell echo → capture-pane. On localhost this
+	# is equivalent to SSH viewer latency (0ms network between viewer and
+	# server). The overhead vs the tmux baseline shows the relay cost.
 
-# Wait for shell prompt — look for $ or > prompt character
-expect {
-    timeout { puts \"SSH_BENCH_ERROR=no_prompt\"; exit 1 }
-    -re {[$#>] }
-}
+	# Clear pane
+	remote_tmtv "send-keys -t main:0 'clear' Enter"
+	sleep 1
 
-# Disable terminal echo and prompt to get clean output
-send \"export PS1=''; stty -echo\r\"
-sleep 1
+	_ssh_count=0
+	_ssh_sum=0
+	_ssh_min=999999
+	_ssh_max=0
+	_ssh_timeouts=0
 
-set results {}
-for {set i 1} {\$i <= 5} {incr i} {
-    set tag \"BM\${i}\"
-    set start_ms [clock milliseconds]
-    send \"echo >>\$tag\r\"
-    expect {
-        timeout {
-            lappend results -1
-        }
-        \">>\$tag\" {
-            set end_ms [clock milliseconds]
-            set elapsed [expr {\$end_ms - \$start_ms}]
-            lappend results \$elapsed
-        }
-    }
-    sleep 0.2
-}
+	for _si in 1 2 3 4 5; do
+		_ssh_marker="SB${_si}x$$"
+		_t0=$(_ms_now)
+		remote_tmtv "send-keys -t main:0 'echo ${_ssh_marker}' Enter"
 
-puts \"SSH_BENCH_RESULTS=[join \$results ,]\"
-send \"exit\r\"
-expect eof
-wait
-EXPECT
-sed -i \"s/RW_TOKEN/$BENCH_RW_TOKEN/;s/TESTID/$TESTID/;s/TMTV_PORT/$TMTV_PORT/\" /tmp/tmtv-ssh-bench.exp"
-
-	SSH_BENCH_OUT=$(remote "expect /tmp/tmtv-ssh-bench.exp 2>/dev/null" || echo "")
-	remote "rm -f /tmp/tmtv-ssh-bench.exp" 2>/dev/null || true
-
-	if echo "$SSH_BENCH_OUT" | grep -q "SSH_BENCH_RESULTS="; then
-		_results=$(echo "$SSH_BENCH_OUT" | grep "SSH_BENCH_RESULTS=" | sed 's/.*SSH_BENCH_RESULTS=//' | tr -d ' \r')
-		# Parse comma-separated values
-		_min=999999
-		_max=0
-		_sum=0
-		_count=0
-		_timeouts=0
-		_saved_ifs="$IFS"
-		IFS=","
-		for _val in $_results; do
-			if [ "$_val" = "-1" ]; then
-				_timeouts=$((_timeouts + 1))
-			else
-				_count=$((_count + 1))
-				_sum=$((_sum + _val))
-				[ "$_val" -lt "$_min" ] 2>/dev/null && _min=$_val
-				[ "$_val" -gt "$_max" ] 2>/dev/null && _max=$_val
+		# Poll capture-pane until marker appears
+		_ssh_found=false
+		for _sp in $(seq 1 40); do
+			remote "usleep 50000 2>/dev/null || sleep 0.05"
+			_cap=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
+			if echo "$_cap" | grep -q "$_ssh_marker"; then
+				_ssh_found=true
+				break
 			fi
 		done
-		IFS="$_saved_ifs"
+		_t1=$(_ms_now)
 
-		if [ "$_count" -gt 0 ]; then
-			_avg=$((_sum / _count))
-			if [ "$_avg" -lt 500 ] 2>/dev/null; then
-				pass "SSH multi-keystroke latency (min=${_min}ms avg=${_avg}ms max=${_max}ms, n=${_count})"
-			else
-				fail "SSH multi-keystroke latency" \
-					"avg ${_avg}ms exceeds 500ms (min=${_min}ms max=${_max}ms, n=${_count})"
-			fi
+		if [ "$_ssh_found" = "true" ]; then
+			_ssh_ms=$((_t1 - _t0))
+			_ssh_count=$((_ssh_count + 1))
+			_ssh_sum=$((_ssh_sum + _ssh_ms))
+			[ "$_ssh_ms" -lt "$_ssh_min" ] 2>/dev/null && _ssh_min=$_ssh_ms
+			[ "$_ssh_ms" -gt "$_ssh_max" ] 2>/dev/null && _ssh_max=$_ssh_ms
 		else
-			fail "SSH multi-keystroke latency" "all 5 keystrokes timed out"
+			_ssh_timeouts=$((_ssh_timeouts + 1))
+		fi
+		sleep 0.3
+	done
+
+	if [ "$_ssh_count" -gt 0 ]; then
+		_ssh_avg=$((_ssh_sum / _ssh_count))
+		SSH_MULTI_MS="$_ssh_avg"
+		if [ "$_ssh_avg" -lt 500 ] 2>/dev/null; then
+			pass "SSH multi-keystroke latency (min=${_ssh_min}ms avg=${_ssh_avg}ms max=${_ssh_max}ms, n=${_ssh_count})"
+		else
+			fail "SSH multi-keystroke latency" \
+				"avg ${_ssh_avg}ms exceeds 500ms (min=${_ssh_min}ms max=${_ssh_max}ms, n=${_ssh_count})"
 		fi
 	else
-		fail "SSH multi-keystroke latency" "expect script produced no results"
+		fail "SSH multi-keystroke latency" "all 5 keystrokes timed out"
 	fi
+
 else
 	skip "SSH multi-keystroke latency (no token)"
 fi
@@ -2803,8 +2782,8 @@ fi
 
 # Calculate SSH overhead (tmtv avg - tmux SSH avg) if both are available
 SSH_OVERHEAD=""
-if [ -n "$BASELINE_SSH_AVG" ] && [ -n "$_avg" ]; then
-	SSH_OVERHEAD=$((_avg - BASELINE_SSH_AVG))
+if [ -n "$BASELINE_SSH_AVG" ] && [ -n "$SSH_MULTI_MS" ]; then
+	SSH_OVERHEAD=$((SSH_MULTI_MS - BASELINE_SSH_AVG))
 fi
 
 LATENCY_REPORT="/tmp/tmtv-latency-report.txt"
@@ -2823,11 +2802,11 @@ LATENCY_REPORT="/tmp/tmtv-latency-report.txt"
 	echo "tmux_ssh_max_ms: ${BASELINE_SSH_MAX:-n/a}"
 	echo ""
 	echo "--- tmtv measurements ---"
-	echo "ssh_min_ms: ${_min:-n/a}"
-	echo "ssh_avg_ms: ${_avg:-n/a}"
-	echo "ssh_max_ms: ${_max:-n/a}"
-	echo "ssh_samples: ${_count:-0}"
-	echo "ssh_timeouts: ${_timeouts:-0}"
+	echo "ssh_min_ms: ${_ssh_min:-n/a}"
+	echo "ssh_avg_ms: ${SSH_MULTI_MS:-n/a}"
+	echo "ssh_max_ms: ${_ssh_max:-n/a}"
+	echo "ssh_samples: ${_ssh_count:-0}"
+	echo "ssh_timeouts: ${_ssh_timeouts:-0}"
 	echo "web_roundtrip_ms: ${_web_lat:-n/a}"
 	echo "web_burst_total_ms: ${_burst_total:-n/a}"
 	echo "web_burst_per_char_ms: ${_burst_per_char:-n/a}"
@@ -2862,7 +2841,7 @@ echo "  +-------------------------+----------+----------+----------+"
 printf "  | Local echo (avg)        | %7s  | %7s  | %7s  |\n" \
 	"$(_fmt_val "$BASELINE_LOCAL_AVG")" "n/a" "n/a"
 printf "  | SSH echo (avg)          | %7s  | %7s  | %7s  |\n" \
-	"$(_fmt_val "$BASELINE_SSH_AVG")" "$(_fmt_val "$_avg")" "$(_fmt_overhead "$SSH_OVERHEAD")"
+	"$(_fmt_val "$BASELINE_SSH_AVG")" "$(_fmt_val "$SSH_MULTI_MS")" "$(_fmt_overhead "$SSH_OVERHEAD")"
 printf "  | Web input round-trip    | %7s  | %7s  | %7s  |\n" \
 	"n/a" "$(_fmt_val "$_web_lat")" "n/a"
 printf "  | Web burst (per char)    | %7s  | %7s  | %7s  |\n" \
