@@ -34,16 +34,16 @@ static int on_encoder_write(void *userdata, const char *buf, size_t len)
 	}
 
 	/*
-	 * Flush immediately when a callback is registered.
-	 * The old code used event_active() which deferred the write
-	 * to the next event loop iteration, adding milliseconds of
-	 * latency to every keystroke and PTY output delivery.
+	 * Defer the flush via event_active().  DO NOT call
+	 * ready_callback directly — on_encoder_write fires per
+	 * msgpack field, not per complete message.  Immediate flush
+	 * causes reentrancy on the server side (ssh_channel_write
+	 * from within a channel-data callback lets libssh deliver
+	 * more channel data, re-entering the encoder).
+	 *
+	 * event_active() runs before the next poll(), so the latency
+	 * penalty is microseconds.
 	 */
-	if (encoder->ready_callback) {
-		encoder->ready_callback(encoder->userdata, encoder->buffer);
-		return 0;
-	}
-
 	if (!encoder->ev_active) {
 		event_active(encoder->ev_buffer, EV_READ, 0);
 		encoder->ev_active = true;

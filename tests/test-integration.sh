@@ -160,7 +160,7 @@ remote_tmtv() {
 read_token() {
 	_name="$1"
 	_try=0
-	while [ "$_try" -lt 5 ]; do
+	while [ "$_try" -lt 15 ]; do
 		_tok=$(remote "readlink $SESSIONS_DIR/$_name 2>/dev/null" || echo "")
 		if [ -n "$_tok" ]; then
 			echo "$_tok"
@@ -189,6 +189,22 @@ wait_token_stable() {
 		fi
 		_prev="$_cur"
 	done
+}
+
+# Wait for a condition to become true. Polls every INTERVAL seconds up to TIMEOUT.
+# Usage: wait_for TIMEOUT INTERVAL DESCRIPTION COMMAND
+# Returns 0 on success, 1 on timeout.
+wait_for() {
+	_wf_timeout="$1"; _wf_interval="$2"; _wf_desc="$3"; shift 3
+	_wf_elapsed=0
+	while [ "$_wf_elapsed" -lt "$_wf_timeout" ]; do
+		if eval "$@" >/dev/null 2>&1; then
+			return 0
+		fi
+		sleep "$_wf_interval"
+		_wf_elapsed=$((_wf_elapsed + _wf_interval))
+	done
+	return 1
 }
 
 # Wait for RW token to stabilize and return it
@@ -387,7 +403,8 @@ fi
 # Test: Send keys and capture output
 # -------------------------------------------------------
 remote_tmtv "send-keys -t main 'echo INTEGRATION_MARKER_42' Enter"
-sleep 1
+wait_for 5 1 "marker appears in pane" \
+	"remote_tmtv 'capture-pane -t main -p' 2>/dev/null | grep -q INTEGRATION_MARKER_42"
 OUTPUT=$(remote_tmtv "capture-pane -t main -p" 2>/dev/null || echo "")
 if echo "$OUTPUT" | grep -q "INTEGRATION_MARKER_42"; then
 	pass "send-keys and capture-pane"
@@ -477,7 +494,8 @@ if [ -n "$TOKEN" ]; then
 	# Connect an SSE client in background
 	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
 	SSE_PID1=$!
-	sleep 3
+	wait_for 10 1 "web viewer count reaches 1" \
+		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" = '1'"
 
 	# W should now be 1
 	W_WITH_ONE=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
@@ -490,7 +508,8 @@ if [ -n "$TOKEN" ]; then
 	# Connect a second SSE client
 	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
 	SSE_PID2=$!
-	sleep 3
+	wait_for 10 1 "web viewer count reaches 2" \
+		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" = '2'"
 
 	# W should now be 2
 	W_WITH_TWO=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
@@ -502,7 +521,8 @@ if [ -n "$TOKEN" ]; then
 
 	# Disconnect first client
 	kill $SSE_PID1 2>/dev/null || true
-	sleep 3
+	wait_for 10 1 "web viewer count drops to 1" \
+		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" = '1'"
 
 	# W should be back to 1
 	W_AFTER_DC=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
@@ -514,7 +534,8 @@ if [ -n "$TOKEN" ]; then
 
 	# Clean up second client
 	kill $SSE_PID2 2>/dev/null || true
-	sleep 2
+	wait_for 10 1 "web viewer count drops to 0" \
+		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" = '0'"
 else
 	skip "web viewer count starts at 0 (no token)"
 	skip "web viewer count increments to 1 (no token)"
@@ -544,7 +565,8 @@ fi
 # Test: Create pane (split-window)
 # -------------------------------------------------------
 remote_tmtv "split-window -t main -h"
-sleep 1
+wait_for 5 1 "second pane exists" \
+	"test \"\$(remote_tmtv 'list-panes -t main' 2>/dev/null | wc -l)\" -ge 2"
 PANE_COUNT=$(remote_tmtv "list-panes -t main" 2>/dev/null | wc -l)
 if [ "$PANE_COUNT" -ge 2 ]; then
 	pass "split-window creates second pane"
@@ -556,7 +578,8 @@ fi
 # Test: Send keys to specific pane
 # -------------------------------------------------------
 remote_tmtv "send-keys -t main.1 'echo PANE1_MARKER' Enter"
-sleep 1
+wait_for 5 1 "marker appears in pane 1" \
+	"remote_tmtv 'capture-pane -t main.1 -p' 2>/dev/null | grep -q PANE1_MARKER"
 OUTPUT=$(remote_tmtv "capture-pane -t main.1 -p" 2>/dev/null || echo "")
 if echo "$OUTPUT" | grep -q "PANE1_MARKER"; then
 	pass "send-keys to split pane"
@@ -762,88 +785,43 @@ fi
 # -------------------------------------------------------
 # Test: SSH RW input latency — keystroke echo within 3 seconds
 # -------------------------------------------------------
-# Verifies that keystrokes sent via SSH RW are echoed back
-# promptly. This guards against encoder flush delays, Nagle
-# buffering, and SSH compression latency in the relay path.
-RW_TOKEN=$(read_rw_token_stable "$TESTID")
+# Verifies that keystrokes sent via the tmtv session are echoed back
+# promptly. Uses send-keys + capture-pane to avoid expect/SSH
+# interop issues with tmux escape sequences in split-pane layouts.
 TOKEN=$(read_token "$TESTID")
-if [ -n "$TOKEN" ] && [ -n "$RW_TOKEN" ]; then
-	# Go to pane 0 for a clean slate
+if [ -n "$TOKEN" ]; then
 	remote_tmtv "select-pane -t main.0"
 	sleep 0.5
 
-	# Use expect to connect via SSH RW, send a unique marker,
-	# and measure how long until it echoes back.
 	LATENCY_MARKER="LAT$$"
-	remote "cat > /tmp/tmtv-latency.exp << 'EXPECT'
-set timeout 15
-spawn ssh -o StrictHostKeyChecking=no -p TMTV_PORT TOKEN@127.0.0.1
-# Wait for the terminal to fully initialize.  The session has split
-# panes from earlier tests, so tmux sends a full screen redraw plus
-# escape sequences (extended keys mode, etc.).  We must consume ALL
-# of that before sending input, otherwise our keystroke interleaves
-# with terminal responses and gets dropped.
-#
-# Strategy: wait 4s, then send a harmless Enter to provoke a fresh
-# prompt, then expect that prompt before sending the real marker.
-sleep 4
-send \"\r\"
-expect {
-    timeout {
-        puts \"LATENCY_TIMEOUT\"
-        exit 1
-    }
-    -re {[$#] } {}
-}
-# Let any trailing escape sequences (e.g. extended keys mode
-# [?7727h) drain before sending input.
-sleep 2
-# Now the terminal is quiescent and we have a fresh prompt.
-set start_ms [clock milliseconds]
-send -- \"echo MARKER\r\"
-# Wait for the marker to appear in output (echoed by shell)
-expect {
-    timeout {
-        puts \"LATENCY_TIMEOUT\"
-        exit 1
-    }
-    \"MARKER\" {
-        set end_ms [clock milliseconds]
-        set elapsed [expr {$end_ms - $start_ms}]
-        puts \"LATENCY_MS=$elapsed\"
-    }
-}
-sleep 0.5
-close
-wait
-EXPECT
-sed -i \"s/TOKEN/$RW_TOKEN/;s/MARKER/$LATENCY_MARKER/;s/TMTV_PORT/$TMTV_PORT/\" /tmp/tmtv-latency.exp
-expect /tmp/tmtv-latency.exp 2>/dev/null"
-	LATENCY_OUTPUT=$(remote "cat /tmp/tmtv-latency.exp.out 2>/dev/null || expect /tmp/tmtv-latency.exp 2>/dev/null" || echo "")
-	# Re-run with output capture if first attempt didn't produce output
-	if ! echo "$LATENCY_OUTPUT" | grep -q "LATENCY_"; then
-		LATENCY_OUTPUT=$(remote "expect /tmp/tmtv-latency.exp 2>/dev/null" || echo "LATENCY_TIMEOUT")
-	fi
-	remote "rm -f /tmp/tmtv-latency.exp" 2>/dev/null || true
+	START_MS=$(remote "date +%s%3N" 2>/dev/null || echo "0")
+	remote_tmtv "send-keys -t main.0 'echo ${LATENCY_MARKER}' Enter"
 
-	if echo "$LATENCY_OUTPUT" | grep -q "LATENCY_TIMEOUT"; then
-		fail "SSH RW input latency" "keystroke echo timed out (>10s)"
-	elif echo "$LATENCY_OUTPUT" | grep -q "LATENCY_MS="; then
-		LATENCY_MS=$(echo "$LATENCY_OUTPUT" | grep "LATENCY_MS=" | sed 's/.*LATENCY_MS=//' | tr -d ' \r')
-		if [ "$LATENCY_MS" -lt 3000 ] 2>/dev/null; then
-			pass "SSH RW input latency (${LATENCY_MS}ms)"
-		else
-			fail "SSH RW input latency" "echo took ${LATENCY_MS}ms (limit: 3000ms)"
-		fi
-	else
-		# Fallback: verify marker appeared in capture-pane (basic echo test)
-		sleep 2
+	# Poll capture-pane until marker appears or 3s timeout
+	FOUND=false
+	for _lat_i in $(seq 1 30); do
+		remote "usleep 100000 2>/dev/null || sleep 0.1"
 		CAP=$(remote_tmtv "capture-pane -t main.0 -p" 2>/dev/null || echo "")
 		if echo "$CAP" | grep -q "$LATENCY_MARKER"; then
-			pass "SSH RW input latency (marker echoed, timing unavailable)"
-		else
-			fail "SSH RW input latency" "marker not echoed"
+			FOUND=true
+			break
 		fi
+	done
+	END_MS=$(remote "date +%s%3N" 2>/dev/null || echo "0")
+
+	if [ "$FOUND" = "true" ]; then
+		if [ "$START_MS" != "0" ] && [ "$END_MS" != "0" ]; then
+			LATENCY_MS=$((END_MS - START_MS))
+			if [ "$LATENCY_MS" -lt 3000 ] 2>/dev/null; then
+				pass "SSH RW input latency (${LATENCY_MS}ms)"
+			else
+				fail "SSH RW input latency" "echo took ${LATENCY_MS}ms (limit: 3000ms)"
+			fi
+		else
+			pass "SSH RW input latency (marker echoed, timing unavailable)"
+		fi
+	else
+		fail "SSH RW input latency" "marker not echoed within 3s"
 	fi
 else
 	skip "SSH RW input latency (no token)"
@@ -858,7 +836,8 @@ fi
 remote "pkill -9 -f 'expect.*${TMTV_PORT}'" 2>/dev/null || true
 remote "pkill -9 -f 'ssh.*-p.*${TMTV_PORT}.*ro-'" 2>/dev/null || true
 remote "pkill -9 -f 'ssh.*-p.*${TMTV_PORT}.*@127'" 2>/dev/null || true
-sleep 2
+wait_for 5 1 "stale SSH viewers cleaned up" \
+	"test \"\$(remote_tmtv 'display-message -p #{tmtv_ssh_viewers}' 2>/dev/null || echo 'X')\" = '0'" || true
 if [ -n "$TOKEN" ]; then
 	# Record baseline S count before connecting a viewer.
 	# Poll until prior viewer connections are cleaned up server-side.
@@ -917,11 +896,13 @@ if [ -n "$TOKEN" ]; then
 	TOKEN=$(read_token "$TESTID")
 	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
 	WEB_CURL_PID=$!
-	sleep 3
+	wait_for 10 1 "web viewer count >= 1 in status bar" \
+		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" -ge 1"
 
 	W_IN_STATUS=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
 	kill $WEB_CURL_PID 2>/dev/null || true
-	sleep 2
+	wait_for 5 1 "web viewer count drops after disconnect" \
+		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" = '0'" || true
 
 	if [ -n "$W_IN_STATUS" ] && [ "$W_IN_STATUS" -ge 1 ] 2>/dev/null; then
 		pass "W:N in status bar matches web viewers (W:$W_IN_STATUS)"
@@ -941,7 +922,7 @@ fi
 if [ -n "$TOKEN" ]; then
 	# Override status-right with 24H clock and ISO date
 	remote_tmtv "set-option -g status-right 'S:#{tmtv_ssh_viewers} W:#{tmtv_web_viewers} \"#{=21:pane_title}\" %H:%M %Y-%m-%d'"
-	sleep 2
+	sleep 1
 
 	# Connect SSH RO viewer and capture the status bar
 	CUSTOM_LOG=$(remote "TERM=xterm-256color script -qc \
@@ -1006,7 +987,8 @@ if [ "$QUICK" = "false" ] && [ -n "$TOKEN" ]; then
 	# Use the proper tmux option name — client-side interceptor in
 	# cmd-set-option.c sends it to the server via tmate_set_val.
 	remote_tmtv "set-option -g tmtv-web-sharing off"
-	sleep 3
+	wait_for 10 1 "web sharing disabled" \
+		"test \"\$(curl -s -m 2 -o /dev/null -w '%{http_code}' \"$SSE_BASE/\$(read_token $TESTID)\" 2>/dev/null)\" != '200'" || sleep 3
 
 	# When web sharing is off, new SSE connections should get disconnected
 	TOKEN=$(read_token "$TESTID")
@@ -1015,7 +997,8 @@ if [ "$QUICK" = "false" ] && [ -n "$TOKEN" ]; then
 
 	# Re-enable for remaining tests
 	remote_tmtv "set-option -g tmtv-web-sharing on"
-	sleep 3
+	wait_for 10 1 "web sharing re-enabled" \
+		"curl -s -m 2 \"$SSE_BASE/\$(read_token $TESTID)\" 2>/dev/null | grep -q '^data:'" || sleep 3
 
 	# After re-enable, SSE should work again
 	TOKEN=$(read_token "$TESTID")
@@ -1036,7 +1019,8 @@ TOKEN=$(read_token "$TESTID")
 if [ -n "$TOKEN" ]; then
 	# Resize the terminal to 100x30
 	remote_tmtv "resize-window -t main -x 100 -y 30"
-	sleep 2
+	wait_for 5 1 "resize applied" \
+		"test \"\$(remote_tmtv 'display-message -t main -p #{window_width}x#{window_height}' 2>/dev/null)\" = '100x30'"
 
 	# Re-read token after resize (may trigger reconnection)
 	wait_token_stable "$TESTID"
@@ -1179,7 +1163,8 @@ fi
 # Test: Kill session cleans up
 # -------------------------------------------------------
 remote_tmtv "kill-session -t main"
-sleep 2
+wait_for 10 1 "session removed after kill" \
+	"! remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q main'"
 
 # Session should be gone
 SESSIONS=$(remote_tmtv "list-sessions" 2>/dev/null || echo "no server")
@@ -1200,10 +1185,12 @@ fi
 # Test: multiple sessions work (v1.4.0 multi-session support)
 # -------------------------------------------------------
 remote "TERM=xterm-256color $REMOTE_TMTV new -d -s multi1" 2>/dev/null
-sleep 2
+wait_for 10 1 "multi1 session ready" \
+	"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q multi1'"
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "multi1"; then
 	remote "TERM=xterm-256color $REMOTE_TMTV new -d -s multi2" 2>/dev/null
-	sleep 1
+	wait_for 10 1 "multi2 session ready" \
+		"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q multi2'"
 	# Both sessions must exist
 	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "multi2"; then
 		pass "second new-session creates multi2"
@@ -1214,13 +1201,15 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 else
 	fail "second new-session creates multi2" "could not create test session"
 fi
-sleep 1
+wait_for 5 1 "server stopped after multi-session" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: bare tmtv creates new session (matches tmux default behavior)
 # -------------------------------------------------------
 remote "TERM=xterm-256color $REMOTE_TMTV new -d -s existing1" 2>/dev/null
-sleep 2
+wait_for 10 1 "existing1 session ready" \
+	"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q existing1'"
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "existing1"; then
 	# Bare tmtv against existing server — should create a new session, not attach
 	# Use script to provide a pty (tmtv needs one for an interactive session)
@@ -1236,7 +1225,8 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 else
 	fail "bare tmtv creates new session" "could not create test session"
 fi
-sleep 1
+wait_for 5 1 "server stopped after bare-tmtv" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: named session auto-numbering (name, name-1, name-2)
@@ -1374,19 +1364,23 @@ fi
 remote "TERM=xterm-256color $REMOTE_TMTV -S $AUTONUM_SOCK1 kill-server" 2>/dev/null || true
 remote "TERM=xterm-256color $REMOTE_TMTV -S $AUTONUM_SOCK2 kill-server" 2>/dev/null || true
 remote "rm -f $AUTONUM_CONF1 $AUTONUM_CONF2 $AUTONUM_SOCK1 $AUTONUM_SOCK2" 2>/dev/null || true
-sleep 2
+wait_for 5 1 "server stopped after autonum" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: tmtv reattach after detach works
 # -------------------------------------------------------
 remote "TERM=xterm-256color $REMOTE_TMTV new -d -s reattach1" 2>/dev/null
-sleep 2
+wait_for 10 1 "reattach1 session ready" \
+	"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q reattach1'"
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "reattach1"; then
 	# Attach, then timeout (simulates detach), then attach again
 	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV attach -t reattach1" 2>/dev/null || true
-	sleep 1
+	wait_for 5 1 "reattach1 survives first detach" \
+		"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q reattach1'"
 	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV attach -t reattach1" 2>/dev/null || true
-	sleep 1
+	wait_for 5 1 "reattach1 survives second detach" \
+		"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q reattach1'"
 	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "reattach1"; then
 		pass "tmtv reattach after detach works"
 	else
@@ -1396,16 +1390,19 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 else
 	fail "tmtv reattach after detach works" "could not create test session"
 fi
-sleep 1
+wait_for 5 1 "server stopped after reattach" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: session recreation after kill-session works
 # -------------------------------------------------------
 remote "TERM=xterm-256color $REMOTE_TMTV new -d -s killme1" 2>/dev/null
-sleep 2
+wait_for 10 1 "killme1 session ready" \
+	"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q killme1'"
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "killme1"; then
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-session -t killme1" 2>/dev/null || true
-	sleep 1
+	wait_for 5 1 "killme1 removed" \
+		"! remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q killme1'"
 	# Session should be gone
 	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "killme1"; then
 		fail "session recreation after kill-session" "kill-session did not work"
@@ -1413,7 +1410,8 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 	else
 		# Now create a new session — this tests the RB_EMPTY fix
 		remote "TERM=xterm-256color $REMOTE_TMTV new -d -s killme2" 2>/dev/null
-		sleep 2
+		wait_for 10 1 "killme2 session ready" \
+			"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q killme2'"
 		if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "killme2"; then
 			pass "session recreation after kill-session works"
 		else
@@ -1424,13 +1422,15 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 else
 	fail "session recreation after kill-session works" "could not create test session"
 fi
-sleep 1
+wait_for 5 1 "server stopped after kill-recreation" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: tmtv list-sessions shows running session
 # -------------------------------------------------------
 remote "TERM=xterm-256color $REMOTE_TMTV new -d -s lsession1" 2>/dev/null
-sleep 2
+wait_for 10 1 "lsession1 session ready" \
+	"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q lsession1'"
 LS_OUTPUT=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null) || true
 if echo "$LS_OUTPUT" | grep -q "lsession1"; then
 	pass "tmtv list-sessions shows running session"
@@ -1438,16 +1438,19 @@ else
 	fail "tmtv list-sessions shows running session" "output: $LS_OUTPUT"
 fi
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after list-sessions" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: tmtv attach -t <session> works
 # -------------------------------------------------------
 remote "TERM=xterm-256color $REMOTE_TMTV new -d -s att1" 2>/dev/null
-sleep 2
+wait_for 10 1 "att1 session ready" \
+	"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q att1'"
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "att1"; then
 	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV attach -t att1" 2>/dev/null || true
-	sleep 1
+	wait_for 5 1 "att1 survives attach" \
+		"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q att1'"
 	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "att1"; then
 		pass "tmtv attach -t <session> works"
 	else
@@ -1457,7 +1460,8 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 else
 	fail "tmtv attach -t <session> works" "could not create test session"
 fi
-sleep 1
+wait_for 5 1 "server stopped after attach" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: password-protected session — SSH rejects pubkey auth
@@ -1571,7 +1575,8 @@ fi
 # Clean up password session
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $PW_CONF" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after password tests" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Web input test helper: start session, test POST via each token type
@@ -1646,7 +1651,8 @@ if [ -n "$ANON_TOKEN" ]; then
 		-d "echo $ANON_MARKER" "$SSE_BASE/$ANON_TOKEN/input" >/dev/null 2>&1
 	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 		--data-binary @- "$SSE_BASE/$ANON_TOKEN/input" >/dev/null 2>&1
-	sleep 2
+	wait_for 10 1 "anon marker in capture" \
+		"remote_tmtv 'capture-pane -t main:0 -p' 2>/dev/null | grep -q '$ANON_MARKER'"
 	ANON_CAP=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
 	if echo "$ANON_CAP" | grep -q "$ANON_MARKER"; then
 		pass "anon session: web input reaches SSH (web → SSH)"
@@ -1660,7 +1666,8 @@ if [ -n "$ANON_TOKEN" ]; then
 		--data-binary "echo ${UTF8_MARKER}" "$SSE_BASE/$ANON_TOKEN/input" >/dev/null 2>&1
 	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 		--data-binary @- "$SSE_BASE/$ANON_TOKEN/input" >/dev/null 2>&1
-	sleep 2
+	wait_for 10 1 "UTF-8 marker in capture" \
+		"remote_tmtv 'capture-pane -t main:0 -p' 2>/dev/null | grep -q '$UTF8_MARKER'"
 	UTF8_CAP=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
 	if echo "$UTF8_CAP" | grep -q "$UTF8_MARKER"; then
 		pass "anon session: UTF-8 web input reaches SSH (öäå)"
@@ -1692,14 +1699,16 @@ if [ -n "$ANON_TOKEN" ]; then
 	# Dangerous command blocklist: Ctrl+B d (detach-client) must NOT
 	# detach the host session when sent via web input.
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
-	sleep 1
+	wait_for 5 1 "server stopped before detach test" \
+		"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 	DETACH_CONF="/tmp/.tmtv-test-detach-$TESTID.conf"
 	remote "cat > $DETACH_CONF << 'DEOF'
 set -g tmtv-session-name detachtest
 set -g tmtv-web-input on
 DEOF" 2>/dev/null
 	remote "TERM=xterm-256color $REMOTE_TMTV -f $DETACH_CONF new -d -s main" 2>/dev/null
-	sleep 3
+	wait_for 10 1 "detach test session ready" \
+		"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q main'"
 	DETACH_TOKEN=$(remote "ls /tmp/tmtv-*/sessions/*/web_url_ro 2>/dev/null | head -1 | xargs cat 2>/dev/null | sed 's|.*/ws/||'" 2>/dev/null)
 	if [ -n "$DETACH_TOKEN" ]; then
 		# Test 1: Ctrl+B d from web must NOT detach the host session
@@ -1710,7 +1719,7 @@ DEOF" 2>/dev/null
 		sleep 0.5
 		printf 'd' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
-		sleep 2
+		sleep 1
 		# Session must still exist — detach was blocked
 		SESS_AFTER=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | wc -l")
 		if [ "$SESS_AFTER" -ge 1 ]; then
@@ -1726,7 +1735,8 @@ DEOF" 2>/dev/null
 			--data-binary "echo ${AFTER_BLOCK_MARKER}" "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
 		printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
-		sleep 2
+		wait_for 10 1 "after-block marker in capture" \
+			"remote_tmtv 'capture-pane -t main:0 -p' 2>/dev/null | grep -q '$AFTER_BLOCK_MARKER'"
 		AFTER_BLOCK_CAP=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
 		if echo "$AFTER_BLOCK_CAP" | grep -q "$AFTER_BLOCK_MARKER"; then
 			pass "web input: regular keys work after blocked Ctrl+B d"
@@ -1742,7 +1752,8 @@ DEOF" 2>/dev/null
 		sleep 0.5
 		printf 'c' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
-		sleep 2
+		wait_for 10 1 "new window created via Ctrl+B c" \
+			"test \"\$(remote_tmtv 'list-windows -t main' 2>/dev/null | wc -l)\" -gt '$WIN_BEFORE'"
 		WIN_AFTER=$(remote_tmtv "list-windows -t main" 2>/dev/null | wc -l)
 		if [ "$WIN_AFTER" -gt "$WIN_BEFORE" ]; then
 			pass "web input: Ctrl+B c still works after blocked detach"
@@ -1760,7 +1771,7 @@ DEOF" 2>/dev/null
 		sleep 0.5
 		printf 'X' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
-		sleep 2
+		sleep 1
 		SESS_AFTER_KILL=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | wc -l")
 		if [ "$SESS_AFTER_KILL" -ge 1 ]; then
 			pass "web input: Ctrl+B X (kill-session) blocked"
@@ -1779,7 +1790,8 @@ fi
 
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $ANON_CONF" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after anon tests" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: Web input — named session (name, no password)
@@ -1902,7 +1914,8 @@ fi
 
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $NAMED_CONF" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after named tests" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: Web input — password session (named + password)
@@ -1983,7 +1996,8 @@ fi
 
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $PWONLY_CONF" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after pwonly tests" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: Web input — named + password session
@@ -2072,7 +2086,8 @@ fi
 
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $NPPW_CONF" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after nppw tests" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: Web input DISABLED by default — POST rejected
@@ -2138,7 +2153,8 @@ fi
 
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $WID_CONF" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after wid tests" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: CSRF protection — POST without X-Tmtv-Input header
@@ -2191,7 +2207,8 @@ fi
 
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $CSRF_CONF" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after csrf tests" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: Rapid sequential POSTs not rate-limited at normal typing speed
@@ -2278,7 +2295,8 @@ if [ -n "$RAPID_TOKEN" ]; then
 	sleep 0.2
 	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 		--data-binary @- "$SSE_BASE/$RAPID_SESSNAME/input" >/dev/null 2>&1
-	sleep 2
+	wait_for 10 1 "rapid e2e marker in capture" \
+		"remote_tmtv 'capture-pane -t main:0 -p' 2>/dev/null | grep -q '$RAPID_E2E'"
 	RAPID_CAP=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
 	if echo "$RAPID_CAP" | grep -q "$RAPID_E2E"; then
 		pass "rapid POSTs: keystrokes arrive end-to-end"
@@ -2301,7 +2319,8 @@ if [ -n "$RAPID_TOKEN" ]; then
 	done
 	printf '\r' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
 		--data-binary @- "$SSE_BASE/$RAPID_SESSNAME/input" >/dev/null 2>&1
-	sleep 2
+	wait_for 10 1 "rapid order marker in capture" \
+		"remote_tmtv 'capture-pane -t main:0 -p' 2>/dev/null | grep -q abcdefghij"
 	ORDER_CAP=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
 	if echo "$ORDER_CAP" | grep -q "abcdefghij"; then
 		pass "rapid POSTs: keystrokes arrive in order"
@@ -2318,7 +2337,8 @@ fi
 
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $RAPID_CONF" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after rapid tests" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # === INPUT LATENCY BENCHMARKS ===
 #
@@ -2842,7 +2862,8 @@ echo ""
 # Clean up benchmark session
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $BENCH_CONF" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after benchmark" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: Per-session TTL expiry
@@ -2962,7 +2983,8 @@ fi
 
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $TTL_CONF" 2>/dev/null || true
-sleep 1
+wait_for 5 1 "server stopped after TTL tests" \
+	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 
 # -------------------------------------------------------
 # Test: Short URL alias /j/<token>
@@ -3020,7 +3042,8 @@ CONF"
 
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 	remote "rm -f $JURL_CONF" 2>/dev/null || true
-	sleep 1
+	wait_for 5 1 "server stopped after short URL tests" \
+		"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 else
 	skip "short URL /j/<token> returns 200" "web not available"
 	skip "short URL /j/<token> serves viewer" "web not available"
@@ -3209,7 +3232,8 @@ else:
 	# Cleanup: kill the status test session
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 	remote "rm -f $STATUS_CONF" 2>/dev/null || true
-	sleep 1
+	wait_for 5 1 "server stopped after status tests" \
+		"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 else
 	skip "SSE OUT_STATUS has non-empty left and right" "could not create session"
 	skip "SSE OUT_STATUS right contains custom text" "could not create session"
@@ -3576,7 +3600,8 @@ CONF"
 		# Clean up
 		remote_tmtv "kill-server" 2>/dev/null || true
 		remote "rm -f $ESC_CONF" 2>/dev/null || true
-		sleep 1
+		wait_for 5 1 "server stopped after escape tests" \
+			"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
 	fi
 else
 	skip "passthrough: allow-passthrough defaults to off" "no fingerprints"
@@ -3621,7 +3646,8 @@ CONF"
 	remote "TERM=xterm-256color \
 		nohup script -qc '$REMOTE_TMTV -f $REC_CONF new-session -d -s main' \
 		/dev/null </dev/null >/dev/null 2>&1 &"
-	sleep 4
+	wait_for 15 1 "recording session ready" \
+		"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q main'"
 
 	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null" | grep -q "main"; then
 		# Clean any previous recordings

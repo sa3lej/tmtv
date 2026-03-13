@@ -18,16 +18,18 @@ static int on_encoder_write(void *userdata, const char *buf, size_t len)
 		tmate_fatal("Cannot buffer encoded data");
 
 	/*
-	 * Flush immediately when a callback is registered.
-	 * The old code used event_active() which deferred the write
-	 * to the next event loop iteration, adding milliseconds of
-	 * latency to every keystroke echo in the SSH relay path.
+	 * Defer the flush to the current event loop iteration via
+	 * event_active().  DO NOT call ready_callback directly here —
+	 * on_encoder_write is invoked by msgpack for every pack call
+	 * (i.e. per field, not per message).  Calling ssh_channel_write
+	 * from within a channel-data callback causes reentrancy:
+	 * libssh's blocking write processes incoming packets, which
+	 * can trigger another on_ssh_channel_read, re-entering the
+	 * encoder and interleaving two messages on the wire.
+	 *
+	 * event_active() fires before the next poll(), so the latency
+	 * cost is microseconds — negligible compared to network RTT.
 	 */
-	if (encoder->ready_callback) {
-		encoder->ready_callback(encoder->userdata, encoder->buffer);
-		return 0;
-	}
-
 	if (!encoder->ev_active) {
 		event_active(encoder->ev_buffer, EV_READ, 0);
 		encoder->ev_active = true;
