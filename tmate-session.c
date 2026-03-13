@@ -140,12 +140,13 @@ static void __tmate_session_init(struct tmate_session *session,
 	session->min_sy = -1;
 
 	TAILQ_INIT(&session->clients);
+	TAILQ_INIT(&session->env);
 }
 
 void tmate_session_init(struct event_base *base)
 {
 	__tmate_session_init(&tmate_session, base);
-	tmate_write_header();
+	tmate_write_header(&tmate_session);
 }
 
 static void send_authorized_keys(void)
@@ -183,7 +184,7 @@ static void send_authorized_keys(void)
 	while ((line = fparseln(f, &len, NULL, NULL, 0)) != NULL) {
 		if (len == 0)
 			continue;
-		tmate_set_val("authorized_keys", line);
+		tmate_set_val(&tmate_session, "authorized_keys", line);
 		free(line);
 	}
 
@@ -204,7 +205,7 @@ void tmate_session_start(void)
 	 *   serialize it, and so we need a worker encoder.
 	 */
 	if (tmate_foreground) {
-		tmate_set_val("foreground", "true");
+		tmate_set_val(&tmate_session, "foreground", "true");
 		tmate_info("To connect to the session locally, run: tmtv -S %s attach", socket_path);
 	} else {
 		cfg_add_cause("%s", "Tip: if you wish to use tmtv only for remote access, run: tmtv -F");
@@ -218,7 +219,7 @@ void tmate_session_start(void)
 		const char *sname = options_get_string(global_options,
 						      "tmtv-session-name");
 		if (sname && *sname)
-			tmate_set_val("session_name", sname);
+			tmate_set_val(&tmate_session, "session_name", sname);
 	}
 
 	/* Send session password if configured */
@@ -226,7 +227,7 @@ void tmate_session_start(void)
 		const char *pw = options_get_string(global_options,
 						    "tmtv-session-password");
 		if (pw != NULL && *pw != '\0')
-			tmate_set_val("session_password", pw);
+			tmate_set_val(&tmate_session, "session_password", pw);
 	}
 
 	/* Send link TTL if configured */
@@ -234,13 +235,16 @@ void tmate_session_start(void)
 		const char *ttl = options_get_string(global_options,
 						     "tmtv-link-ttl");
 		if (ttl != NULL && *ttl != '\0')
-			tmate_set_val("link_ttl", ttl);
+			tmate_set_val(&tmate_session, "link_ttl", ttl);
 	}
 
 	send_authorized_keys();
-	tmate_write_uname();
-	tmate_write_ready();
+	tmate_write_uname(&tmate_session);
+	tmate_write_ready(&tmate_session);
 	lookup_and_connect();
+
+	/* Start periodic status timer for detached sessions */
+	tmate_start_status_timer(&tmate_session);
 }
 
 static void on_reconnect_retry(__unused evutil_socket_t fd, __unused short what, void *arg)

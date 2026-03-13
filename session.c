@@ -114,13 +114,6 @@ session_create(const char *prefix, const char *name, const char *cwd,
 {
 	struct session	*s;
 
-#ifdef TMATE
-	if (!RB_EMPTY(&sessions)) {
-		tmate_info("multi sessions is not supported with tmtv");
-		return (NULL);
-	}
-#endif
-
 	s = xcalloc(1, sizeof *s);
 	s->references = 1;
 	s->flags = 0;
@@ -240,7 +233,7 @@ session_destroy(struct session *s, int notify, const char *from)
 	if (tmtv_recording_active())
 		tmtv_recording_stop();
 	tmate_info("Session closed");
-	tmate_write_fin();
+	tmate_write_fin(&tmate_session);
 #endif
 }
 
@@ -355,7 +348,7 @@ session_attach(struct session *s, struct window *w, int idx, char **cause)
 	notify_session_window("window-linked", s, w);
 
 #ifdef TMATE
-	tmate_sync_layout();
+	tmate_sync_layout(&tmate_session, s);
 #endif
 
 	session_group_synchronize_from(s);
@@ -377,7 +370,7 @@ session_detach(struct session *s, struct winlink *wl)
 	winlink_remove(&s->windows, wl);
 
 #ifdef TMATE
-	tmate_sync_layout();
+	tmate_sync_layout(&tmate_session, s);
 #endif
 
 	session_group_synchronize_from(s);
@@ -523,7 +516,7 @@ session_set_current(struct session *s, struct winlink *wl)
 	winlink_clear_flags(wl);
 
 #ifdef TMATE
-	tmate_sync_layout();
+	tmate_sync_layout(&tmate_session, s);
 #endif
 
 	window_update_activity(wl->window);

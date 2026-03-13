@@ -69,6 +69,7 @@ import Viewer from '../layouts/Viewer.astro';
 
     <div id="tmux-status" class="tmux-status">
       <span id="tmux-status-left"></span>
+      <span id="tmux-status-center"></span>
       <span id="tmux-status-right"></span>
     </div>
 
@@ -159,8 +160,9 @@ import Viewer from '../layouts/Viewer.astro';
     padding: 1px 4px; display: flex; justify-content: space-between;
     min-height: 20px; white-space: nowrap; overflow: hidden;
   }
-  #tmux-status-left { color: #ffffff; font-weight: bold; }
-  #tmux-status-right { color: #d0d0d0; }
+  #tmux-status-left { color: #ffffff; font-weight: bold; flex: 0 0 auto; }
+  #tmux-status-center { color: #e0e0e0; flex: 1 1 auto; }
+  #tmux-status-right { color: #d0d0d0; flex: 0 0 auto; text-align: right; }
 
   /* scanlines removed — caused visible banding artifacts */
   .xterm-viewport::-webkit-scrollbar { display: none; }

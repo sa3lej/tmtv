@@ -47,6 +47,7 @@ void request_server_termination(void)
 	 * tmux 3.6a: server_fd and server_send_exit() are static.
 	 * Use SIGTERM to trigger clean shutdown.
 	 */
+	tmate_info("request_server_termination called");
 	kill(getpid(), SIGTERM);
 }
 

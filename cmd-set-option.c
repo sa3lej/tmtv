@@ -230,18 +230,18 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 #ifndef TMATE_SERVER_BUILD
 	/* Client side: replicate web sharing toggle to server */
 	if (strcmp(name, "tmtv-web-sharing") == 0) {
-		extern void tmate_set_val(const char *, const char *);
 		if (args_has(args, 'u'))
-			tmate_set_val("web_sharing", "off");
+			tmate_set_val(&tmate_session, "web_sharing", "off");
 		else
-			tmate_set_val("web_sharing", value ? value : "off");
+			tmate_set_val(&tmate_session, "web_sharing",
+				      value ? value : "off");
 	}
 	if (strcmp(name, "tmtv-web-input") == 0) {
-		extern void tmate_set_val(const char *, const char *);
 		if (args_has(args, 'u'))
-			tmate_set_val("web_input", "off");
+			tmate_set_val(&tmate_session, "web_input", "off");
 		else
-			tmate_set_val("web_input", value ? value : "off");
+			tmate_set_val(&tmate_session, "web_input",
+				      value ? value : "off");
 	}
 	if (strcmp(name, "tmtv-recording") == 0) {
 		int want_on = !args_has(args, 'u') && value &&
@@ -266,11 +266,11 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 		}
 	}
 	if (strcmp(name, "tmtv-link-ttl") == 0) {
-		extern void tmate_set_val(const char *, const char *);
 		if (args_has(args, 'u'))
-			tmate_set_val("link_ttl", "0");
+			tmate_set_val(&tmate_session, "link_ttl", "0");
 		else
-			tmate_set_val("link_ttl", value ? value : "0");
+			tmate_set_val(&tmate_session, "link_ttl",
+				      value ? value : "0");
 	}
 #else
 	/* Server side: process option hooks */

@@ -28,6 +28,9 @@
 #include <unistd.h>
 
 #include "tmux.h"
+#ifdef TMATE
+#include "tmate.h"
+#endif
 
 static void	 status_message_callback(int, short, void *);
 static void	 status_timer_callback(int, short, void *);
@@ -402,6 +405,22 @@ status_redraw(struct client *c)
 		flags |= FORMAT_FORCE;
 	ft = format_create(c, NULL, FORMAT_NONE, flags);
 	format_defaults(ft, c, NULL, NULL, NULL);
+
+#ifdef TMATE
+	/* Send expanded status-left/right to tmate server for web viewers. */
+	{
+		const char *sleft, *sright;
+		char *eleft, *eright;
+
+		sleft = options_get_string(s->options, "status-left");
+		sright = options_get_string(s->options, "status-right");
+		eleft = format_expand_time(ft, sleft);
+		eright = format_expand_time(ft, sright);
+		tmate_status(&tmate_session, eleft, eright);
+		free(eleft);
+		free(eright);
+	}
+#endif
 
 	/* Set up default colour. */
 	style_apply(&gc, s->options, "status-style", ft);

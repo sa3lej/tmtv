@@ -7,6 +7,8 @@
 
 struct tmate_session _tmate_session, *tmate_session = &_tmate_session;
 
+extern void tmate_send_fin_to_ws_clients(struct tmate_session *session);
+
 static void on_daemon_decoder_read(void *userdata, struct tmate_unpacker *uk)
 {
 	struct tmate_session *session = userdata;
@@ -64,12 +66,11 @@ static void on_daemon_encoder_write(void *userdata, struct evbuffer *buffer)
 
 		written = ssh_channel_write(session->ssh_client.channel, buf, len);
 		if (written < 0) {
-			tmate_info("Error writing to channel: %s",
-				   ssh_get_error(session->ssh_client.session));
+			tmate_info("daemon_encoder_write: FAILED (%zd bytes): %s",
+				   len, ssh_get_error(session->ssh_client.session));
 			request_server_termination();
 			break;
 		}
-
 		evbuffer_drain(buffer, written);
 	}
 }
@@ -81,7 +82,7 @@ static void tmate_daemon_init(struct tmate_session *session)
 	memset(&client->channel_cb, 0, sizeof(client->channel_cb));
 	ssh_callbacks_init(&client->channel_cb);
 	client->channel_cb.userdata = session;
-	client->channel_cb.channel_data_function = on_ssh_channel_read,
+	client->channel_cb.channel_data_function = on_ssh_channel_read;
 	ssh_set_channel_callbacks(client->channel, &client->channel_cb);
 
 	tmate_encoder_init(&session->daemon_encoder, on_daemon_encoder_write, session);
@@ -454,6 +455,8 @@ void tmate_register_session_name(struct tmate_session *session,
 	char prefix[6];
 	char *ssh_conn_str;
 	char *old_ro;
+	char *actual_name;
+	int suffix;
 
 	if (!is_valid_session_name(name)) {
 		tmate_notify("Invalid session name (3-32 alphanumeric/hyphens)");
@@ -465,14 +468,68 @@ void tmate_register_session_name(struct tmate_session *session,
 		return;
 	}
 
-	/* Check if name (used for web + RO) is already taken */
-	xasprintf(&ro_named, "ro-%s", name);
-	if (fstatat(session->sessions_dir_fd, name, &st, AT_SYMLINK_NOFOLLOW) == 0 ||
-	    fstatat(session->sessions_dir_fd, ro_named, &st, AT_SYMLINK_NOFOLLOW) == 0) {
-		tmate_notify("Session name '%s' is already taken", name);
-		free(ro_named);
-		return;
+	/*
+	 * Auto-increment: if "name" is taken, try "name-1", "name-2", etc.
+	 * This supports multiple sessions sharing the same base name.
+	 *
+	 * Before auto-numbering, check if the existing symlink points to a
+	 * dead socket. This happens when the client reconnects — the first
+	 * daemon's atexit cleanup hasn't run yet, but the socket is already
+	 * closed. Remove stale symlinks to let the reconnecting client
+	 * reclaim its name.
+	 */
+	actual_name = xstrdup(name);
+	xasprintf(&ro_named, "ro-%s", actual_name);
+
+	/* Check if existing symlink is stale (points to dead socket) */
+	if (fstatat(session->sessions_dir_fd, actual_name, &st,
+		    AT_SYMLINK_NOFOLLOW) == 0) {
+		char target[TMATE_TOKEN_LEN + 1];
+		ssize_t len = readlinkat(session->sessions_dir_fd, actual_name,
+					 target, sizeof(target) - 1);
+		if (len > 0) {
+			target[len] = '\0';
+			/* Check if the target socket is alive */
+			struct stat sock_st;
+			if (fstatat(session->sessions_dir_fd, target, &sock_st,
+				    0) < 0) {
+				/* Target socket is dead — remove stale symlinks */
+				char *stale_ro;
+				xasprintf(&stale_ro, "ro-%s", actual_name);
+				unlinkat(session->sessions_dir_fd, actual_name, 0);
+				unlinkat(session->sessions_dir_fd, stale_ro, 0);
+				/* Also remove RW symlink (XXXXX-name pattern) */
+				/* We don't know the exact prefix, skip it —
+				 * it will be cleaned by the dying daemon */
+				free(stale_ro);
+				tmate_info("Reclaimed stale session name: %s",
+					   actual_name);
+			}
+		}
 	}
+
+	for (suffix = 1;
+	     fstatat(session->sessions_dir_fd, actual_name, &st, AT_SYMLINK_NOFOLLOW) == 0 ||
+	     fstatat(session->sessions_dir_fd, ro_named, &st, AT_SYMLINK_NOFOLLOW) == 0;
+	     suffix++) {
+		free(actual_name);
+		free(ro_named);
+		xasprintf(&actual_name, "%s-%d", name, suffix);
+		if (!is_valid_session_name(actual_name)) {
+			tmate_notify("Session name '%s' is too long to auto-number", name);
+			free(actual_name);
+			return;
+		}
+		xasprintf(&ro_named, "ro-%s", actual_name);
+		if (suffix > 99) {
+			tmate_notify("Too many sessions with name '%s'", name);
+			free(actual_name);
+			free(ro_named);
+			return;
+		}
+	}
+
+	name = actual_name;
 
 	/* Generate RW token: <5 random digits>-<name> */
 	snprintf(prefix, sizeof(prefix), "%05d",
@@ -483,6 +540,7 @@ void tmate_register_session_name(struct tmate_session *session,
 	if (symlinkat(session->session_token, session->sessions_dir_fd, name) < 0) {
 		tmate_info("Named session symlink failed: %s", strerror(errno));
 		tmate_notify("Named session unavailable (%s)", strerror(errno));
+		free((char *)name);
 		free(rw_named);
 		free(ro_named);
 		return;
@@ -493,6 +551,7 @@ void tmate_register_session_name(struct tmate_session *session,
 		tmate_info("RW named symlink failed: %s", strerror(errno));
 		unlinkat(session->sessions_dir_fd, name, 0);
 		tmate_notify("Named session unavailable (%s)", strerror(errno));
+		free((char *)name);
 		free(rw_named);
 		free(ro_named);
 		return;
@@ -545,6 +604,8 @@ void tmate_register_session_name(struct tmate_session *session,
 
 		tmate_send_web_url(session);
 	}
+
+	free(actual_name);
 }
 
 static void handle_session_name_options(const char *name,
@@ -557,7 +618,6 @@ static void handle_session_name_options(const char *name,
 }
 
 extern void tmate_disconnect_ws_clients(struct tmate_session *session);
-extern void tmate_send_fin_to_ws_clients(struct tmate_session *session);
 
 static void handle_web_sharing_option(const char *name, const char *val)
 {

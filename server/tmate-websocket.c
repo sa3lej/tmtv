@@ -642,6 +642,39 @@ static void sse_send_session_mode(struct bufferevent *bev,
 	msgpack_sbuffer_destroy(&sbuf);
 }
 
+/*
+ * Send the current status bar to a newly connected SSE client.
+ * Without this, the client only receives OUT_STATUS when the next
+ * timer tick sends a changed status — which may never come if the
+ * values haven't changed since the last broadcast.
+ */
+static void sse_send_current_status(struct bufferevent *bev)
+{
+	msgpack_sbuffer sbuf;
+	msgpack_packer pk;
+	const char *left = tmate_left_status ? tmate_left_status : "";
+	const char *right = tmate_right_status ? tmate_right_status : "";
+
+	if (!tmate_left_status && !tmate_right_status)
+		return;
+
+	msgpack_sbuffer_init(&sbuf);
+	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+
+	msgpack_pack_array(&pk, 3);
+	msgpack_pack_int(&pk, TMATE_OUT_STATUS);
+	msgpack_pack_str(&pk, strlen(left));
+	msgpack_pack_str_body(&pk, left, strlen(left));
+	msgpack_pack_str(&pk, strlen(right));
+	msgpack_pack_str_body(&pk, right, strlen(right));
+
+	sse_send_data(bev, (unsigned char *)sbuf.data, sbuf.size);
+	msgpack_sbuffer_destroy(&sbuf);
+}
+
 static int sse_do_handshake(struct ws_client *wc)
 {
 	struct evbuffer *input = bufferevent_get_input(wc->bev);
@@ -1118,6 +1151,56 @@ void tmate_send_fin_to_ws_clients(struct tmate_session *session)
 }
 
 /*
+ * Route a web input key through the tmux key binding pipeline.
+ *
+ * When an SSH viewer is connected, we inject the key via
+ * server_client_handle_key() on the first attached client. This
+ * processes prefix keys (Ctrl+B), key bindings, copy mode entry,
+ * and pane navigation — exactly the same path SSH viewer keystrokes
+ * take.
+ *
+ * When no SSH viewer is connected, we fall back to
+ * tmate_client_pane_key() which sends the raw key directly to the
+ * host. Key bindings won't work in this case, but basic typing will.
+ */
+static void
+tmate_web_input_key(int pane_id, key_code key)
+{
+	struct client *c;
+
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (c->session == NULL)
+			continue;
+		if (c->flags & CLIENT_UNATTACHEDFLAGS)
+			continue;
+		if (c->flags & CLIENT_READONLY)
+			continue;
+
+		/*
+		 * Don't inject keys through a client that has an active
+		 * overlay (popup, menu, display-panes) —
+		 * server_client_handle_key would dismiss it.
+		 */
+		if (c->overlay_draw != NULL) {
+			tmate_client_pane_key(pane_id, key);
+			return;
+		}
+
+		/* Inject through tmux key handler for binding support */
+		struct key_event *event = xcalloc(1, sizeof *event);
+		event->key = key;
+		if (!server_client_handle_key(c, event)) {
+			free(event->buf);
+			free(event);
+		}
+		return;
+	}
+
+	/* No attached rw client — send raw key to host */
+	tmate_client_pane_key(pane_id, key);
+}
+
+/*
  * Handle POST /token/input: read body as raw keystrokes and forward
  * to the tmux client. Respond with 200 and close.
  */
@@ -1193,8 +1276,8 @@ static void handle_post_input(struct ws_client *wc)
 		unsigned char c = data[i];
 
 		if (c < 0x80) {
-			/* ASCII byte — send directly */
-			tmate_client_pane_key(-1, (key_code)c);
+			/* ASCII byte — route through tmux key bindings */
+			tmate_web_input_key(-1, (key_code)c);
 			i++;
 		} else {
 			struct utf8_data ud;
@@ -1208,7 +1291,7 @@ static void handle_post_input(struct ws_client *wc)
 
 			if (more == UTF8_DONE &&
 			    utf8_from_data(&ud, &uc) == UTF8_DONE) {
-				tmate_client_pane_key(-1, (key_code)uc);
+				tmate_web_input_key(-1, (key_code)uc);
 			} else {
 				/* Invalid UTF-8 — skip */
 				tmate_debug("POST input: skipping "
@@ -1273,6 +1356,8 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		sse_send_sync_layout(wc->bev);
 		/* Send current screen state from tmux grid */
 		sse_send_screen_dump(wc->bev);
+		/* Send current status bar so web viewers see it immediately */
+		sse_send_current_status(wc->bev);
 		/* Broadcast updated viewer counts to all clients */
 		tmate_broadcast_viewer_count(wc->session);
 		return;
@@ -1367,6 +1452,13 @@ void tmate_websocket_accept_fd(struct tmate_session *session, int fd)
 	int flag = 1;
 
 	if (!session->web_sharing_enabled) {
+		static const char *forbidden =
+			"HTTP/1.1 403 Forbidden\r\n"
+			"Access-Control-Allow-Origin: *\r\n"
+			"Content-Length: 0\r\n"
+			"Connection: close\r\n"
+			"\r\n";
+		(void)write(fd, forbidden, strlen(forbidden));
 		close(fd);
 		tmate_debug("SSE connection rejected via IPC: web sharing disabled");
 		return;
@@ -1522,12 +1614,12 @@ static void ctl_pane_keys(struct tmate_session *session,
 		return;
 	}
 
-	/* Forward input as keys, building tmux utf8_char for multibyte */
+	/* Forward input as keys, routing through tmux key bindings */
 	for (i = 0; str[i]; ) {
 		unsigned char c = (unsigned char)str[i];
 
 		if (c < 0x80) {
-			tmate_client_pane_key(pane_id, (key_code)c);
+			tmate_web_input_key(pane_id, (key_code)c);
 			i++;
 		} else {
 			struct utf8_data ud;
@@ -1542,7 +1634,7 @@ static void ctl_pane_keys(struct tmate_session *session,
 
 			if (more == UTF8_DONE &&
 			    utf8_from_data(&ud, &uc) == UTF8_DONE) {
-				tmate_client_pane_key(pane_id, (key_code)uc);
+				tmate_web_input_key(pane_id, (key_code)uc);
 			} else {
 				tmate_debug("ws input: skipping "
 				    "invalid UTF-8 at offset %zu", i);

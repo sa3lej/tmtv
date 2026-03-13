@@ -56,12 +56,30 @@ void sse_registry_init(struct sse_registry *reg)
 void sse_registry_add(struct sse_registry *reg,
 		      const char *token, int ipc_fd, pid_t pid)
 {
+	struct sse_registry_entry *e;
+
+	/*
+	 * If this token already exists (e.g. named session token after client
+	 * reconnection), replace the old entry so lookups hit the new daemon.
+	 */
+	for (int i = 0; i < reg->count; i++) {
+		if (strcmp(reg->entries[i].token, token) == 0) {
+			tmate_info("SSE registry: replacing token %.4s... "
+			    "old pid=%d fd=%d -> new pid=%d fd=%d",
+			    token, reg->entries[i].pid, reg->entries[i].ipc_fd,
+			    pid, ipc_fd);
+			reg->entries[i].ipc_fd = ipc_fd;
+			reg->entries[i].pid = pid;
+			return;
+		}
+	}
+
 	if (reg->count >= (int)(sizeof(reg->entries) / sizeof(reg->entries[0]))) {
 		tmate_info("SSE registry full, cannot register token %.4s...", token);
 		return;
 	}
 
-	struct sse_registry_entry *e = &reg->entries[reg->count++];
+	e = &reg->entries[reg->count++];
 	strlcpy(e->token, token, sizeof(e->token));
 	e->ipc_fd = ipc_fd;
 	e->pid = pid;

@@ -2721,7 +2721,7 @@ server_client_loop(void)
 			tmate_should_sync_layout = 1;
 		if (tmate_should_sync_layout) {
 			w->tmate_last_layout_hash = layout_hash;
-			tmate_sync_layout();
+			tmate_sync_layout(&tmate_session, NULL);
 		}
 #endif
 	}

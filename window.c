@@ -1061,7 +1061,7 @@ window_pane_read_callback(__unused struct bufferevent *bufev, void *data)
 		size_t tmate_newsz;
 		tmate_new = window_pane_get_new_data(wp, &wp->offset, &tmate_newsz);
 		if (tmate_newsz > 0) {
-			tmate_pty_data(wp, tmate_new, tmate_newsz);
+			tmate_pty_data(&tmate_session, wp, tmate_new, tmate_newsz);
 			if (tmtv_recording_active())
 				tmtv_recording_write(tmate_new, tmate_newsz);
 		}
