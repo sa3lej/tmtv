@@ -806,8 +806,13 @@ static int sse_do_handshake(struct ws_client *wc)
 	if (is_post_method) {
 		/* CSRF protection: require X-Tmtv-Input header.
 		 * This forces a CORS preflight for cross-origin requests,
-		 * preventing malicious websites from injecting keystrokes. */
-		if (!strcasestr(data, "x-tmtv-input:")) {
+		 * preventing malicious websites from injecting keystrokes.
+		 * Search headers only (not body) with bounded length. */
+		char saved_end = *header_end;
+		*header_end = '\0';
+		int has_csrf = (strcasestr(data, "x-tmtv-input:") != NULL);
+		*header_end = saved_end;
+		if (!has_csrf) {
 			static const char *reject_csrf =
 				"HTTP/1.1 400 Bad Request\r\n"
 				"Content-Length: 0\r\n"
@@ -1151,23 +1156,101 @@ void tmate_send_fin_to_ws_clients(struct tmate_session *session)
 }
 
 /*
+ * Prefix key state machine for web input.
+ *
+ * The server daemon can't use server_client_handle_key() for web input
+ * because the daemon has no real ptys — unbound keys would go to
+ * window_pane_key() on the server side where they'd be lost. Instead,
+ * we track the prefix key state here: when we see Ctrl+B (the prefix),
+ * we buffer it and look up the next key in the prefix binding table.
+ * If a binding is found, we dispatch it as a command string via
+ * tmate_client_cmd_str(). If not, we send both keys raw.
+ *
+ * When an SSH viewer IS connected, we use their real client for key
+ * handling — that path works correctly through server_client_handle_key.
+ */
+static int web_input_in_prefix;
+
+static int
+tmate_web_input_dispatch_binding(key_code key)
+{
+	struct key_table	*table;
+	struct key_binding	*bd;
+
+	table = key_bindings_get_table("prefix", 0);
+	if (table == NULL) {
+		tmate_debug("web prefix: no prefix table found");
+		return (0);
+	}
+
+	bd = key_bindings_get(table, key & KEYC_MASK_KEY);
+	if (bd == NULL) {
+		tmate_debug("web prefix: no binding for key 0x%llx "
+		    "(masked 0x%llx)", (unsigned long long)key,
+		    (unsigned long long)(key & KEYC_MASK_KEY));
+		return (0);
+	}
+
+	tmate_debug("web prefix: found binding for key 0x%llx, dispatching",
+	    (unsigned long long)key);
+
+	/*
+	 * Found a prefix binding — serialize the command list and
+	 * send it to the tmtv client for execution.
+	 */
+	struct cmd	*cmd;
+	struct cmd_list	*cmdlist = bd->cmdlist;
+
+	cmd = cmd_list_first(cmdlist);
+	while (cmd != NULL) {
+		tmate_client_cmd(-1, cmd);
+		cmd = cmd_list_next(cmd);
+	}
+	return (1);
+}
+
+/*
  * Route a web input key through the tmux key binding pipeline.
  *
- * When an SSH viewer is connected, we inject the key via
- * server_client_handle_key() on the first attached client. This
- * processes prefix keys (Ctrl+B), key bindings, copy mode entry,
- * and pane navigation — exactly the same path SSH viewer keystrokes
- * take.
+ * When an SSH viewer is connected, we inject through their client's
+ * key handler (supports prefix, bindings, copy mode, etc.).
  *
- * When no SSH viewer is connected, we fall back to
- * tmate_client_pane_key() which sends the raw key directly to the
- * host. Key bindings won't work in this case, but basic typing will.
+ * When no SSH viewer is connected, we handle the prefix key state
+ * machine ourselves: detect Ctrl+B, look up bindings in the prefix
+ * table, and dispatch via tmate_client_cmd(). Non-prefix keys go
+ * straight to tmate_client_pane_key() for the host.
  */
+/*
+ * Convert a raw ASCII C0 control code (0x00–0x1f) into the tmux key_code
+ * representation used by options and key bindings: letter | KEYC_CTRL.
+ * For example, 0x02 (Ctrl+B) becomes 'b' | KEYC_CTRL = 0x200000000062.
+ * This mirrors the conversion in tty-keys.c lines 922–931.
+ */
+static key_code
+web_input_normalize_key(key_code key)
+{
+	key_code onlykey = key & KEYC_MASK_KEY;
+
+	if (onlykey < 0x20 &&
+	    onlykey != C0_HT &&
+	    onlykey != C0_CR &&
+	    onlykey != C0_ESC) {
+		onlykey |= 0x40;
+		if (onlykey >= 'A' && onlykey <= 'Z')
+			onlykey |= 0x20;
+		key = onlykey | KEYC_CTRL | (key & KEYC_META);
+	}
+	return (key);
+}
+
 static void
 tmate_web_input_key(int pane_id, key_code key)
 {
 	struct client *c;
+	struct session *s;
+	key_code prefix, prefix2, normalized;
 
+	/* First, try to find a real SSH viewer client */
 	TAILQ_FOREACH(c, &clients, entry) {
 		if (c->session == NULL)
 			continue;
@@ -1188,7 +1271,7 @@ tmate_web_input_key(int pane_id, key_code key)
 
 		/* Inject through tmux key handler for binding support */
 		struct key_event *event = xcalloc(1, sizeof *event);
-		event->key = key;
+		event->key = web_input_normalize_key(key);
 		if (!server_client_handle_key(c, event)) {
 			free(event->buf);
 			free(event);
@@ -1196,7 +1279,51 @@ tmate_web_input_key(int pane_id, key_code key)
 		return;
 	}
 
-	/* No attached rw client — send raw key to host */
+	/*
+	 * No SSH viewer connected — handle prefix key state ourselves.
+	 * Normalize the raw key (C0 → letter|KEYC_CTRL) so it matches
+	 * the tmux option format used by prefix/prefix2.
+	 */
+	normalized = web_input_normalize_key(key);
+
+	s = RB_MIN(sessions, &sessions);
+	prefix = 'b' | KEYC_CTRL;  /* Default: Ctrl+B */
+	prefix2 = KEYC_NONE;
+	if (s != NULL) {
+		prefix = (key_code)options_get_number(s->options, "prefix");
+		prefix2 = (key_code)options_get_number(s->options, "prefix2");
+	}
+
+	tmate_debug("web input key: raw=0x%llx norm=0x%llx, prefix=0x%llx, "
+	    "in_prefix=%d, session=%s",
+	    (unsigned long long)key, (unsigned long long)normalized,
+	    (unsigned long long)prefix, web_input_in_prefix,
+	    s ? s->name : "none");
+
+	if (web_input_in_prefix) {
+		web_input_in_prefix = 0;
+
+		/* Second press of prefix sends the prefix key itself */
+		if (normalized == prefix || normalized == prefix2) {
+			tmate_client_pane_key(pane_id, key);
+			return;
+		}
+
+		/* Look up binding in prefix table; if no match,
+		 * pass the key through to the pane (like tmux does). */
+		if (!tmate_web_input_dispatch_binding(normalized))
+			tmate_client_pane_key(pane_id, key);
+		return;
+	}
+
+	/* Check if this key is the prefix */
+	if (normalized == prefix || normalized == prefix2) {
+		tmate_debug("web input: prefix key detected, entering prefix mode");
+		web_input_in_prefix = 1;
+		return;
+	}
+
+	/* Regular key — send to host */
 	tmate_client_pane_key(pane_id, key);
 }
 
