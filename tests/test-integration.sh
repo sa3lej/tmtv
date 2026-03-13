@@ -1807,6 +1807,49 @@ DEOF" 2>/dev/null
 			fail "web input: Ctrl+B X (kill-session) blocked" \
 				"sessions before=$SESS_BEFORE_KILL after=$SESS_AFTER_KILL"
 		fi
+
+		# Test 5: Prefix-leak bypass — Ctrl+B d then another 'd'.
+		# Before the deferred-prefix fix, the first Ctrl+B forwarded the
+		# prefix to the SSH client.  Blocking 'd' left the client in
+		# prefix mode, so the NEXT 'd' would detach the host.
+		SESS_BEFORE_LEAK=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | wc -l")
+		# Send Ctrl+B then d (should be blocked)
+		printf '\002' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		sleep 0.5
+		printf 'd' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		sleep 0.5
+		# Now send bare 'd' — if prefix leaked, this triggers detach
+		printf 'd' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		sleep 1
+		SESS_AFTER_LEAK=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | wc -l")
+		if [ "$SESS_AFTER_LEAK" -ge 1 ]; then
+			pass "web input: prefix-leak bypass (Ctrl+B d d) blocked"
+		else
+			fail "web input: prefix-leak bypass (Ctrl+B d d) blocked" \
+				"sessions before=$SESS_BEFORE_LEAK after=$SESS_AFTER_LEAK (prefix leaked to SSH client)"
+		fi
+
+		# Test 6: Rapid Ctrl+B d repeated 3x — stress the state machine
+		SESS_BEFORE_RAPID=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | wc -l")
+		for _rapid in 1 2 3; do
+			printf '\002' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+				--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+			sleep 0.3
+			printf 'd' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+				--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+			sleep 0.3
+		done
+		sleep 1
+		SESS_AFTER_RAPID=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | wc -l")
+		if [ "$SESS_AFTER_RAPID" -ge 1 ]; then
+			pass "web input: rapid Ctrl+B d x3 all blocked"
+		else
+			fail "web input: rapid Ctrl+B d x3 all blocked" \
+				"sessions before=$SESS_BEFORE_RAPID after=$SESS_AFTER_RAPID"
+		fi
 	else
 		skip "web input dangerous command tests" "could not find session token"
 	fi
