@@ -278,7 +278,7 @@ CONF"
 remote "TERM=xterm-256color \
 	nohup script -qc '$REMOTE_TMTV -f $REMOTE_CONF new-session -d -s main' \
 	/dev/null </dev/null >/dev/null 2>&1 &"
-sleep 4
+sleep 6
 
 # Verify session is running
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null" | grep -q "main"; then
@@ -333,10 +333,8 @@ fi
 # -------------------------------------------------------
 # Test: SSE endpoint responds (WEB RO basic)
 # -------------------------------------------------------
-# TOKEN was set above from readlink; if empty, try again
-if [ -z "$TOKEN" ]; then
-	TOKEN=$(remote "readlink $SESSIONS_DIR/$TESTID 2>/dev/null" || echo "")
-fi
+# Always re-read token — client may have reconnected and gotten a new one
+TOKEN=$(remote "readlink $SESSIONS_DIR/$TESTID 2>/dev/null" || echo "")
 
 if [ -n "$TOKEN" ]; then
 	# Test SSE endpoint returns event-stream content type
