@@ -310,6 +310,10 @@ else
         err "Failed to upload test-ttl-viewer.js"
         exit 5
     }
+    scp $SCP_OPTS "$REPO_ROOT/tests/test-ctrl-b.js" "${STAGING_TARGET}:/tmp/test-ctrl-b.js" || {
+        err "Failed to upload test-ctrl-b.js"
+        exit 5
+    }
 
     # Build test command
     TEST_FLAGS="--local"
