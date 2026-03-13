@@ -1127,23 +1127,23 @@ fi
 sleep 1
 
 # -------------------------------------------------------
-# Test: bare tmtv auto-attaches to existing session
+# Test: bare tmtv creates new session (matches tmux default behavior)
 # -------------------------------------------------------
 remote "TERM=xterm-256color $REMOTE_TMTV new -d -s existing1" 2>/dev/null
 sleep 2
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "existing1"; then
-	# Bare tmtv against existing server — should auto-attach (new-session -A)
+	# Bare tmtv against existing server — should create a new session, not attach
 	remote "timeout 2 env TERM=xterm-256color $REMOTE_TMTV" 2>/dev/null || true
 	sleep 1
-	# Session must still be alive (attach succeeded, not a second session error)
-	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "existing1"; then
-		pass "bare tmtv auto-attaches to existing session"
+	COUNT=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | wc -l)
+	if [ "$COUNT" -ge 2 ]; then
+		pass "bare tmtv creates new session (count=$COUNT)"
 	else
-		fail "bare tmtv auto-attaches to existing session" "session died"
+		fail "bare tmtv creates new session" "expected >= 2 sessions, got $COUNT"
 	fi
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 else
-	fail "bare tmtv auto-attaches to existing session" "could not create test session"
+	fail "bare tmtv creates new session" "could not create test session"
 fi
 sleep 1
 
