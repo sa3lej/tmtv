@@ -170,7 +170,7 @@ read_token() {
 		sleep 1
 	done
 	echo ""
-	return 1
+	return 0
 }
 
 # Wait for token to stabilize after an operation that may trigger reconnection
@@ -776,13 +776,31 @@ if [ -n "$TOKEN" ] && [ -n "$RW_TOKEN" ]; then
 	# and measure how long until it echoes back.
 	LATENCY_MARKER="LAT$$"
 	remote "cat > /tmp/tmtv-latency.exp << 'EXPECT'
-set timeout 10
+set timeout 15
 spawn ssh -o StrictHostKeyChecking=no -p TMTV_PORT TOKEN@127.0.0.1
-# Wait for session to render
-sleep 3
-# Send marker as a single burst (echo command + Enter)
+# Wait for the terminal to fully initialize.  The session has split
+# panes from earlier tests, so tmux sends a full screen redraw plus
+# escape sequences (extended keys mode, etc.).  We must consume ALL
+# of that before sending input, otherwise our keystroke interleaves
+# with terminal responses and gets dropped.
+#
+# Strategy: wait 4s, then send a harmless Enter to provoke a fresh
+# prompt, then expect that prompt before sending the real marker.
+sleep 4
+send \"\r\"
+expect {
+    timeout {
+        puts \"LATENCY_TIMEOUT\"
+        exit 1
+    }
+    -re {[$#] } {}
+}
+# Let any trailing escape sequences (e.g. extended keys mode
+# [?7727h) drain before sending input.
+sleep 2
+# Now the terminal is quiescent and we have a fresh prompt.
 set start_ms [clock milliseconds]
-send \"echo MARKER\r\"
+send -- \"echo MARKER\r\"
 # Wait for the marker to appear in output (echoed by shell)
 expect {
     timeout {
@@ -2307,6 +2325,220 @@ sleep 1
 # Measure actual round-trip latency for SSH and web input paths.
 # These tests create their own session and report wall-clock times.
 # They degrade gracefully — skip if tokens are unavailable.
+#
+# Baseline tests run first to measure plain tmux without tmtv relay overhead.
+
+# Helper: get current time in milliseconds (defined early for baseline tests).
+# Uses date +%s%N (nanoseconds) if available, falls back to seconds * 1000.
+_ms_now() {
+	_ns=$(date +%s%N 2>/dev/null) || _ns=""
+	if [ ${#_ns} -gt 10 ]; then
+		# date +%s%N works — convert nanoseconds to milliseconds
+		echo $((_ns / 1000000))
+	else
+		# Fallback: seconds * 1000 (1-second granularity)
+		echo $(($(date +%s) * 1000))
+	fi
+}
+
+# Initialize baseline result variables (used in report even if skipped)
+BASELINE_LOCAL_MIN=""
+BASELINE_LOCAL_AVG=""
+BASELINE_LOCAL_MAX=""
+BASELINE_SSH_MIN=""
+BASELINE_SSH_AVG=""
+BASELINE_SSH_MAX=""
+
+# -------------------------------------------------------
+# Baseline: tmux local keystroke echo latency
+# -------------------------------------------------------
+# Measures pure local tmux echo (no network, no relay).
+# This is the "cost of zero" — the floor for latency measurements.
+TMUX_BIN=$(remote "command -v tmux 2>/dev/null" || echo "")
+if [ -n "$TMUX_BIN" ]; then
+	# Start a plain tmux session on the staging server
+	remote "TERM=xterm-256color tmux new-session -d -s baseline_local_$TESTID" 2>/dev/null
+	sleep 2
+
+	# Verify session is running
+	_tmux_check=$(remote "tmux has-session -t baseline_local_$TESTID 2>&1" && echo "ok" || echo "")
+	if [ -n "$_tmux_check" ] || remote "tmux has-session -t baseline_local_$TESTID" 2>/dev/null; then
+		remote "cat > /tmp/tmtv-baseline-local.exp << 'EXPECT'
+set timeout 10
+spawn tmux attach-session -t BASELINE_SESS
+
+# Wait for shell prompt
+sleep 2
+
+set results {}
+for {set i 1} {\$i <= 5} {incr i} {
+    set marker \"TMLOC${i}_TESTID\"
+    set start_ms [clock milliseconds]
+    send \"echo \$marker\r\"
+    expect {
+        timeout {
+            lappend results -1
+            continue
+        }
+        \"\$marker\" {
+            set end_ms [clock milliseconds]
+            set elapsed [expr {\$end_ms - \$start_ms}]
+            lappend results \$elapsed
+        }
+    }
+    sleep 0.3
+}
+
+puts \"BASELINE_LOCAL_RESULTS=[join \$results ,]\"
+sleep 0.5
+send \"exit\r\"
+expect eof
+wait
+EXPECT
+sed -i \"s/BASELINE_SESS/baseline_local_$TESTID/;s/TESTID/$TESTID/\" /tmp/tmtv-baseline-local.exp"
+
+		BASELINE_LOCAL_OUT=$(remote "expect /tmp/tmtv-baseline-local.exp 2>/dev/null" || echo "")
+		remote "rm -f /tmp/tmtv-baseline-local.exp" 2>/dev/null || true
+
+		if echo "$BASELINE_LOCAL_OUT" | grep -q "BASELINE_LOCAL_RESULTS="; then
+			_bl_results=$(echo "$BASELINE_LOCAL_OUT" | grep "BASELINE_LOCAL_RESULTS=" | sed 's/.*BASELINE_LOCAL_RESULTS=//' | tr -d ' \r')
+			_bl_min=999999
+			_bl_max=0
+			_bl_sum=0
+			_bl_count=0
+			_bl_timeouts=0
+			_saved_ifs="$IFS"
+			IFS=","
+			for _val in $_bl_results; do
+				if [ "$_val" = "-1" ]; then
+					_bl_timeouts=$((_bl_timeouts + 1))
+				else
+					_bl_count=$((_bl_count + 1))
+					_bl_sum=$((_bl_sum + _val))
+					[ "$_val" -lt "$_bl_min" ] 2>/dev/null && _bl_min=$_val
+					[ "$_val" -gt "$_bl_max" ] 2>/dev/null && _bl_max=$_val
+				fi
+			done
+			IFS="$_saved_ifs"
+
+			if [ "$_bl_count" -gt 0 ]; then
+				_bl_avg=$((_bl_sum / _bl_count))
+				BASELINE_LOCAL_MIN=$_bl_min
+				BASELINE_LOCAL_AVG=$_bl_avg
+				BASELINE_LOCAL_MAX=$_bl_max
+				pass "tmux baseline local echo (min=${_bl_min}ms avg=${_bl_avg}ms max=${_bl_max}ms, n=${_bl_count})"
+			else
+				fail "tmux baseline local echo" "all 5 keystrokes timed out"
+			fi
+		else
+			fail "tmux baseline local echo" "expect script produced no results"
+		fi
+	else
+		skip "tmux baseline local echo (session failed to start)"
+	fi
+
+	# Clean up the local baseline session
+	remote "tmux kill-session -t baseline_local_$TESTID" 2>/dev/null || true
+else
+	skip "tmux baseline local echo (tmux not found)"
+fi
+
+# -------------------------------------------------------
+# Baseline: tmux SSH echo latency
+# -------------------------------------------------------
+# Measures tmux echo over SSH to localhost (no tmtv relay).
+# Isolates the SSH transport cost from the tmtv relay overhead.
+if [ -n "$TMUX_BIN" ]; then
+	# Start a plain tmux session on the staging server
+	remote "TERM=xterm-256color tmux new-session -d -s baseline_ssh_$TESTID" 2>/dev/null
+	sleep 2
+
+	if remote "tmux has-session -t baseline_ssh_$TESTID" 2>/dev/null; then
+		remote "cat > /tmp/tmtv-baseline-ssh.exp << 'EXPECT'
+set timeout 10
+spawn ssh -o StrictHostKeyChecking=no localhost
+
+# Wait for login shell
+sleep 2
+
+# Attach to the tmux session over SSH
+send \"tmux attach-session -t BASELINE_SESS\r\"
+sleep 2
+
+set results {}
+for {set i 1} {\$i <= 5} {incr i} {
+    set marker \"TMSSH${i}_TESTID\"
+    set start_ms [clock milliseconds]
+    send \"echo \$marker\r\"
+    expect {
+        timeout {
+            lappend results -1
+            continue
+        }
+        \"\$marker\" {
+            set end_ms [clock milliseconds]
+            set elapsed [expr {\$end_ms - \$start_ms}]
+            lappend results \$elapsed
+        }
+    }
+    sleep 0.3
+}
+
+puts \"BASELINE_SSH_RESULTS=[join \$results ,]\"
+sleep 0.5
+send \"exit\r\"
+sleep 0.5
+send \"exit\r\"
+expect eof
+wait
+EXPECT
+sed -i \"s/BASELINE_SESS/baseline_ssh_$TESTID/;s/TESTID/$TESTID/\" /tmp/tmtv-baseline-ssh.exp"
+
+		BASELINE_SSH_OUT=$(remote "expect /tmp/tmtv-baseline-ssh.exp 2>/dev/null" || echo "")
+		remote "rm -f /tmp/tmtv-baseline-ssh.exp" 2>/dev/null || true
+
+		if echo "$BASELINE_SSH_OUT" | grep -q "BASELINE_SSH_RESULTS="; then
+			_bs_results=$(echo "$BASELINE_SSH_OUT" | grep "BASELINE_SSH_RESULTS=" | sed 's/.*BASELINE_SSH_RESULTS=//' | tr -d ' \r')
+			_bs_min=999999
+			_bs_max=0
+			_bs_sum=0
+			_bs_count=0
+			_bs_timeouts=0
+			_saved_ifs="$IFS"
+			IFS=","
+			for _val in $_bs_results; do
+				if [ "$_val" = "-1" ]; then
+					_bs_timeouts=$((_bs_timeouts + 1))
+				else
+					_bs_count=$((_bs_count + 1))
+					_bs_sum=$((_bs_sum + _val))
+					[ "$_val" -lt "$_bs_min" ] 2>/dev/null && _bs_min=$_val
+					[ "$_val" -gt "$_bs_max" ] 2>/dev/null && _bs_max=$_val
+				fi
+			done
+			IFS="$_saved_ifs"
+
+			if [ "$_bs_count" -gt 0 ]; then
+				_bs_avg=$((_bs_sum / _bs_count))
+				BASELINE_SSH_MIN=$_bs_min
+				BASELINE_SSH_AVG=$_bs_avg
+				BASELINE_SSH_MAX=$_bs_max
+				pass "tmux baseline SSH echo (min=${_bs_min}ms avg=${_bs_avg}ms max=${_bs_max}ms, n=${_bs_count})"
+			else
+				fail "tmux baseline SSH echo" "all 5 keystrokes timed out"
+			fi
+		else
+			fail "tmux baseline SSH echo" "expect script produced no results"
+		fi
+	else
+		skip "tmux baseline SSH echo (session failed to start)"
+	fi
+
+	# Clean up the SSH baseline session
+	remote "tmux kill-session -t baseline_ssh_$TESTID" 2>/dev/null || true
+else
+	skip "tmux baseline SSH echo (tmux not found)"
+fi
 
 BENCH_CONF="/tmp/.tmtv-test-bench-$TESTID.conf"
 BENCH_SESSNAME="bench$TESTID"
@@ -2344,19 +2576,6 @@ for _wait in $(seq 1 20); do
 done
 
 BENCH_RW_TOKEN=$(read_rw_token_stable "$BENCH_SESSNAME")
-
-# Helper: get current time in milliseconds.
-# Uses date +%s%N (nanoseconds) if available, falls back to seconds * 1000.
-_ms_now() {
-	_ns=$(date +%s%N 2>/dev/null) || _ns=""
-	if [ ${#_ns} -gt 10 ]; then
-		# date +%s%N works — convert nanoseconds to milliseconds
-		echo $((_ns / 1000000))
-	else
-		# Fallback: seconds * 1000 (1-second granularity)
-		echo $(($(date +%s) * 1000))
-	fi
-}
 
 # -------------------------------------------------------
 # Test: Web input round-trip latency — single marker
@@ -2549,6 +2768,14 @@ fi
 
 # --- Latency report summary ---
 # Write a machine-readable report so agents can read and report results.
+# Includes baseline measurements and calculated overhead.
+
+# Calculate SSH overhead (tmtv avg - tmux SSH avg) if both are available
+SSH_OVERHEAD=""
+if [ -n "$BASELINE_SSH_AVG" ] && [ -n "$_avg" ]; then
+	SSH_OVERHEAD=$((_avg - BASELINE_SSH_AVG))
+fi
+
 LATENCY_REPORT="/tmp/tmtv-latency-report.txt"
 {
 	echo "=== tmtv latency report ==="
@@ -2556,18 +2783,60 @@ LATENCY_REPORT="/tmp/tmtv-latency-report.txt"
 	echo "host: ${TEST_HOST:-unknown}"
 	echo "testid: $TESTID"
 	echo ""
-	echo "web_roundtrip_ms: ${_web_lat:-n/a}"
+	echo "--- baseline (plain tmux) ---"
+	echo "tmux_local_min_ms: ${BASELINE_LOCAL_MIN:-n/a}"
+	echo "tmux_local_avg_ms: ${BASELINE_LOCAL_AVG:-n/a}"
+	echo "tmux_local_max_ms: ${BASELINE_LOCAL_MAX:-n/a}"
+	echo "tmux_ssh_min_ms: ${BASELINE_SSH_MIN:-n/a}"
+	echo "tmux_ssh_avg_ms: ${BASELINE_SSH_AVG:-n/a}"
+	echo "tmux_ssh_max_ms: ${BASELINE_SSH_MAX:-n/a}"
+	echo ""
+	echo "--- tmtv measurements ---"
 	echo "ssh_min_ms: ${_min:-n/a}"
 	echo "ssh_avg_ms: ${_avg:-n/a}"
 	echo "ssh_max_ms: ${_max:-n/a}"
 	echo "ssh_samples: ${_count:-0}"
 	echo "ssh_timeouts: ${_timeouts:-0}"
+	echo "web_roundtrip_ms: ${_web_lat:-n/a}"
 	echo "web_burst_total_ms: ${_burst_total:-n/a}"
 	echo "web_burst_per_char_ms: ${_burst_per_char:-n/a}"
 	echo "web_burst_chars: 10"
+	echo ""
+	echo "--- overhead (tmtv - baseline) ---"
+	echo "ssh_overhead_ms: ${SSH_OVERHEAD:-n/a}"
 } > "$LATENCY_REPORT" 2>/dev/null || true
 echo ""
 echo "  ** Latency report written to $LATENCY_REPORT **"
+echo ""
+
+# Print human-readable comparison table
+_fmt_val() {
+	if [ -n "$1" ] && [ "$1" != "n/a" ]; then
+		printf '%5sms' "$1"
+	else
+		printf '  n/a  '
+	fi
+}
+_fmt_overhead() {
+	if [ -n "$1" ] && [ "$1" != "n/a" ]; then
+		printf ' +%sms' "$1"
+	else
+		printf '  n/a  '
+	fi
+}
+
+echo "  +-------------------------+----------+----------+----------+"
+echo "  | Measurement             | tmux     | tmtv     | overhead |"
+echo "  +-------------------------+----------+----------+----------+"
+printf "  | Local echo (avg)        | %7s  | %7s  | %7s  |\n" \
+	"$(_fmt_val "$BASELINE_LOCAL_AVG")" "n/a" "n/a"
+printf "  | SSH echo (avg)          | %7s  | %7s  | %7s  |\n" \
+	"$(_fmt_val "$BASELINE_SSH_AVG")" "$(_fmt_val "$_avg")" "$(_fmt_overhead "$SSH_OVERHEAD")"
+printf "  | Web input round-trip    | %7s  | %7s  | %7s  |\n" \
+	"n/a" "$(_fmt_val "$_web_lat")" "n/a"
+printf "  | Web burst (per char)    | %7s  | %7s  | %7s  |\n" \
+	"n/a" "$(_fmt_val "$_burst_per_char")" "n/a"
+echo "  +-------------------------+----------+----------+----------+"
 echo ""
 
 # Clean up benchmark session
