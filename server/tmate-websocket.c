@@ -1056,6 +1056,9 @@ static void ws_client_free(struct ws_client *wc)
 	struct tmate_session *session = wc->session;
 	bool was_connected = wc->handshake_done;
 
+	if (was_connected && session->input_mode_enabled && wc->viewer_id > 0)
+		tmate_send_user_leave(session, wc->viewer_id);
+
 	tmate_info("SSE client disconnected");
 	TAILQ_REMOVE(&session->ws_clients, wc, entry);
 	if (wc->bev)
@@ -1373,6 +1376,15 @@ tmate_web_input_key(int pane_id, key_code key)
 	key_code prefix, prefix2, normalized;
 	int have_ssh_client;
 
+	if (tmate_session->input_mode_enabled) {
+		/* Send per-user input event to host client.
+		 * Web viewer ID 0 for now (TODO: track per-request). */
+		int web_id = 0;
+		tmate_send_user_input(tmate_session, web_id, pane_id, key);
+		if (!tmate_session->input_mirror)
+			return;
+	}
+
 	/*
 	 * Normalize early — both paths need this for prefix detection
 	 * and binding lookup.
@@ -1608,6 +1620,8 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		tmate_info("SSE client connected (%s)",
 			   wc->readonly ? "RO" : "RW");
 
+		wc->viewer_id = ++wc->session->next_viewer_id;
+
 		/* Send session mode so browser knows RW/RO and input status */
 		sse_send_session_mode(wc->bev, wc->readonly,
 				      wc->session->web_input_enabled);
@@ -1619,6 +1633,11 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		sse_send_current_status(wc->bev);
 		/* Broadcast updated viewer counts to all clients */
 		tmate_broadcast_viewer_count(wc->session);
+		if (wc->session->input_mode_enabled) {
+			tmate_send_user_join(wc->session, wc->viewer_id,
+					     wc->readonly ? "web-ro" : "web",
+					     wc->readonly, "web");
+		}
 		return;
 	}
 
@@ -1989,6 +2008,13 @@ void tmate_notify_client_join(__unused struct tmate_session *session,
 	pack(boolean, c->readonly);
 
 	tmate_broadcast_viewer_count(session);
+
+	if (session->input_mode_enabled) {
+		char name[64];
+		snprintf(name, sizeof(name), "ssh-%d", c->pid);
+		tmate_send_user_join(session, c->pid, name,
+				     c->readonly, "ssh");
+	}
 }
 
 void tmate_notify_client_left(__unused struct tmate_session *session,
@@ -2006,6 +2032,9 @@ void tmate_notify_client_left(__unused struct tmate_session *session,
 		return;
 
 	c->flags &= ~CLIENT_TMATE_NOTIFIED_JOIN;
+
+	if (session->input_mode_enabled)
+		tmate_send_user_leave(session, c->pid);
 
 	pack(array, 2);
 	pack(int, TMATE_CTL_CLIENT_LEFT);

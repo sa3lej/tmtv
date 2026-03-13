@@ -105,6 +105,64 @@ TEST(encoder_struct)
 	ASSERT(enc.ev_active == false);
 }
 
+/* Verify input socket struct fields exist */
+TEST(input_socket_fields)
+{
+	struct tmate_session s;
+	memset(&s, 0, sizeof(s));
+
+	s.input_mode_enabled = true;
+	s.input_mirror = true;
+	s.next_viewer_id = 42;
+
+	ASSERT(s.input_mode_enabled == true);
+	ASSERT(s.input_mirror == true);
+	ASSERT(s.next_viewer_id == 42);
+
+	/* Default zero-init should give disabled, mirror=false, id=0 */
+	memset(&s, 0, sizeof(s));
+	ASSERT(s.input_mode_enabled == false);
+	ASSERT(s.input_mirror == false);
+	ASSERT(s.next_viewer_id == 0);
+}
+
+/* Verify ws_client has viewer_id field */
+TEST(ws_client_viewer_id)
+{
+	struct ws_client wc;
+	memset(&wc, 0, sizeof(wc));
+
+	wc.viewer_id = 7;
+	ASSERT(wc.viewer_id == 7);
+
+	memset(&wc, 0, sizeof(wc));
+	ASSERT(wc.viewer_id == 0);
+}
+
+/* Verify input socket protocol constants */
+TEST(input_socket_protocol_constants)
+{
+	/* OUT messages (host -> server) must be at the end of the enum */
+	ASSERT(TMATE_OUT_INPUT_MODE > TMATE_OUT_SESSION_MODE);
+
+	/* IN messages (server -> host) must be at the end of the enum */
+	ASSERT(TMATE_IN_USER_JOIN > TMATE_IN_EXEC_CMD);
+	ASSERT(TMATE_IN_USER_LEAVE > TMATE_IN_USER_JOIN);
+	ASSERT(TMATE_IN_USER_INPUT > TMATE_IN_USER_LEAVE);
+
+	/* Existing constants must be unchanged (protocol compatibility) */
+	ASSERT(TMATE_OUT_HEADER == 0);
+	ASSERT(TMATE_OUT_VIEWER_COUNT == 14);
+	ASSERT(TMATE_OUT_SESSION_MODE == 15);
+	ASSERT(TMATE_OUT_INPUT_MODE == 16);
+
+	ASSERT(TMATE_IN_NOTIFY == 0);
+	ASSERT(TMATE_IN_EXEC_CMD == 7);
+	ASSERT(TMATE_IN_USER_JOIN == 8);
+	ASSERT(TMATE_IN_USER_LEAVE == 9);
+	ASSERT(TMATE_IN_USER_INPUT == 10);
+}
+
 int main(void)
 {
 	TEST_SUITE_BEGIN("Server header compatibility (tmux 3.6a)");
@@ -114,6 +172,9 @@ int main(void)
 	RUN_TEST(ssh_client_struct);
 	RUN_TEST(protocol_constants);
 	RUN_TEST(encoder_struct);
+	RUN_TEST(input_socket_fields);
+	RUN_TEST(ws_client_viewer_id);
+	RUN_TEST(input_socket_protocol_constants);
 
 	TEST_SUITE_END();
 }

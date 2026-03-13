@@ -1794,7 +1794,83 @@ DEOF" 2>/dev/null
 				"windows before=$WIN_BEFORE after=$WIN_AFTER"
 		fi
 
-		# Test 4: Ctrl+B : kill-session (kill-session is also blocked)
+		# Test 4: Window switching via web input
+		# Create two more windows (total 3), then switch between them
+		# using Ctrl+B 0/1/2.  Also verify the status bar updates.
+		# First, create window 2 via Ctrl+B c
+		printf '\002' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		sleep 0.5
+		printf 'c' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		wait_for 5 1 "second new window created" \
+			"test \"\$(remote_tmtv 'list-windows -t main' 2>/dev/null | wc -l)\" -ge 3"
+		WIN_TOTAL=$(remote_tmtv "list-windows -t main" 2>/dev/null | wc -l)
+		if [ "$WIN_TOTAL" -ge 3 ]; then
+			pass "web input: created 3 windows via Ctrl+B c"
+		else
+			fail "web input: created 3 windows via Ctrl+B c" \
+				"expected >=3, got $WIN_TOTAL"
+		fi
+
+		# Switch to window 0 via Ctrl+B 0
+		printf '\002' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		sleep 0.5
+		printf '0' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		sleep 1
+		CUR_WIN=$(remote_tmtv "display-message -p -t main '#{window_index}'" 2>/dev/null || echo "")
+		if [ "$CUR_WIN" = "0" ]; then
+			pass "web input: Ctrl+B 0 switches to window 0"
+		else
+			fail "web input: Ctrl+B 0 switches to window 0" \
+				"current window=$CUR_WIN (expected 0)"
+		fi
+
+		# Switch to window 1 via Ctrl+B 1
+		printf '\002' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		sleep 0.5
+		printf '1' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		sleep 1
+		CUR_WIN=$(remote_tmtv "display-message -p -t main '#{window_index}'" 2>/dev/null || echo "")
+		if [ "$CUR_WIN" = "1" ]; then
+			pass "web input: Ctrl+B 1 switches to window 1"
+		else
+			fail "web input: Ctrl+B 1 switches to window 1" \
+				"current window=$CUR_WIN (expected 1)"
+		fi
+
+		# Switch to window 2 via Ctrl+B 2
+		printf '\002' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		sleep 0.5
+		printf '2' | curl -s -m 3 -X POST -H "Content-Type: text/plain" -H "X-Tmtv-Input: 1" \
+			--data-binary @- "$SSE_BASE/$DETACH_TOKEN/input" >/dev/null 2>&1
+		sleep 1
+		CUR_WIN=$(remote_tmtv "display-message -p -t main '#{window_index}'" 2>/dev/null || echo "")
+		if [ "$CUR_WIN" = "2" ]; then
+			pass "web input: Ctrl+B 2 switches to window 2"
+		else
+			fail "web input: Ctrl+B 2 switches to window 2" \
+				"current window=$CUR_WIN (expected 2)"
+		fi
+
+		# Verify status bar reflects the current window
+		# The status bar should contain the window list with an asterisk
+		# on the active window.  Check via list-windows format.
+		STATUS_WINS=$(remote_tmtv "list-windows -t main -F '#{window_index}:#{window_active}'" 2>/dev/null || echo "")
+		ACTIVE_WIN=$(echo "$STATUS_WINS" | grep ':1$' | cut -d: -f1)
+		if [ "$ACTIVE_WIN" = "2" ]; then
+			pass "web input: status bar shows window 2 as active"
+		else
+			fail "web input: status bar shows window 2 as active" \
+				"active=$ACTIVE_WIN status=$STATUS_WINS"
+		fi
+
+		# Test 5: Ctrl+B : kill-session (kill-session is also blocked)
 		# Bind a custom key to kill-session, then try it from web input
 		remote_tmtv "bind-key X kill-session" 2>/dev/null || true
 		SESS_BEFORE_KILL=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | wc -l")

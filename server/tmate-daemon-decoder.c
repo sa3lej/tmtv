@@ -723,6 +723,43 @@ static void tmate_snapshot(__unused struct tmate_session *session,
 	 */
 }
 
+static void tmate_input_mode(struct tmate_session *session,
+			     struct tmate_unpacker *uk)
+{
+	bool enabled = unpack_bool(uk);
+	bool mirror = unpack_bool(uk);
+
+	session->input_mode_enabled = enabled;
+	session->input_mirror = mirror;
+
+	tmate_info("Input mode: enabled=%d mirror=%d", enabled, mirror);
+
+	if (enabled) {
+		/* Send current viewer list to host */
+		struct client *c;
+		TAILQ_FOREACH(c, &clients, entry) {
+			if (!(c->flags & CLIENT_IDENTIFIED))
+				continue;
+			char name[64];
+			snprintf(name, sizeof(name), "ssh-%d", c->pid);
+			tmate_send_user_join(session, c->pid, name,
+					     c->readonly, "ssh");
+		}
+
+		if (tmate_has_websocket()) {
+			struct ws_client *wc;
+			TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+				if (wc->handshake_done && !wc->is_post &&
+				    wc->viewer_id > 0)
+					tmate_send_user_join(session,
+							     wc->viewer_id,
+							     wc->readonly ? "web-ro" : "web",
+							     wc->readonly, "web");
+			}
+		}
+	}
+}
+
 void tmate_dispatch_daemon_message(struct tmate_session *session,
 				   struct tmate_unpacker *uk)
 {
@@ -747,6 +784,7 @@ void tmate_dispatch_daemon_message(struct tmate_session *session,
 	dispatch(TMATE_OUT_SNAPSHOT,		tmate_snapshot);
 	dispatch(TMATE_OUT_EXEC_CMD,		tmate_exec_cmd);
 	dispatch(TMATE_OUT_UNAME,		tmate_uname);
+	dispatch(TMATE_OUT_INPUT_MODE,		tmate_input_mode);
 	default: tmate_fatal("Bad message type: %d", cmd);
 	}
 }

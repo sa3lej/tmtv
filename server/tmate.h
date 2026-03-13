@@ -120,6 +120,18 @@ extern void tmate_format(struct format_tree *ft);
 extern void tmate_send_client_ready(void);
 extern void tmate_send_mc_obj(msgpack_object *obj);
 
+/* tmate-daemon-encoder.c — input socket interception */
+extern int tmate_intercept_input_key(int pid, key_code key);
+
+/* tmate-daemon-encoder.c — input socket events */
+extern void tmate_send_user_join(struct tmate_session *session,
+				 int user_id, const char *name,
+				 bool readonly, const char *type);
+extern void tmate_send_user_leave(struct tmate_session *session,
+				  int user_id);
+extern void tmate_send_user_input(struct tmate_session *session,
+				  int user_id, int pane_id, key_code key);
+
 /* tmate-daemon-legacy.c */
 
 extern void tmate_translate_legacy_key(int pane_id, key_code key);
@@ -239,6 +251,7 @@ struct ws_client {
 	bool handshake_done;
 	bool readonly;        /* true if connected via RO token */
 	bool is_post;         /* true if this is a POST /input request */
+	int viewer_id;        /* unique ID for input socket events */
 	TAILQ_ENTRY(ws_client) entry;
 };
 
@@ -279,6 +292,11 @@ struct tmate_session {
 	time_t post_rate_window;  /* start of current rate-limit window */
 	int post_rate_count;      /* POST requests in current window */
 	bool urls_sent;           /* true after initial URLs sent in tmate_ready */
+
+	/* input socket state */
+	bool input_mode_enabled;     /* host requested per-user input events */
+	bool input_mirror;           /* keys go to both PTY and socket (default: true) */
+	int next_viewer_id;          /* monotonic counter for viewer IDs */
 
 	/* idle / lifetime timeout (daemon role) */
 	time_t last_pty_activity; /* time of last PTY data from host client */

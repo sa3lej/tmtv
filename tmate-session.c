@@ -141,11 +141,16 @@ static void __tmate_session_init(struct tmate_session *session,
 
 	TAILQ_INIT(&session->clients);
 	TAILQ_INIT(&session->env);
+
+	/* Create input socket early so TMTV_INPUT_SOCKET is in the env */
+	tmtv_input_socket_create();
+	tmtv_input_socket_start(base);
 }
 
 void tmate_session_init(struct event_base *base)
 {
 	__tmate_session_init(&tmate_session, base);
+	atexit(tmtv_input_socket_cleanup);
 	tmate_write_header(&tmate_session);
 }
 

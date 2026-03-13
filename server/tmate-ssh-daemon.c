@@ -88,6 +88,11 @@ static void tmate_daemon_init(struct tmate_session *session)
 	tmate_encoder_init(&session->daemon_encoder, on_daemon_encoder_write, session);
 	tmate_decoder_init(&session->daemon_decoder, on_daemon_decoder_read, session);
 
+	/* Input socket defaults: disabled, mirror on (keys go to both PTY and socket) */
+	session->input_mode_enabled = false;
+	session->input_mirror = true;
+	session->next_viewer_id = 0;
+
 	tmate_init_websocket(session);
 }
 
