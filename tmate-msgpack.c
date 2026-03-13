@@ -33,6 +33,17 @@ static int on_encoder_write(void *userdata, const char *buf, size_t len)
 			    buflen - ENCODER_BUFFER_MAX);
 	}
 
+	/*
+	 * Flush immediately when a callback is registered.
+	 * The old code used event_active() which deferred the write
+	 * to the next event loop iteration, adding milliseconds of
+	 * latency to every keystroke and PTY output delivery.
+	 */
+	if (encoder->ready_callback) {
+		encoder->ready_callback(encoder->userdata, encoder->buffer);
+		return 0;
+	}
+
 	if (!encoder->ev_active) {
 		event_active(encoder->ev_buffer, EV_READ, 0);
 		encoder->ev_active = true;

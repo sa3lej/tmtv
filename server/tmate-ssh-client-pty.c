@@ -1,5 +1,6 @@
 #include <libssh/server.h>
 #include <errno.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -30,17 +31,29 @@ static int on_ssh_channel_read(__unused ssh_session _session,
 		return total_len;
 	}
 
-	setblocking(session->pty, 1);
+	/*
+	 * Write to PTY in non-blocking mode. Avoids two fcntl() syscalls
+	 * per keystroke that the old setblocking(1)/setblocking(0) pattern
+	 * incurred. EAGAIN is retried with a short poll() to avoid spinning.
+	 */
 	while (total_len) {
 		len = write(session->pty, data, total_len);
-		if (len < 0)
+		if (len < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				struct pollfd pfd = {
+					.fd = session->pty,
+					.events = POLLOUT
+				};
+				poll(&pfd, 1, 100);
+				continue;
+			}
 			tmate_fatal("Error writing to pty");
+		}
 
 		total_len -= len;
 		written += len;
 		data += len;
 	}
-	setblocking(session->pty, 0);
 
 	return written;
 }
