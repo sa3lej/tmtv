@@ -316,7 +316,14 @@ void tmate_decoder_get_buffer(struct tmate_decoder *decoder,
 			      char **buf, size_t *len)
 {
 	if (msgpack_unpacker_message_size(&decoder->unpacker) > TMATE_MAX_MESSAGE_SIZE) {
-		tmate_fatal("Incoming message is too large");
+		tmate_info("Oversized message (%zu bytes, limit %d) — discarding",
+			   msgpack_unpacker_message_size(&decoder->unpacker),
+			   TMATE_MAX_MESSAGE_SIZE);
+		msgpack_unpacker_reset(&decoder->unpacker);
+		msgpack_unpacker_reserve_buffer(&decoder->unpacker,
+						UNPACKER_RESERVE_SIZE);
+		*buf = msgpack_unpacker_buffer(&decoder->unpacker);
+		*len = msgpack_unpacker_buffer_capacity(&decoder->unpacker);
 		return;
 	}
 
