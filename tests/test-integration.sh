@@ -531,8 +531,16 @@ fi
 # -------------------------------------------------------
 # Test: SSH RW — connect, type, verify text appears
 # -------------------------------------------------------
+TOKEN=$(read_token "$TESTID")
 if [ -n "$TOKEN" ]; then
-	RW_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" | grep -E "^[0-9]+-$TESTID$" | head -1 || echo "")
+	# Look up RW token with retry (format: PID-TESTID)
+	RW_TOKEN=""
+	_rw_try=0
+	while [ "$_rw_try" -lt 5 ] && [ -z "$RW_TOKEN" ]; do
+		RW_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" | grep -E "^[0-9]+-$TESTID$" | head -1 || echo "")
+		[ -z "$RW_TOKEN" ] && sleep 1
+		_rw_try=$((_rw_try + 1))
+	done
 
 	if [ -n "$RW_TOKEN" ]; then
 		# First go back to pane 0 for a clean slate
@@ -585,6 +593,13 @@ fi
 # -------------------------------------------------------
 # Test: SSH RW — create pane via tmux split-window command
 # -------------------------------------------------------
+# Re-read RW token in case client reconnected
+_rw_try=0; RW_TOKEN=""
+while [ "$_rw_try" -lt 5 ] && [ -z "$RW_TOKEN" ]; do
+	RW_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" | grep -E "^[0-9]+-$TESTID$" | head -1 || echo "")
+	[ -z "$RW_TOKEN" ] && sleep 1
+	_rw_try=$((_rw_try + 1))
+done
 if [ -n "$RW_TOKEN" ]; then
 	# Record pane count before
 	PANES_BEFORE=$(remote_tmtv "list-panes -t main" 2>/dev/null | wc -l)
@@ -629,6 +644,7 @@ rm -f /tmp/tmtv-split.exp"
 	fi
 
 	# Verify SSE still delivers data after pane operations
+	TOKEN=$(read_token "$TESTID")
 	if [ -n "$TOKEN" ]; then
 		SSE_AFTER=$(curl -s -m 3 "$SSE_BASE/$TOKEN" \
 			2>/dev/null || echo "")
@@ -772,6 +788,7 @@ if [ -n "$TOKEN" ]; then
 
 	# Verify W:N in status bar reflects actual web viewers.
 	# Connect an SSE client, then check W via format variable.
+	TOKEN=$(read_token "$TESTID")
 	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
 	WEB_CURL_PID=$!
 	sleep 3
@@ -885,6 +902,7 @@ fi
 # -------------------------------------------------------
 # Test: Terminal resize propagates to SSE
 # -------------------------------------------------------
+TOKEN=$(read_token "$TESTID")
 if [ -n "$TOKEN" ]; then
 	# Resize the terminal to 100x30
 	remote_tmtv "resize-window -t main -x 100 -y 30"
@@ -921,6 +939,7 @@ fi
 # -------------------------------------------------------
 # Test: Multi-window SSE — switch window, SSE still streams
 # -------------------------------------------------------
+TOKEN=$(read_token "$TESTID")
 if [ -n "$TOKEN" ]; then
 	# We already have window 0 and testwin from earlier tests
 	remote_tmtv "select-window -t main:testwin"
@@ -959,6 +978,7 @@ fi
 # -------------------------------------------------------
 # Test: SSE reconnect — new client gets screen dump
 # -------------------------------------------------------
+TOKEN=$(read_token "$TESTID")
 if [ -n "$TOKEN" ]; then
 	# Put a unique marker on screen
 	RECONNECT_MARKER="RECONN_$$"
