@@ -642,6 +642,39 @@ static void sse_send_session_mode(struct bufferevent *bev,
 	msgpack_sbuffer_destroy(&sbuf);
 }
 
+/*
+ * Send the current status bar to a newly connected SSE client.
+ * Without this, the client only receives OUT_STATUS when the next
+ * timer tick sends a changed status — which may never come if the
+ * values haven't changed since the last broadcast.
+ */
+static void sse_send_current_status(struct bufferevent *bev)
+{
+	msgpack_sbuffer sbuf;
+	msgpack_packer pk;
+	const char *left = tmate_left_status ? tmate_left_status : "";
+	const char *right = tmate_right_status ? tmate_right_status : "";
+
+	if (!tmate_left_status && !tmate_right_status)
+		return;
+
+	msgpack_sbuffer_init(&sbuf);
+	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+
+	msgpack_pack_array(&pk, 3);
+	msgpack_pack_int(&pk, TMATE_OUT_STATUS);
+	msgpack_pack_str(&pk, strlen(left));
+	msgpack_pack_str_body(&pk, left, strlen(left));
+	msgpack_pack_str(&pk, strlen(right));
+	msgpack_pack_str_body(&pk, right, strlen(right));
+
+	sse_send_data(bev, (unsigned char *)sbuf.data, sbuf.size);
+	msgpack_sbuffer_destroy(&sbuf);
+}
+
 static int sse_do_handshake(struct ws_client *wc)
 {
 	struct evbuffer *input = bufferevent_get_input(wc->bev);
@@ -1323,6 +1356,8 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		sse_send_sync_layout(wc->bev);
 		/* Send current screen state from tmux grid */
 		sse_send_screen_dump(wc->bev);
+		/* Send current status bar so web viewers see it immediately */
+		sse_send_current_status(wc->bev);
 		/* Broadcast updated viewer counts to all clients */
 		tmate_broadcast_viewer_count(wc->session);
 		return;
