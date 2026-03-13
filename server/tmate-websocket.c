@@ -1171,7 +1171,7 @@ void tmate_send_fin_to_ws_clients(struct tmate_session *session)
  */
 static int web_input_in_prefix;
 
-static void
+static int
 tmate_web_input_dispatch_binding(key_code key)
 {
 	struct key_table	*table;
@@ -1180,7 +1180,7 @@ tmate_web_input_dispatch_binding(key_code key)
 	table = key_bindings_get_table("prefix", 0);
 	if (table == NULL) {
 		tmate_debug("web prefix: no prefix table found");
-		return;
+		return (0);
 	}
 
 	bd = key_bindings_get(table, key & KEYC_MASK_KEY);
@@ -1188,7 +1188,7 @@ tmate_web_input_dispatch_binding(key_code key)
 		tmate_debug("web prefix: no binding for key 0x%llx "
 		    "(masked 0x%llx)", (unsigned long long)key,
 		    (unsigned long long)(key & KEYC_MASK_KEY));
-		return;
+		return (0);
 	}
 
 	tmate_debug("web prefix: found binding for key 0x%llx, dispatching",
@@ -1206,6 +1206,7 @@ tmate_web_input_dispatch_binding(key_code key)
 		tmate_client_cmd(-1, cmd);
 		cmd = cmd_list_next(cmd);
 	}
+	return (1);
 }
 
 /*
@@ -1308,8 +1309,10 @@ tmate_web_input_key(int pane_id, key_code key)
 			return;
 		}
 
-		/* Look up binding in prefix table */
-		tmate_web_input_dispatch_binding(normalized);
+		/* Look up binding in prefix table; if no match,
+		 * pass the key through to the pane (like tmux does). */
+		if (!tmate_web_input_dispatch_binding(normalized))
+			tmate_client_pane_key(pane_id, key);
 		return;
 	}
 
