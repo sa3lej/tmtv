@@ -316,13 +316,14 @@
   var everConnected = false;
   var sessionReadonly = true;     /* assume RO until server says otherwise */
   var webInputEnabled = false;
-  var inputBatchTimer = null;
+  var inputInFlight = false;
   var inputBatch = '';
 
-  function sendInputBatch() {
+  function flushInput() {
     if (!inputBatch) return;
     var data = inputBatch;
     inputBatch = '';
+    inputInFlight = true;
     var url = buildSseUrl().replace(/\?.*$/, '') + '/input';
     var pw = sessionPassword;
     if (pw) url += '?password=' + encodeURIComponent(pw);
@@ -330,17 +331,19 @@
       method: 'POST',
       body: data,
       headers: { 'Content-Type': 'text/plain', 'X-Tmtv-Input': '1' }
-    }).catch(function() {});
+    }).then(function() {
+      inputInFlight = false;
+      flushInput();
+    }).catch(function() {
+      inputInFlight = false;
+    });
   }
 
   function queueInput(data) {
     if (sessionReadonly || !webInputEnabled) return;
     inputBatch += data;
-    if (!inputBatchTimer) {
-      inputBatchTimer = setTimeout(function() {
-        inputBatchTimer = null;
-        sendInputBatch();
-      }, 5);
+    if (!inputInFlight) {
+      flushInput();
     }
   }
 
@@ -425,6 +428,8 @@
     var msgEl = document.getElementById('error-msg');
     var titleEl = document.getElementById('error-title');
     var iconEl = document.getElementById('error-icon');
+    var sessionForm = document.getElementById('session-form');
+    var sessionInput = document.getElementById('session-input');
     if (overlay) overlay.classList.remove('hidden');
     if (msgEl && msg) msgEl.textContent = msg;
     if (titleEl) titleEl.textContent = isSessionEnd ? 'Session ended' : 'Session unavailable';
@@ -433,6 +438,29 @@
         ? '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>'
         : '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/><line x1="12" x2="12" y1="15" y2="17"/></svg>';
     }
+    /* Show session lobby form for both session-end and unavailable states */
+    if (sessionForm) {
+      sessionForm.classList.remove('hidden');
+      bindSessionForm();
+      if (sessionInput) sessionInput.focus();
+    }
+  }
+
+  function bindSessionForm() {
+    var form = document.getElementById('session-form');
+    if (!form || form._bound) return;
+    form._bound = true;
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      var input = document.getElementById('session-input');
+      if (!input) return;
+      var value = (input.value || '').trim();
+      if (!value) return;
+      /* Extract token from full URL or bare token */
+      var urlMatch = value.match(/\/[sj]\/([^\/?#]+)/);
+      var token = urlMatch ? urlMatch[1] : value;
+      location.href = '/s/' + encodeURIComponent(token);
+    });
   }
 
   function buildSseUrl() {

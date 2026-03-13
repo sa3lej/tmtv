@@ -389,7 +389,13 @@ static void client_bootstrap(struct tmate_session *_session)
 	ssh_set_server_callbacks(client->session, &ssh_server_cb);
 
 	ssh_options_set(session, SSH_OPTIONS_TIMEOUT, &grace_period);
-	ssh_options_set(session, SSH_OPTIONS_COMPRESSION, "yes");
+	/*
+	 * Disable SSH compression. zlib buffers small writes to build
+	 * efficient compressed blocks, adding milliseconds of latency
+	 * to every keystroke. Terminal data is small and interactive —
+	 * latency matters far more than bandwidth.
+	 */
+	ssh_options_set(session, SSH_OPTIONS_COMPRESSION, "no");
 	ssh_options_set(session, SSH_OPTIONS_CIPHERS_C_S, TMTV_SSH_CIPHERS);
 	ssh_options_set(session, SSH_OPTIONS_CIPHERS_S_C, TMTV_SSH_CIPHERS);
 	ssh_options_set(session, SSH_OPTIONS_KEY_EXCHANGE, TMTV_SSH_KEX);

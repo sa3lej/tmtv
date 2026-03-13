@@ -1067,6 +1067,7 @@ static void ws_client_free(struct ws_client *wc)
 }
 
 static void on_ws_client_event(struct bufferevent *, short, void *);
+static void on_ws_client_read(struct bufferevent *, void *);
 
 /* Deferred free: flush the write buffer (e.g. a 403 response) before
  * closing the connection.  Without this, bufferevent_free() destroys
@@ -1084,6 +1085,28 @@ static void ws_client_free_after_flush(struct ws_client *wc)
 	bufferevent_setcb(wc->bev, NULL, on_ws_client_flush,
 			  on_ws_client_event, wc);
 	bufferevent_enable(wc->bev, EV_WRITE);
+}
+
+#define POST_KEEPALIVE_IDLE_SEC 5
+
+/* Reset a POST ws_client to accept another HTTP request on the same
+ * TCP connection (HTTP keep-alive).  Instead of freeing after flush,
+ * we reset handshake state and set a short idle timeout. */
+static void ws_client_reset_for_keepalive(struct ws_client *wc)
+{
+	struct timeval idle_tv = { POST_KEEPALIVE_IDLE_SEC, 0 };
+
+	wc->handshake_done = false;
+	wc->is_post = false;
+
+	/* Restore the normal read callback so the next HTTP request
+	 * triggers sse_do_handshake again. */
+	bufferevent_setcb(wc->bev, on_ws_client_read, NULL,
+			  on_ws_client_event, wc);
+	bufferevent_enable(wc->bev, EV_READ | EV_WRITE);
+
+	/* Short idle timeout — if no new request arrives, free. */
+	bufferevent_set_timeouts(wc->bev, &idle_tv, NULL);
 }
 
 static void sse_send_fin(struct bufferevent *bev)
@@ -1166,24 +1189,74 @@ void tmate_send_fin_to_ws_clients(struct tmate_session *session)
  * If a binding is found, we dispatch it as a command string via
  * tmate_client_cmd_str(). If not, we send both keys raw.
  *
- * When an SSH viewer IS connected, we use their real client for key
- * handling — that path works correctly through server_client_handle_key.
+ * When an SSH viewer IS connected, we still track prefix state ourselves
+ * to block dangerous commands (detach-client, kill-session, etc.) before
+ * they reach server_client_handle_key(). Safe prefix keys are forwarded
+ * to the SSH client's key handler normally.
  */
 static int web_input_in_prefix;
+
+/*
+ * Commands that must NEVER be executed via web input.
+ * These would affect the host's SSH session or kill the server.
+ */
+static const char *web_input_blocked_cmds[] = {
+	"detach-client",
+	"switch-client",
+	"kill-session",
+	"kill-server",
+	"suspend-client",
+	NULL
+};
+
+/*
+ * Check if a key binding's command list contains any blocked command.
+ * Returns 1 if the binding is dangerous and should be blocked, 0 if safe.
+ */
+static int
+web_input_binding_is_blocked(struct key_binding *bd)
+{
+	struct cmd		*cmd;
+	const struct cmd_entry	*entry;
+	const char		**blocked;
+
+	cmd = cmd_list_first(bd->cmdlist);
+	while (cmd != NULL) {
+		entry = cmd_get_entry(cmd);
+		for (blocked = web_input_blocked_cmds; *blocked != NULL;
+		    blocked++) {
+			if (strcmp(entry->name, *blocked) == 0) {
+				tmate_info("web input: blocked dangerous "
+				    "command '%s'", entry->name);
+				return (1);
+			}
+		}
+		cmd = cmd_list_next(cmd);
+	}
+	return (0);
+}
+
+/*
+ * Look up a key in the prefix binding table.
+ * Returns the binding if found, NULL otherwise.
+ */
+static struct key_binding *
+web_input_get_prefix_binding(key_code key)
+{
+	struct key_table	*table;
+
+	table = key_bindings_get_table("prefix", 0);
+	if (table == NULL)
+		return (NULL);
+	return (key_bindings_get(table, key & KEYC_MASK_KEY));
+}
 
 static int
 tmate_web_input_dispatch_binding(key_code key)
 {
-	struct key_table	*table;
 	struct key_binding	*bd;
 
-	table = key_bindings_get_table("prefix", 0);
-	if (table == NULL) {
-		tmate_debug("web prefix: no prefix table found");
-		return (0);
-	}
-
-	bd = key_bindings_get(table, key & KEYC_MASK_KEY);
+	bd = web_input_get_prefix_binding(key);
 	if (bd == NULL) {
 		tmate_debug("web prefix: no binding for key 0x%llx "
 		    "(masked 0x%llx)", (unsigned long long)key,
@@ -1191,11 +1264,15 @@ tmate_web_input_dispatch_binding(key_code key)
 		return (0);
 	}
 
+	/* Block dangerous commands from web input */
+	if (web_input_binding_is_blocked(bd))
+		return (1);  /* consumed but not dispatched */
+
 	tmate_debug("web prefix: found binding for key 0x%llx, dispatching",
 	    (unsigned long long)key);
 
 	/*
-	 * Found a prefix binding — serialize the command list and
+	 * Found a safe prefix binding — serialize the command list and
 	 * send it to the tmtv client for execution.
 	 */
 	struct cmd	*cmd;
@@ -1212,13 +1289,12 @@ tmate_web_input_dispatch_binding(key_code key)
 /*
  * Route a web input key through the tmux key binding pipeline.
  *
- * When an SSH viewer is connected, we inject through their client's
- * key handler (supports prefix, bindings, copy mode, etc.).
- *
- * When no SSH viewer is connected, we handle the prefix key state
- * machine ourselves: detect Ctrl+B, look up bindings in the prefix
- * table, and dispatch via tmate_client_cmd(). Non-prefix keys go
- * straight to tmate_client_pane_key() for the host.
+ * Both paths (SSH viewer present and no SSH viewer) track prefix state
+ * here so that dangerous commands can be blocked before they execute.
+ * When an SSH viewer is connected, safe keys are forwarded through
+ * server_client_handle_key() for full tmux binding support.
+ * When no SSH viewer is connected, we dispatch safe prefix bindings
+ * via tmate_client_cmd() and regular keys via tmate_client_pane_key().
  */
 /*
  * Convert a raw ASCII C0 control code (0x00–0x1f) into the tmux key_code
@@ -1243,14 +1319,15 @@ web_input_normalize_key(key_code key)
 	return (key);
 }
 
-static void
-tmate_web_input_key(int pane_id, key_code key)
+/*
+ * Forward a key through the SSH viewer client's key handler.
+ * Returns 1 if forwarded, 0 if no suitable client found.
+ */
+static int
+web_input_forward_to_ssh_client(int pane_id, key_code key)
 {
 	struct client *c;
-	struct session *s;
-	key_code prefix, prefix2, normalized;
 
-	/* First, try to find a real SSH viewer client */
 	TAILQ_FOREACH(c, &clients, entry) {
 		if (c->session == NULL)
 			continue;
@@ -1266,7 +1343,7 @@ tmate_web_input_key(int pane_id, key_code key)
 		 */
 		if (c->overlay_draw != NULL) {
 			tmate_client_pane_key(pane_id, key);
-			return;
+			return (1);
 		}
 
 		/* Inject through tmux key handler for binding support */
@@ -1276,13 +1353,22 @@ tmate_web_input_key(int pane_id, key_code key)
 			free(event->buf);
 			free(event);
 		}
-		return;
+		return (1);
 	}
+	return (0);
+}
+
+static void
+tmate_web_input_key(int pane_id, key_code key)
+{
+	struct session *s;
+	struct key_binding *bd;
+	key_code prefix, prefix2, normalized;
+	int have_ssh_client;
 
 	/*
-	 * No SSH viewer connected — handle prefix key state ourselves.
-	 * Normalize the raw key (C0 → letter|KEYC_CTRL) so it matches
-	 * the tmux option format used by prefix/prefix2.
+	 * Normalize early — both paths need this for prefix detection
+	 * and binding lookup.
 	 */
 	normalized = web_input_normalize_key(key);
 
@@ -1305,26 +1391,53 @@ tmate_web_input_key(int pane_id, key_code key)
 
 		/* Second press of prefix sends the prefix key itself */
 		if (normalized == prefix || normalized == prefix2) {
-			tmate_client_pane_key(pane_id, key);
+			if (!web_input_forward_to_ssh_client(pane_id, key))
+				tmate_client_pane_key(pane_id, key);
 			return;
 		}
 
-		/* Look up binding in prefix table; if no match,
-		 * pass the key through to the pane (like tmux does). */
-		if (!tmate_web_input_dispatch_binding(normalized))
-			tmate_client_pane_key(pane_id, key);
+		/*
+		 * Check if this prefix binding is dangerous.
+		 * Block it regardless of whether an SSH client exists.
+		 */
+		bd = web_input_get_prefix_binding(normalized);
+		if (bd != NULL && web_input_binding_is_blocked(bd)) {
+			/* Silently drop — already logged by the check */
+			return;
+		}
+
+		/*
+		 * Safe prefix key — dispatch through the appropriate path.
+		 * SSH client path: forward through server_client_handle_key
+		 * which will see the client already in prefix table and
+		 * dispatch the binding.
+		 * No-client path: dispatch the binding ourselves.
+		 */
+		have_ssh_client =
+		    web_input_forward_to_ssh_client(pane_id, key);
+		if (!have_ssh_client) {
+			if (!tmate_web_input_dispatch_binding(normalized))
+				tmate_client_pane_key(pane_id, key);
+		}
 		return;
 	}
 
 	/* Check if this key is the prefix */
 	if (normalized == prefix || normalized == prefix2) {
-		tmate_debug("web input: prefix key detected, entering prefix mode");
+		tmate_debug("web input: prefix key detected, "
+		    "entering prefix mode");
 		web_input_in_prefix = 1;
+		/*
+		 * Also forward the prefix key to the SSH client so its
+		 * internal state machine switches to the prefix table.
+		 */
+		web_input_forward_to_ssh_client(pane_id, key);
 		return;
 	}
 
-	/* Regular key — send to host */
-	tmate_client_pane_key(pane_id, key);
+	/* Regular key — forward through SSH client or direct to host */
+	if (!web_input_forward_to_ssh_client(pane_id, key))
+		tmate_client_pane_key(pane_id, key);
 }
 
 /*
@@ -1333,7 +1446,7 @@ tmate_web_input_key(int pane_id, key_code key)
  */
 #define POST_INPUT_MAX_BODY 1024
 
-#define POST_RATE_LIMIT    60  /* max POST requests per window */
+#define POST_RATE_LIMIT    120 /* max POST requests per window */
 #define POST_RATE_WINDOW   1   /* window size in seconds */
 
 static void handle_post_input(struct ws_client *wc)
@@ -1348,7 +1461,7 @@ static void handle_post_input(struct ws_client *wc)
 	static const char *ok_response =
 		"HTTP/1.1 200 OK\r\n"
 		"Content-Length: 0\r\n"
-		"Connection: close\r\n"
+		"Connection: keep-alive\r\n"
 		"\r\n";
 
 	static const char *forbidden =
@@ -1394,7 +1507,7 @@ static void handle_post_input(struct ws_client *wc)
 	data = evbuffer_pullup(input, len);
 	if (!data) {
 		bufferevent_write(wc->bev, ok_response, strlen(ok_response));
-		ws_client_free_after_flush(wc);
+		ws_client_reset_for_keepalive(wc);
 		return;
 	}
 
@@ -1431,7 +1544,7 @@ static void handle_post_input(struct ws_client *wc)
 
 	evbuffer_drain(input, len);
 	bufferevent_write(wc->bev, ok_response, strlen(ok_response));
-	ws_client_free_after_flush(wc);
+	ws_client_reset_for_keepalive(wc);
 }
 
 static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)

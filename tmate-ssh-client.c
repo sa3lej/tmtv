@@ -292,7 +292,13 @@ static void on_ssh_client_event(struct tmate_ssh_client *client)
 		ssh_options_set(session, SSH_OPTIONS_LOG_VERBOSITY, &verbosity);
 		ssh_options_set(session, SSH_OPTIONS_PORT, &port);
 		ssh_options_set(session, SSH_OPTIONS_USER, "tmtv");
-		ssh_options_set(session, SSH_OPTIONS_COMPRESSION, "yes");
+		/*
+		 * Disable SSH compression. zlib buffers small writes
+		 * to build efficient compressed blocks, adding latency
+		 * to every keystroke. Terminal data is small — latency
+		 * matters more than bandwidth.
+		 */
+		ssh_options_set(session, SSH_OPTIONS_COMPRESSION, "no");
 		ssh_options_set(session, SSH_OPTIONS_CIPHERS_C_S, TMTV_SSH_CIPHERS);
 		ssh_options_set(session, SSH_OPTIONS_CIPHERS_S_C, TMTV_SSH_CIPHERS);
 		ssh_options_set(session, SSH_OPTIONS_KEY_EXCHANGE, TMTV_SSH_KEX);

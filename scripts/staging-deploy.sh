@@ -297,23 +297,13 @@ elif [ "$MODE" = "binary-only" ] || [ "$MODE" = "web-only" ]; then
 else
     step "Running integration tests on staging"
 
-    # Upload latest test scripts
-    scp $SCP_OPTS "$REPO_ROOT/tests/test-integration.sh" "${STAGING_TARGET}:/tmp/test-integration.sh" || {
-        err "Failed to upload test script"
-        exit 5
-    }
-    scp $SCP_OPTS "$REPO_ROOT/tests/test-password-prompt.js" "${STAGING_TARGET}:/tmp/test-password-prompt.js" || {
-        err "Failed to upload test-password-prompt.js"
-        exit 5
-    }
-    scp $SCP_OPTS "$REPO_ROOT/tests/test-ttl-viewer.js" "${STAGING_TARGET}:/tmp/test-ttl-viewer.js" || {
-        err "Failed to upload test-ttl-viewer.js"
-        exit 5
-    }
-    scp $SCP_OPTS "$REPO_ROOT/tests/test-ctrl-b.js" "${STAGING_TARGET}:/tmp/test-ctrl-b.js" || {
-        err "Failed to upload test-ctrl-b.js"
-        exit 5
-    }
+    # Upload latest test scripts (auto-discover all test-*.sh and test-*.js)
+    for f in "$REPO_ROOT"/tests/test-*.sh "$REPO_ROOT"/tests/test-*.js; do
+        [ -f "$f" ] && scp $SCP_OPTS "$f" "${STAGING_TARGET}:/tmp/$(basename "$f")" || {
+            err "Failed to upload $(basename "$f")"
+            exit 5
+        }
+    done
 
     # Build test command
     TEST_FLAGS="--local"
@@ -330,6 +320,15 @@ else
     else
         err "Integration tests FAILED"
         exit 5
+    fi
+
+    # Fetch latency report if it exists
+    LATENCY_REPORT=$(remote "cat /tmp/tmtv-latency-report.txt 2>/dev/null" || echo "")
+    if [ -n "$LATENCY_REPORT" ]; then
+        echo ""
+        step "Latency Report"
+        echo "$LATENCY_REPORT"
+        echo ""
     fi
 fi
 
