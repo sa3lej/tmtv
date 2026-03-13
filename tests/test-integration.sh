@@ -238,21 +238,23 @@ cleanup() {
 	# Kill any lingering expect/SSH processes from tests
 	remote "pkill -9 -f 'expect.*${TMTV_PORT}'" 2>/dev/null || true
 	remote "pkill -9 -f 'ssh.*-p.*${TMTV_PORT}'" 2>/dev/null || true
-	# Kill any test sessions
+	# Kill any test sessions (default socket and all custom test sockets)
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server 2>/dev/null" || true
+	remote "for sock in /tmp/tmtv-*-$$; do TERM=xterm-256color $REMOTE_TMTV -S \$sock kill-server 2>/dev/null; done" || true
+	# Kill any tmtv processes spawned from test configs
+	remote "pkill -9 -f '.tmtv-test-.*\.conf'" 2>/dev/null || true
 	# Clean up all temp configs from this test run
 	remote "rm -f /tmp/.tmtv-test-*-$TESTID.conf" 2>/dev/null || true
 	remote "rm -f $REMOTE_CONF" 2>/dev/null || true
+	remote "rm -f /tmp/tmtv-*-$$" 2>/dev/null || true
 }
 trap cleanup EXIT
 
-# Global timeout safety net for CI — prevent indefinite hangs.
+# Global timeout safety net — prevent indefinite hangs in CI and manual runs.
 # Individual tests have their own timeouts, but this catches anything missed.
-if [ -n "${CI:-}" ]; then
-	_CI_TIMEOUT=240
-	( sleep "$_CI_TIMEOUT" && echo "" && echo "FATAL: Test suite exceeded ${_CI_TIMEOUT}s global timeout" >&2 && kill -TERM $$ 2>/dev/null ) &
-	_GLOBAL_TIMER_PID=$!
-fi
+_CI_TIMEOUT=${TMTV_TEST_TIMEOUT:-240}
+( sleep "$_CI_TIMEOUT" && echo "" && echo "FATAL: Test suite exceeded ${_CI_TIMEOUT}s global timeout" >&2 && kill -TERM $$ 2>/dev/null ) &
+_GLOBAL_TIMER_PID=$!
 
 echo ""
 if [ "$WEB_HOST" != "$TEST_HOST" ]; then
@@ -408,7 +410,9 @@ fi
 # -------------------------------------------------------
 # Test: Named session registered
 # -------------------------------------------------------
-# Check if named symlink exists (readlink follows symlinks, stat checks existence)
+# Wait for symlink to appear (server-side registration is async)
+wait_for 10 1 "named session symlink appears" \
+	"remote 'test -L $SESSIONS_DIR/$TESTID'"
 if remote "test -L $SESSIONS_DIR/$TESTID"; then
 	pass "named session symlink created"
 	SESSION_NAME="$TESTID"
@@ -3946,6 +3950,96 @@ else
 		skip "session lobby input accessible (web not available)"
 		skip "session lobby navigation (web not available)"
 	fi
+fi
+
+# -------------------------------------------------------
+# Test: custom prefix key sync (client → server)
+# -------------------------------------------------------
+echo ""
+echo "-- Prefix key sync tests --"
+
+if [ -n "$RSA_FP" ] || [ -n "$ED25519_FP" ]; then
+	PFX_SESSNAME="pfx$$"
+	PFX_CONF="/tmp/.tmtv-test-pfx-$TESTID.conf"
+
+	remote "cat > $PFX_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$PFX_SESSNAME\"
+set -g tmtv-web-sharing on
+unbind C-b
+set -g prefix C-a
+bind C-a send-prefix
+CONF"
+
+	# Capture server log position before starting session
+	PFX_LOG_BEFORE=$(remote "wc -l < /var/log/tmtv-server.log 2>/dev/null || echo 0")
+
+	remote "TERM=xterm-256color \
+		nohup script -qc '$REMOTE_TMTV -f $PFX_CONF new-session -d -s main' \
+		/dev/null </dev/null >/dev/null 2>&1 &"
+	wait_for 15 1 "prefix session ready" \
+		"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q main'"
+
+	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null" | grep -q "main"; then
+		# Check server log for prefix sync message
+		PFX_LOG=$(remote "tail -n +$((PFX_LOG_BEFORE + 1)) /var/log/tmtv-server.log 2>/dev/null" || echo "")
+		if echo "$PFX_LOG" | grep -q "Session prefix set"; then
+			pass "prefix key synced to server (C-a)"
+		else
+			fail "prefix key synced to server (C-a)" \
+				"no 'Session prefix set' in server log"
+		fi
+
+		# Verify the server session actually has the right prefix by
+		# sending C-a + % via web input (should split pane, not C-b)
+		PFX_TOKEN=$(remote "cat /tmp/tmtv/sessions/$PFX_SESSNAME 2>/dev/null || echo ''")
+		if [ -n "$PFX_TOKEN" ]; then
+			# Count panes before
+			PFX_PANES_BEFORE=$(remote "TERM=xterm-256color $REMOTE_TMTV list-panes 2>/dev/null | wc -l")
+
+			# Send C-a (0x01) then % via web input
+			PFX_RW_TOKEN=$(remote "cat /tmp/tmtv/rw-tokens/$PFX_SESSNAME 2>/dev/null || echo ''")
+			if [ -n "$PFX_RW_TOKEN" ]; then
+				# Send prefix key C-a (0x01)
+				remote "curl -s -o /dev/null -H 'X-Tmtv-Input: 1' \
+					-d \$'\\x01' \
+					http://127.0.0.1:4002/$PFX_RW_TOKEN/input"
+				sleep 0.3
+				# Send % to split pane
+				remote "curl -s -o /dev/null -H 'X-Tmtv-Input: 1' \
+					-d '%' \
+					http://127.0.0.1:4002/$PFX_RW_TOKEN/input"
+				sleep 1
+
+				PFX_PANES_AFTER=$(remote "TERM=xterm-256color $REMOTE_TMTV list-panes 2>/dev/null | wc -l")
+				if [ "$PFX_PANES_AFTER" -gt "$PFX_PANES_BEFORE" ]; then
+					pass "web input C-a prefix splits pane (server uses custom prefix)"
+				else
+					fail "web input C-a prefix splits pane (server uses custom prefix)" \
+						"panes before=$PFX_PANES_BEFORE after=$PFX_PANES_AFTER"
+				fi
+			else
+				skip "web input C-a prefix splits pane (no RW token)"
+			fi
+		else
+			skip "web input C-a prefix splits pane (no session token)"
+		fi
+
+		# Cleanup
+		remote "TERM=xterm-256color $REMOTE_TMTV kill-session -t main" 2>/dev/null || true
+		sleep 1
+	else
+		skip "prefix key synced to server (C-a)" "session failed to start"
+		skip "web input C-a prefix splits pane" "session failed to start"
+	fi
+
+	remote "rm -f $PFX_CONF" 2>/dev/null || true
+else
+	skip "prefix key synced to server (C-a)" "no fingerprints"
+	skip "web input C-a prefix splits pane" "no fingerprints"
 fi
 
 # -------------------------------------------------------
