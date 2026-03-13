@@ -35,8 +35,8 @@ if (!url) {
     await page.screenshot({ path: screenshotDir + '/ctrl-b-1-connected.png' });
     console.log('PASS step 1: terminal connected');
 
-    // Count initial pane containers (each .terminal-pane div is one pane)
-    const panesBefore = await page.locator('.terminal-pane').count();
+    // Count xterm instances (each pane gets one .xterm container)
+    const panesBefore = await page.locator('.xterm').count();
     console.log('  panes before: ' + panesBefore);
 
     // --- Step 2: Send Ctrl+B then "%" to split pane ---
@@ -56,7 +56,7 @@ if (!url) {
 
     await page.screenshot({ path: screenshotDir + '/ctrl-b-2-after-split.png' });
 
-    const panesAfter = await page.locator('.terminal-pane').count();
+    const panesAfter = await page.locator('.xterm').count();
     console.log('  panes after: ' + panesAfter);
 
     if (panesAfter > panesBefore) {
