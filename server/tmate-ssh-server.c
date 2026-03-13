@@ -716,10 +716,24 @@ static void gc_stale_sessions(void)
  * Format: "REG <token1> <token2> ...\n"
  * Each token is registered in the SSE registry for routing.
  */
+static void parse_ipc_line(struct sse_registry *reg, char *line,
+			   int ipc_fd, pid_t pid)
+{
+	/* Parse "REG token1 token2 token3 ..." */
+	if (strncmp(line, SSE_IPC_MSG_REGISTER " ", 4) == 0) {
+		char *saveptr;
+		char *tok = strtok_r(line + 4, " ", &saveptr);
+		while (tok) {
+			sse_registry_add(reg, tok, ipc_fd, pid);
+			tok = strtok_r(NULL, " ", &saveptr);
+		}
+	}
+}
+
 static void handle_ipc_registrations(struct sse_registry *reg,
 				     int ipc_fd, pid_t pid)
 {
-	char buf[512];
+	char buf[1024];
 	int n;
 
 	n = sse_ipc_read_msg(ipc_fd, buf, sizeof(buf));
@@ -731,14 +745,17 @@ static void handle_ipc_registrations(struct sse_registry *reg,
 		return;
 	}
 
-	/* Parse "REG token1 token2 token3 ..." */
-	if (strncmp(buf, SSE_IPC_MSG_REGISTER " ", 4) == 0) {
-		char *saveptr;
-		char *tok = strtok_r(buf + 4, " \n", &saveptr);
-		while (tok) {
-			sse_registry_add(reg, tok, ipc_fd, pid);
-			tok = strtok_r(NULL, " \n", &saveptr);
-		}
+	/*
+	 * Messages are newline-delimited.  A single read() on a
+	 * SOCK_STREAM socketpair may return multiple coalesced
+	 * messages (e.g. initial token registration + named token
+	 * registration).  Split on '\n' and process each line.
+	 */
+	char *saveptr;
+	char *line = strtok_r(buf, "\n", &saveptr);
+	while (line) {
+		parse_ipc_line(reg, line, ipc_fd, pid);
+		line = strtok_r(NULL, "\n", &saveptr);
 	}
 }
 

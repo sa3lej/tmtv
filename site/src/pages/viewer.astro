@@ -15,12 +15,14 @@ import Viewer from '../layouts/Viewer.astro';
       </div>
       <h2 class="error-title" id="error-title">Session unavailable</h2>
       <p class="error-msg" id="error-msg">This session may have ended or the token is invalid.</p>
-      <form id="session-form" class="session-form hidden">
+      <form id="session-form" class="session-form hidden" role="search" aria-label="Join a session">
         <input type="text" id="session-input" class="session-input"
                placeholder="Enter session token..." autocomplete="off" spellcheck="false"
-               aria-label="Session token">
+               aria-label="Session token or URL">
         <button type="submit" class="session-submit">Connect</button>
+        <p class="session-hint">Paste a session URL or token to connect</p>
       </form>
+      <div class="session-divider hidden" id="session-divider">or</div>
       <a href="/" class="error-link" id="error-link">Back to tmtv</a>
     </div>
   </div>
@@ -252,6 +254,11 @@ import Viewer from '../layouts/Viewer.astro';
     position: fixed; inset: 0; z-index: 100;
     display: flex; align-items: center; justify-content: center;
     background: rgba(12, 12, 22, 0.95); backdrop-filter: blur(12px);
+    animation: overlay-fade-in 0.3s ease-out;
+  }
+  @keyframes overlay-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
   .error-overlay.hidden { display: none; }
   .error-card {
@@ -337,5 +344,29 @@ import Viewer from '../layouts/Viewer.astro';
   .session-submit:hover {
     background: rgba(108, 158, 252, 0.1);
     border-color: rgba(108, 158, 252, 0.4);
+  }
+  .session-hint {
+    font-family: "JetBrains Mono", monospace; font-size: 11px;
+    color: #777; margin: 0; line-height: 1.4;
+  }
+  .session-divider {
+    font-family: "JetBrains Mono", monospace; font-size: 11px;
+    color: #555; text-transform: uppercase; letter-spacing: 1px;
+    margin-bottom: 12px;
+  }
+  .session-divider.hidden { display: none; }
+
+  /* WCAG 2.1 AA focus-visible outlines */
+  .session-input:focus-visible,
+  .password-input:focus-visible {
+    border-color: #6c9efc;
+    box-shadow: 0 0 0 2px rgba(108, 158, 252, 0.3);
+    outline: none;
+  }
+  .session-submit:focus-visible,
+  .password-submit:focus-visible,
+  .error-link:focus-visible {
+    outline: 2px solid #6c9efc;
+    outline-offset: 2px;
   }
 </style>

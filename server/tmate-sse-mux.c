@@ -25,6 +25,7 @@
  */
 
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -196,8 +197,20 @@ int sse_recv_fd(int ipc_fd)
 int sse_ipc_send_msg(int ipc_fd, const char *msg)
 {
 	size_t len = strlen(msg);
-	ssize_t n = write(ipc_fd, msg, len);
-	if (n < 0 || (size_t)n != len) {
+	struct iovec iov[2];
+
+	/*
+	 * Append a newline delimiter so the reader can split coalesced
+	 * messages on SOCK_STREAM socketpairs. Use writev() to send
+	 * the message and newline atomically.
+	 */
+	iov[0].iov_base = (void *)msg;
+	iov[0].iov_len = len;
+	iov[1].iov_base = "\n";
+	iov[1].iov_len = 1;
+
+	ssize_t n = writev(ipc_fd, iov, 2);
+	if (n < 0 || (size_t)n != len + 1) {
 		tmate_info("sse_ipc_send_msg: write failed: %s", strerror(errno));
 		return -1;
 	}

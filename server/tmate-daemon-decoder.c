@@ -4,6 +4,8 @@
 #include "tmate.h"
 #include "tmate-protocol.h"
 
+extern void tmate_send_fin_to_ws_clients(struct tmate_session *session);
+
 char *tmate_left_status, *tmate_right_status;
 
 /*
@@ -597,11 +599,23 @@ static void tmate_write_copy_mode(__unused struct tmate_session *session,
 	free(str);
 }
 
-static void tmate_fin(__unused struct tmate_session *session,
+static void tmate_fin(struct tmate_session *session,
 		      __unused struct tmate_unpacker *uk)
 {
 	tmate_info("Client sent FIN (graceful disconnect)");
 	session->fin_received = true;
+
+	/*
+	 * Send FIN to SSE clients BEFORE termination. The subsequent
+	 * tmate_send_websocket_daemon_msg() in on_daemon_decoder_read
+	 * also forwards this, but request_server_termination() sends
+	 * SIGTERM which may kill the process before that call runs or
+	 * before the SSE data is flushed. Writing directly to socket
+	 * fds here ensures viewers receive the FIN and show "Session
+	 * ended" instead of entering a reconnect loop.
+	 */
+	tmate_send_fin_to_ws_clients(session);
+
 	request_server_termination();
 }
 
