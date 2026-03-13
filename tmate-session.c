@@ -238,6 +238,26 @@ void tmate_session_start(void)
 			tmate_set_val(&tmate_session, "link_ttl", ttl);
 	}
 
+	/* Sync prefix key to server so web/SSH viewers use the right key */
+	{
+		key_code prefix = options_get_number(global_s_options,
+						     "prefix");
+		if (prefix != ('b' | KEYC_CTRL)) {
+			char buf[32];
+			snprintf(buf, sizeof(buf), "0x%llx",
+				 (unsigned long long)prefix);
+			tmate_set_val(&tmate_session, "prefix", buf);
+		}
+		key_code prefix2 = options_get_number(global_s_options,
+						      "prefix2");
+		if (prefix2 != KEYC_NONE) {
+			char buf[32];
+			snprintf(buf, sizeof(buf), "0x%llx",
+				 (unsigned long long)prefix2);
+			tmate_set_val(&tmate_session, "prefix2", buf);
+		}
+	}
+
 	send_authorized_keys();
 	tmate_write_uname(&tmate_session);
 	tmate_write_ready(&tmate_session);

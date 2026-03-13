@@ -144,6 +144,14 @@ static void tmate_set(char *key, char *value)
 			tmate_notify("Web input enabled — RW web viewers can type");
 		else
 			tmate_notify("Web input disabled");
+	} else if (!strcmp(key, "prefix") || !strcmp(key, "prefix2")) {
+		key_code kc = (key_code)strtoull(value, NULL, 0);
+		struct session *s = RB_MIN(sessions, &sessions);
+		if (s != NULL)
+			options_set_number(s->options, key, kc);
+		options_set_number(global_s_options, key, kc);
+		tmate_info("Session %s set to 0x%llx", key,
+			   (unsigned long long)kc);
 	} else if (!strcmp(key, "link_ttl")) {
 		int ttl = atoi(value);
 		tmate_session->link_ttl = ttl > 0 ? ttl : 0;
