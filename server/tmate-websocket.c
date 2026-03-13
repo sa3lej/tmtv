@@ -1417,6 +1417,13 @@ void tmate_websocket_accept_fd(struct tmate_session *session, int fd)
 	int flag = 1;
 
 	if (!session->web_sharing_enabled) {
+		static const char *forbidden =
+			"HTTP/1.1 403 Forbidden\r\n"
+			"Access-Control-Allow-Origin: *\r\n"
+			"Content-Length: 0\r\n"
+			"Connection: close\r\n"
+			"\r\n";
+		(void)write(fd, forbidden, strlen(forbidden));
 		close(fd);
 		tmate_debug("SSE connection rejected via IPC: web sharing disabled");
 		return;

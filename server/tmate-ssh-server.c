@@ -322,10 +322,12 @@ static struct ssh_server_callbacks_struct ssh_server_cb = {
 static void on_ssh_read(__unused evutil_socket_t fd, __unused short what, void *arg)
 {
 	struct tmate_ssh_client *client = arg;
+
 	ssh_execute_message_callbacks(client->session);
 
 	if (!ssh_is_connected(client->session)) {
-		tmate_debug("ssh disconnected");
+		tmate_info("ssh disconnected: %s (what=0x%x)",
+			   ssh_get_error(client->session), what);
 
 		/*
 		 * tmux 3.6a / libevent2: ev_ssh is a pointer (struct event *)

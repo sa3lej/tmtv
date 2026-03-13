@@ -56,6 +56,10 @@ static void read_channel(struct tmate_ssh_client *client)
 		tmate_decoder_get_buffer(decoder, &buf, &len);
 		len = ssh_channel_read_nonblocking(client->channel, buf, len, 0);
 		if (len < 0) {
+			tmate_info("read_channel: ssh_channel_read_nonblocking=%zd "
+				   "ssh_is_connected=%d error=%s",
+				   len, ssh_is_connected(client->session),
+				   ssh_get_error(client->session));
 			kill_ssh_client(client, "Error reading from channel: %s",
 					ssh_get_error(client->session));
 			break;
@@ -92,6 +96,10 @@ static void on_encoder_write(void *userdata, struct evbuffer *buffer)
 
 		written = ssh_channel_write(client->channel, buf, len);
 		if (written < 0) {
+			tmate_info("on_encoder_write: write failed (%zd bytes): "
+				   "connected=%d error=%s",
+				   len, ssh_is_connected(client->session),
+				   ssh_get_error(client->session));
 			kill_ssh_client(client, "Error writing to channel: %s",
 					ssh_get_error(client->session));
 			break;
@@ -519,6 +527,8 @@ static void kill_ssh_client(struct tmate_ssh_client *client,
 		va_start(ap, fmt);
 		xvasprintf(&message, fmt, ap);
 		va_end(ap);
+		tmate_info("SSH client killed (state=%d last=%d): %s",
+			   client->state, last_client, message);
 		tmate_status_message("%s", message);
 	}
 

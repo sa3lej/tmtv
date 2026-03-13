@@ -7,6 +7,8 @@
 
 struct tmate_session _tmate_session, *tmate_session = &_tmate_session;
 
+extern void tmate_send_fin_to_ws_clients(struct tmate_session *session);
+
 static void on_daemon_decoder_read(void *userdata, struct tmate_unpacker *uk)
 {
 	struct tmate_session *session = userdata;
@@ -64,12 +66,11 @@ static void on_daemon_encoder_write(void *userdata, struct evbuffer *buffer)
 
 		written = ssh_channel_write(session->ssh_client.channel, buf, len);
 		if (written < 0) {
-			tmate_info("Error writing to channel: %s",
-				   ssh_get_error(session->ssh_client.session));
+			tmate_info("daemon_encoder_write: FAILED (%zd bytes): %s",
+				   len, ssh_get_error(session->ssh_client.session));
 			request_server_termination();
 			break;
 		}
-
 		evbuffer_drain(buffer, written);
 	}
 }
@@ -81,7 +82,7 @@ static void tmate_daemon_init(struct tmate_session *session)
 	memset(&client->channel_cb, 0, sizeof(client->channel_cb));
 	ssh_callbacks_init(&client->channel_cb);
 	client->channel_cb.userdata = session;
-	client->channel_cb.channel_data_function = on_ssh_channel_read,
+	client->channel_cb.channel_data_function = on_ssh_channel_read;
 	ssh_set_channel_callbacks(client->channel, &client->channel_cb);
 
 	tmate_encoder_init(&session->daemon_encoder, on_daemon_encoder_write, session);
@@ -617,7 +618,6 @@ static void handle_session_name_options(const char *name,
 }
 
 extern void tmate_disconnect_ws_clients(struct tmate_session *session);
-extern void tmate_send_fin_to_ws_clients(struct tmate_session *session);
 
 static void handle_web_sharing_option(const char *name, const char *val)
 {

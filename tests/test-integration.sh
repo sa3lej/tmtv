@@ -173,6 +173,38 @@ read_token() {
 	return 1
 }
 
+# Wait for token to stabilize after an operation that may trigger reconnection
+wait_token_stable() {
+	_name="$1"
+	_prev=$(read_token "$_name")
+	_stable=0
+	for _w in $(seq 1 10); do
+		sleep 1
+		_cur=$(read_token "$_name")
+		if [ -n "$_cur" ] && [ "$_cur" = "$_prev" ]; then
+			_stable=$((_stable + 1))
+			[ "$_stable" -ge 2 ] && break
+		else
+			_stable=0
+		fi
+		_prev="$_cur"
+	done
+}
+
+# Wait for RW token to stabilize and return it
+read_rw_token_stable() {
+	_name="$1"
+	wait_token_stable "$_name"
+	_rw=""
+	_try=0
+	while [ "$_try" -lt 5 ] && [ -z "$_rw" ]; do
+		_rw=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" | grep -E "^[0-9]+-$_name$" | head -1 || echo "")
+		[ -z "$_rw" ] && sleep 1
+		_try=$((_try + 1))
+	done
+	echo "$_rw"
+}
+
 # Generate unique session name for this test run
 TESTID="t$$"
 
@@ -547,17 +579,10 @@ fi
 # -------------------------------------------------------
 # Test: SSH RW — connect, type, verify text appears
 # -------------------------------------------------------
+# Wait for token to stabilize after previous operations (split-window, send-keys)
+RW_TOKEN=$(read_rw_token_stable "$TESTID")
 TOKEN=$(read_token "$TESTID")
 if [ -n "$TOKEN" ]; then
-	# Look up RW token with retry (format: PID-TESTID)
-	RW_TOKEN=""
-	_rw_try=0
-	while [ "$_rw_try" -lt 5 ] && [ -z "$RW_TOKEN" ]; do
-		RW_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" | grep -E "^[0-9]+-$TESTID$" | head -1 || echo "")
-		[ -z "$RW_TOKEN" ] && sleep 1
-		_rw_try=$((_rw_try + 1))
-	done
-
 	if [ -n "$RW_TOKEN" ]; then
 		# First go back to pane 0 for a clean slate
 		remote_tmtv "select-pane -t main.0"
@@ -609,13 +634,8 @@ fi
 # -------------------------------------------------------
 # Test: SSH RW — create pane via tmux split-window command
 # -------------------------------------------------------
-# Re-read RW token in case client reconnected
-_rw_try=0; RW_TOKEN=""
-while [ "$_rw_try" -lt 5 ] && [ -z "$RW_TOKEN" ]; do
-	RW_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" | grep -E "^[0-9]+-$TESTID$" | head -1 || echo "")
-	[ -z "$RW_TOKEN" ] && sleep 1
-	_rw_try=$((_rw_try + 1))
-done
+# Re-read RW token after stabilization in case client reconnected
+RW_TOKEN=$(read_rw_token_stable "$TESTID")
 if [ -n "$RW_TOKEN" ]; then
 	# Record pane count before
 	PANES_BEFORE=$(remote_tmtv "list-panes -t main" 2>/dev/null | wc -l)
@@ -928,6 +948,10 @@ if [ -n "$TOKEN" ]; then
 	remote_tmtv "resize-window -t main -x 100 -y 30"
 	sleep 2
 
+	# Re-read token after resize (may trigger reconnection)
+	wait_token_stable "$TESTID"
+	TOKEN=$(read_token "$TESTID")
+
 	# Capture SSE data — should contain layout sync with new dimensions
 	# The SSE stream sends binary msgpack; we check for non-empty data
 	# after resize, which includes the new SYNC_LAYOUT message
@@ -970,6 +994,10 @@ if [ -n "$TOKEN" ]; then
 	remote_tmtv "send-keys 'echo $WIN_MARKER' Enter"
 	sleep 1
 
+	# Re-read token after operations (may trigger reconnection)
+	wait_token_stable "$TESTID"
+	TOKEN=$(read_token "$TESTID")
+
 	# Verify SSE still delivers data on the active window
 	SSE_WIN=$(curl -s -m 3 "$SSE_BASE/$TOKEN" \
 		2>/dev/null || echo "")
@@ -1004,6 +1032,10 @@ if [ -n "$TOKEN" ]; then
 	RECONNECT_MARKER="RECONN_$$"
 	remote_tmtv "send-keys -t main:0 'echo $RECONNECT_MARKER' Enter"
 	sleep 1
+
+	# Re-read token after send-keys (may trigger reconnection)
+	wait_token_stable "$TESTID"
+	TOKEN=$(read_token "$TESTID")
 
 	# Connect a fresh SSE client — should get screen dump with marker
 	SSE_RECONNECT=$(curl -s -m 4 "$SSE_BASE/$TOKEN" \
@@ -1523,7 +1555,15 @@ if [ -n "$NAMED_RW_TOKEN" ]; then
 	fi
 
 	# POST via random RW token
+	echo "    DEBUG: NAMED_RW_TOKEN=$NAMED_RW_TOKEN (len=$(echo -n "$NAMED_RW_TOKEN" | wc -c))" >&2
+	echo "    DEBUG: POST URL=$SSE_BASE/$NAMED_RW_TOKEN/input" >&2
+	# First try a GET to verify the token is routable
+	_dbg_get_code=$(curl -s -m 3 -o /dev/null -w "%{http_code}" "$SSE_BASE/$NAMED_RW_TOKEN" 2>/dev/null) || true
+	echo "    DEBUG: GET $SSE_BASE/$NAMED_RW_TOKEN => HTTP $_dbg_get_code" >&2
+	_dbg_get_named=$(curl -s -m 3 -o /dev/null -w "%{http_code}" "$SSE_BASE/$NAMED_SESSNAME" 2>/dev/null) || true
+	echo "    DEBUG: GET $SSE_BASE/$NAMED_SESSNAME => HTTP $_dbg_get_named" >&2
 	NAMED_RW_CODE=$(wi_post "$SSE_BASE/$NAMED_RW_TOKEN/input")
+	echo "    DEBUG: POST $SSE_BASE/$NAMED_RW_TOKEN/input => HTTP $NAMED_RW_CODE" >&2
 	if [ "$NAMED_RW_CODE" = "200" ]; then
 		pass "named session: POST input via random RW token (200)"
 	else
@@ -1531,7 +1571,10 @@ if [ -n "$NAMED_RW_TOKEN" ]; then
 	fi
 
 	# POST via RO token must be rejected
+	_dbg_get_ro=$(curl -s -m 3 -o /dev/null -w "%{http_code}" "$SSE_BASE/ro-$NAMED_SESSNAME" 2>/dev/null) || true
+	echo "    DEBUG: GET $SSE_BASE/ro-$NAMED_SESSNAME => HTTP $_dbg_get_ro" >&2
 	NAMED_RO_CODE=$(wi_post "$SSE_BASE/ro-$NAMED_SESSNAME/input")
+	echo "    DEBUG: POST $SSE_BASE/ro-$NAMED_SESSNAME/input => HTTP $NAMED_RO_CODE" >&2
 	if [ "$NAMED_RO_CODE" = "403" ]; then
 		pass "named session: POST input via RO token rejected (403)"
 	else
