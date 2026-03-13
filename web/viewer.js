@@ -101,7 +101,7 @@
     }
     var maxFromW = availW / (serverCols * cellRatioW);
     var maxFromH = availH / (contentRows * cellRatioH);
-    fontSize = Math.max(6, Math.min(Math.floor(Math.min(maxFromW, maxFromH)), 22));
+    fontSize = Math.max(10, Math.min(Math.floor(Math.min(maxFromW, maxFromH)), 36));
     cellW = fontSize * cellRatioW;
     cellH = fontSize * cellRatioH;
   }
@@ -367,12 +367,21 @@
     if (pane._inputBound) return;
     pane._inputBound = true;
     pane.term.onData(function(data) { queueInput(data); });
-    /* Prevent browser from intercepting Ctrl sequences (Ctrl+C = copy,
-     * Ctrl+L = address bar, etc.) so they reach the terminal instead. */
+    /* Prevent browser from intercepting keys that should reach the terminal.
+     * Ctrl sequences (Ctrl+A/B prefix, Ctrl+C, Ctrl+L, etc.) and navigation
+     * keys (arrows, Home/End, PgUp/PgDn) must not trigger browser actions
+     * like select-all, address-bar focus, or page scrolling. */
     pane.term.attachCustomKeyEventHandler(function(ev) {
-      if (ev.ctrlKey && ev.type === 'keydown') {
+      if (ev.ctrlKey) {
         /* Allow Ctrl+Shift+C/V for clipboard (browser convention) */
         if (ev.shiftKey && (ev.key === 'C' || ev.key === 'V')) return true;
+        ev.preventDefault();
+        return true;
+      }
+      /* Arrow keys, Home, End, PgUp, PgDn — prevent browser scroll/nav */
+      var navKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                     'Home', 'End', 'PageUp', 'PageDown', 'Tab'];
+      if (navKeys.indexOf(ev.key) >= 0) {
         ev.preventDefault();
         return true;
       }
@@ -441,6 +450,8 @@
     /* Show session lobby form for both session-end and unavailable states */
     if (sessionForm) {
       sessionForm.classList.remove('hidden');
+      var divider = document.getElementById('session-divider');
+      if (divider) divider.classList.remove('hidden');
       bindSessionForm();
       if (sessionInput) sessionInput.focus();
     }
