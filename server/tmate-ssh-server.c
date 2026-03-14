@@ -137,13 +137,15 @@ static int pty_request(__unused ssh_session session,
 		       __unused ssh_channel channel,
 		       __unused const char *term,
 		       int width, int height,
-		       __unused int pxwidth, __unused int pwheight,
+		       int pxwidth, int pxheight,
 		       void *userdata)
 {
 	struct tmate_ssh_client *client = userdata;
 
 	client->winsize_pty.ws_col = width;
 	client->winsize_pty.ws_row = height;
+	client->winsize_pty.ws_xpixel = pxwidth;
+	client->winsize_pty.ws_ypixel = pxheight;
 
 	return 0;
 }

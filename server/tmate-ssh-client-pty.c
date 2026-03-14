@@ -61,14 +61,17 @@ static int on_ssh_channel_read(__unused ssh_session _session,
 static int on_pty_window_change(__unused ssh_session _session,
 				__unused ssh_channel channel,
 				int width, int height,
-				__unused int pxwidth, __unused int pxheight,
+				int pxwidth, int pxheight,
 				void *userdata)
 {
 	struct tmate_session *session = userdata;
 	struct winsize ws;
 
+	memset(&ws, 0, sizeof(ws));
 	ws.ws_col = width;
 	ws.ws_row = height;
+	ws.ws_xpixel = pxwidth;
+	ws.ws_ypixel = pxheight;
 
 	ioctl(session->pty, TIOCSWINSZ, &ws);
 	kill(0, SIGWINCH);
