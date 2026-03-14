@@ -469,9 +469,25 @@ void sse_kill_virtual_client(struct tmate_session *session)
 
 static void sse_broadcast_sync_layout(struct tmate_session *session);
 
-void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy)
+/*
+ * Debounced vpty resize.  Terminal resize drags generate 30-60 events
+ * per second.  Each one triggers: TIOCSWINSZ + SIGWINCH + full screen
+ * redraw + SSE broadcast.  Debouncing with a 80ms timer means we only
+ * do the expensive work once the user pauses or finishes the drag.
+ *
+ * The SYNC_LAYOUT to SSE clients is sent immediately so the browser
+ * resizes its xterm.js grid without delay.  Only the actual vpty
+ * resize (which triggers the full tmux redraw) is debounced.
+ */
+#define VPTY_RESIZE_DEBOUNCE_MS 80
+
+static void on_vpty_resize_timer(__unused evutil_socket_t fd,
+				 __unused short what, void *arg)
 {
+	struct tmate_session *session = arg;
 	struct winsize ws;
+	u_int sx = session->vpty_pending_sx;
+	u_int sy = session->vpty_pending_sy;
 
 	if (!session->vpty_active || session->vpty_master_fd < 0)
 		return;
@@ -488,11 +504,30 @@ void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy)
 	if (session->vpty_child_pid > 0)
 		kill(session->vpty_child_pid, SIGWINCH);
 
-	/* Tell all SSE clients about the new dimensions so the
-	 * browser can resize its xterm.js terminal to match. */
+	tmate_debug("vpty resized to %ux%u (debounced)", sx, sy);
+}
+
+void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy)
+{
+	if (!session->vpty_active || session->vpty_master_fd < 0)
+		return;
+
+	/* Send layout to SSE clients immediately so the browser
+	 * resizes its xterm.js grid without waiting for debounce. */
 	sse_broadcast_sync_layout(session);
 
-	tmate_debug("vpty resized to %ux%u", sx, sy);
+	/* Store pending dimensions and (re)start debounce timer */
+	session->vpty_pending_sx = sx;
+	session->vpty_pending_sy = sy;
+
+	if (!session->ev_vpty_resize) {
+		session->ev_vpty_resize = evtimer_new(session->ev_base,
+						      on_vpty_resize_timer,
+						      session);
+	}
+
+	struct timeval tv = { 0, VPTY_RESIZE_DEBOUNCE_MS * 1000 };
+	evtimer_add(session->ev_vpty_resize, &tv);
 }
 
 #define pack(what, ...) _pack(&tmate_session->websocket_encoder, what, ##__VA_ARGS__)
@@ -2036,17 +2071,18 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		sse_send_session_mode(wc->bev, wc->readonly,
 				      wc->session->web_input_enabled);
 
-		if (wc->session->vpty_active) {
-			/* vpty mode: send layout first so the browser
-			 * knows the terminal dimensions, then replay.
-			 * Limit replay size to prevent write buffer
-			 * overflow that triggers watermark disconnects. */
-			sse_send_sync_layout(wc->bev);
+		sse_send_sync_layout(wc->bev);
+
+		if (wc->session->vpty_active && pty_replay_count > 0) {
+			/* vpty has content — replay recent output.
+			 * Limit size to prevent write buffer overflow
+			 * that triggers watermark disconnects. */
 			pty_replay_send_limited(wc->bev,
 			    PTY_REPLAY_RECONNECT_MAX);
 		} else {
-			/* Fallback: per-pane grid dump */
-			sse_send_sync_layout(wc->bev);
+			/* vpty just spawned (replay empty) or not active:
+			 * send grid-based screen dump for instant content.
+			 * The vpty stream will overwrite this as it arrives. */
 			sse_send_screen_dump(wc->bev);
 			sse_send_current_status(wc->bev);
 		}
@@ -2616,6 +2652,9 @@ void tmate_init_websocket(struct tmate_session *session)
 	session->ev_vpty_read = NULL;
 	session->vpty_active = false;
 	session->jail_sock_name = NULL;
+	session->ev_vpty_resize = NULL;
+	session->vpty_pending_sx = 0;
+	session->vpty_pending_sy = 0;
 
 	TAILQ_INIT(&session->ws_clients);
 
