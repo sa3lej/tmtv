@@ -58,6 +58,13 @@
   var fontSize = 14;
   var cellRatioW = 0, cellRatioH = 0;
   var container = document.getElementById('terminal-container');
+  var searchAddon = null;
+  var searchVisible = false;
+
+  /* Connection quality tracking */
+  var lastDataTime = 0;
+  var connQuality = 'unknown'; /* good, fair, poor, disconnected */
+  var connQualityTimer = null;
 
   function measureCellRatio() {
     if (cellRatioW > 0) return;
@@ -138,6 +145,14 @@
 
     term.open(el);
 
+    /* Load search addon */
+    if (window.SearchAddon && window.SearchAddon.SearchAddon) {
+      try {
+        searchAddon = new window.SearchAddon.SearchAddon();
+        term.loadAddon(searchAddon);
+      } catch (e) {}
+    }
+
     /* Load image addon for SIXEL graphics support */
     if (window.ImageAddon && window.ImageAddon.ImageAddon) {
       try {
@@ -153,11 +168,36 @@
       term.onData(function(data) { queueInput(data); });
     }
 
+    /* Handle text selection for copy */
+    term.onSelectionChange(function() {
+      var sel = term.getSelection();
+      if (sel) {
+        /* Store selection for copy shortcut */
+        term._lastSelection = sel;
+      }
+    });
+
     /* Prevent browser from intercepting terminal keys */
     term.attachCustomKeyEventHandler(function(ev) {
+      /* Ctrl+F: open search */
+      if (ev.ctrlKey && !ev.shiftKey && ev.key === 'f' && ev.type === 'keydown') {
+        ev.preventDefault();
+        toggleSearch(true);
+        return false;
+      }
+      /* Escape: close search */
+      if (ev.key === 'Escape' && searchVisible && ev.type === 'keydown') {
+        toggleSearch(false);
+        return false;
+      }
+      /* Ctrl+Shift+C: copy selection */
+      if (ev.ctrlKey && ev.shiftKey && ev.key === 'C' && ev.type === 'keydown') {
+        copySelection();
+        return false;
+      }
       if (ev.ctrlKey) {
-        /* Allow Ctrl+Shift+C/V for clipboard (browser convention) */
-        if (ev.shiftKey && (ev.key === 'C' || ev.key === 'V')) return true;
+        /* Allow Ctrl+Shift+V for paste (browser convention) */
+        if (ev.shiftKey && ev.key === 'V') return true;
         ev.preventDefault();
         return true;
       }
@@ -172,6 +212,26 @@
     });
 
     sizeToServer();
+
+    /* Focus terminal on touch (mobile) */
+    container.addEventListener('touchstart', function() {
+      if (term) term.focus();
+    }, { passive: true });
+  }
+
+  /* --- Status bar fix: use actual xterm.js dimensions --- */
+  function getActualTerminalDims() {
+    if (!term) return null;
+    try {
+      var dims = term._core._renderService.dimensions;
+      if (dims && dims.css && dims.css.canvas) {
+        return {
+          width: Math.ceil(dims.css.canvas.width),
+          height: Math.ceil(dims.css.canvas.height)
+        };
+      }
+    } catch (e) {}
+    return null;
   }
 
   function sizeToServer() {
@@ -180,8 +240,24 @@
     var effectiveCols = serverCols;
     var effectiveRows = term ? term.rows : contentRows;
 
-    var contentW = Math.ceil(effectiveCols * cellW);
-    var contentH = Math.ceil(effectiveRows * cellH);
+    /* Update font size on the terminal if it changed */
+    if (term && term.options.fontSize !== fontSize) {
+      term.options.fontSize = fontSize;
+    }
+
+    /* Try to use actual xterm.js rendered dimensions for pixel-perfect sizing.
+     * This prevents the status bar from being clipped due to rounding errors
+     * in our cell ratio approximation. */
+    var actualDims = getActualTerminalDims();
+    var contentW, contentH;
+    if (actualDims) {
+      contentW = actualDims.width;
+      contentH = actualDims.height;
+    } else {
+      contentW = Math.ceil(effectiveCols * cellW);
+      contentH = Math.ceil(effectiveRows * cellH);
+    }
+
     var wrap = document.getElementById('terminal-wrap');
 
     if (currentTheme === 'tv') {
@@ -199,11 +275,6 @@
       wrap.style.width = Math.min(contentW, maxW) + 'px';
       wrap.style.height = Math.min(wrapH, maxH) + 'px';
       container.style.height = contentH + 'px';
-    }
-
-    /* Update font size on the terminal if it changed */
-    if (term && term.options.fontSize !== fontSize) {
-      term.options.fontSize = fontSize;
     }
   }
 
@@ -231,6 +302,7 @@
 
   var sessionStart = null;
   var webViewers = 0;
+  var sshViewers = 0;
   var durationTimer = null;
 
   if (sessionToken) {
@@ -241,7 +313,12 @@
 
   function updateMeta() {
     var parts = [];
-    if (webViewers > 0) parts.push('W:' + webViewers);
+    if (webViewers > 0 || sshViewers > 0) {
+      var viewerParts = [];
+      if (sshViewers > 0) viewerParts.push('SSH:' + sshViewers);
+      if (webViewers > 0) viewerParts.push('W:' + webViewers);
+      parts.push(viewerParts.join(' '));
+    }
     if (sessionStart) {
       var elapsed = Math.floor((Date.now() - sessionStart) / 1000);
       var m = Math.floor(elapsed / 60);
@@ -250,10 +327,26 @@
     }
     var metaEl = document.getElementById('titlebar-meta');
     if (metaEl) metaEl.textContent = parts.length ? parts.join(' \u00b7 ') : '';
+
+    /* Update viewer count overlay */
+    var countEl = document.getElementById('viewer-count');
+    if (countEl) {
+      var total = webViewers + sshViewers;
+      if (total > 0) {
+        countEl.textContent = total;
+        countEl.title = (sshViewers ? sshViewers + ' SSH' : '') +
+                        (sshViewers && webViewers ? ', ' : '') +
+                        (webViewers ? webViewers + ' web' : '') + ' viewer' +
+                        (total !== 1 ? 's' : '');
+        countEl.classList.remove('hidden');
+      } else {
+        countEl.classList.add('hidden');
+      }
+    }
   }
 
   var reconnectAttempts = 0;
-  var maxReconnect = 3;
+  var maxReconnect = 5;
   var sessionEnded = false;
   var everConnected = false;
   var sessionReadonly = true;     /* assume RO until server says otherwise */
@@ -406,6 +499,143 @@
     return sseUrl;
   }
 
+  /* --- Seamless reconnect overlay --- */
+  function showReconnectOverlay() {
+    var el = document.getElementById('reconnect-overlay');
+    if (el) el.classList.remove('hidden');
+  }
+
+  function hideReconnectOverlay() {
+    var el = document.getElementById('reconnect-overlay');
+    if (el) el.classList.add('hidden');
+  }
+
+  /* --- Connection quality indicator --- */
+  function updateConnQuality(quality) {
+    if (quality === connQuality) return;
+    connQuality = quality;
+    var el = document.getElementById('conn-quality');
+    if (!el) return;
+    el.className = 'conn-quality ' + quality;
+    var labels = { good: 'Good connection', fair: 'Slow connection', poor: 'Unstable connection', disconnected: 'Disconnected' };
+    el.title = labels[quality] || '';
+    el.setAttribute('aria-label', labels[quality] || '');
+  }
+
+  function startConnQualityMonitor() {
+    if (connQualityTimer) clearInterval(connQualityTimer);
+    connQualityTimer = setInterval(function() {
+      if (!lastDataTime || sessionEnded) return;
+      var age = Date.now() - lastDataTime;
+      if (age < 5000) updateConnQuality('good');
+      else if (age < 15000) updateConnQuality('fair');
+      else if (age < 30000) updateConnQuality('poor');
+      else updateConnQuality('disconnected');
+    }, 2000);
+  }
+
+  /* --- Search --- */
+  function toggleSearch(show) {
+    var bar = document.getElementById('search-bar');
+    var input = document.getElementById('search-input');
+    if (!bar || !searchAddon) return;
+
+    searchVisible = show;
+    if (show) {
+      bar.classList.remove('hidden');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+    } else {
+      bar.classList.add('hidden');
+      searchAddon.clearDecorations();
+      if (term) term.focus();
+    }
+  }
+
+  function doSearch(direction) {
+    if (!searchAddon || !searchVisible) return;
+    var input = document.getElementById('search-input');
+    if (!input || !input.value) return;
+    var opts = { regex: false, wholeWord: false, caseSensitive: false };
+    if (direction === 'prev') {
+      searchAddon.findPrevious(input.value, opts);
+    } else {
+      searchAddon.findNext(input.value, opts);
+    }
+  }
+
+  /* Bind search UI events */
+  (function() {
+    var bar = document.getElementById('search-bar');
+    if (!bar) return;
+    var input = document.getElementById('search-input');
+    var prevBtn = document.getElementById('search-prev');
+    var nextBtn = document.getElementById('search-next');
+    var closeBtn = document.getElementById('search-close');
+
+    if (input) {
+      input.addEventListener('input', function() { doSearch('next'); });
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          doSearch(e.shiftKey ? 'prev' : 'next');
+        }
+        if (e.key === 'Escape') {
+          toggleSearch(false);
+        }
+      });
+    }
+    if (prevBtn) prevBtn.addEventListener('click', function() { doSearch('prev'); });
+    if (nextBtn) nextBtn.addEventListener('click', function() { doSearch('next'); });
+    if (closeBtn) closeBtn.addEventListener('click', function() { toggleSearch(false); });
+  })();
+
+  /* --- Copy text --- */
+  function copySelection() {
+    if (!term) return;
+    var sel = term.getSelection();
+    if (!sel) return;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(sel).then(showCopyToast).catch(function() {
+        fallbackCopy(sel);
+        showCopyToast();
+      });
+    } else {
+      fallbackCopy(sel);
+      showCopyToast();
+    }
+  }
+
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  function showCopyToast() {
+    var toast = document.getElementById('copy-toast');
+    if (!toast) return;
+    toast.classList.remove('hidden');
+    toast.classList.add('show');
+    setTimeout(function() {
+      toast.classList.remove('show');
+      toast.classList.add('hidden');
+    }, 1500);
+  }
+
+  /* Bind copy button */
+  var copyBtn = document.getElementById('copy-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', function() { copySelection(); });
+  }
+
   function connect() {
     setStatus('Connecting...');
 
@@ -446,6 +676,9 @@
     es.onopen = function() {
       setStatus('Connected', 'connected');
       hidePasswordPrompt();
+      hideReconnectOverlay();
+      updateConnQuality('good');
+      startConnQualityMonitor();
       if (!sessionStart) {
         sessionStart = Date.now();
         durationTimer = setInterval(updateMeta, 1000);
@@ -468,6 +701,7 @@
     es.onmessage = function(evt) {
       dataReceived = true;
       reconnectAttempts = 0;
+      lastDataTime = Date.now();
       if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
       var binary = atob(evt.data);
       var bytes = new Uint8Array(binary.length);
@@ -485,6 +719,7 @@
     es.onerror = function() {
       if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
       es.close();
+      updateConnQuality('disconnected');
       if (sessionEnded) {
         setStatus('Session ended', 'error');
         if (durationTimer) clearInterval(durationTimer);
@@ -493,8 +728,10 @@
       }
       if (reconnectAttempts < maxReconnect) {
         reconnectAttempts++;
-        var delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 8000);
+        var delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 5000);
         setStatus('Reconnecting (' + reconnectAttempts + '/' + maxReconnect + ')...', 'error');
+        /* Seamless reconnect: keep terminal visible, show subtle overlay */
+        showReconnectOverlay();
         setTimeout(connect, delay);
       } else {
         setStatus('Connection lost', 'error');
@@ -552,6 +789,7 @@
         break;
       case OUT_VIEWER_COUNT:
         if (inner.length >= 4) {
+          sshViewers = inner[2] || 0;
           webViewers = inner[3];
           updateMeta();
         }
