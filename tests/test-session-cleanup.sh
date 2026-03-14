@@ -338,8 +338,10 @@ else
 fi
 
 # Verify they point to different targets (different inodes)
-INODE1=$(stat -c %i "$JAILDIR/tmux-${TOKEN1}.sock" 2>/dev/null)
-INODE2=$(stat -c %i "$JAILDIR/tmux-${TOKEN2}.sock" 2>/dev/null)
+# stat -c is Linux, stat -f is macOS
+get_inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1" 2>/dev/null; }
+INODE1=$(get_inode "$JAILDIR/tmux-${TOKEN1}.sock")
+INODE2=$(get_inode "$JAILDIR/tmux-${TOKEN2}.sock")
 if [ -n "$INODE1" ] && [ -n "$INODE2" ] && [ "$INODE1" != "$INODE2" ]; then
     pass "jail: per-session links have distinct targets"
 else
