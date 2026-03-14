@@ -271,13 +271,22 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 	}
 
 	/* Connect to the tmux socket via the hard link inside the jail.
-	 * The original socket_path is outside the chroot but a hard link
-	 * at /tmux.sock was created before entering the jail. */
+	 * The original socket_path is outside the chroot but a per-session
+	 * hard link (e.g. /tmux-AbCd1234.sock) was created before entering
+	 * the jail. Using a per-session name prevents concurrent daemons
+	 * from clobbering each other's links. */
 	{
 		struct sockaddr_un sa;
+		const char *jail_path = session->jail_sock_name;
+
+		if (!jail_path) {
+			tmate_info("vpty: no jail socket path configured");
+			return;
+		}
+
 		memset(&sa, 0, sizeof(sa));
 		sa.sun_family = AF_UNIX;
-		strlcpy(sa.sun_path, "/tmux.sock", sizeof(sa.sun_path));
+		strlcpy(sa.sun_path, jail_path, sizeof(sa.sun_path));
 
 		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 		if (sock_fd < 0) {
@@ -287,8 +296,8 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		}
 		if (connect(sock_fd, (struct sockaddr *)&sa,
 			    sizeof(sa)) < 0) {
-			tmate_info("vpty: connect(/tmux.sock) failed: %s",
-				   strerror(errno));
+			tmate_info("vpty: connect(%s) failed: %s",
+				   jail_path, strerror(errno));
 			close(sock_fd);
 			return;
 		}
@@ -2471,6 +2480,7 @@ void tmate_init_websocket(struct tmate_session *session)
 	session->vpty_child_pid = -1;
 	session->ev_vpty_read = NULL;
 	session->vpty_active = false;
+	session->jail_sock_name = NULL;
 
 	TAILQ_INIT(&session->ws_clients);
 

@@ -711,6 +711,62 @@ static void gc_stale_sessions(void)
 
 	if (removed)
 		tmate_info("Session GC: removed %d stale entries", removed);
+
+	/*
+	 * Also GC stale per-session jail sockets (tmux-*.sock).
+	 * These are hard-links to session sockets.  If the target is
+	 * dead (connect fails), remove the hard-link.
+	 */
+	dir = opendir(TMATE_WORKDIR "/jail");
+	if (!dir)
+		return;
+
+	removed = 0;
+	while ((ent = readdir(dir)) != NULL) {
+		if (strncmp(ent->d_name, "tmux-", 5) != 0)
+			continue;
+		size_t nlen = strlen(ent->d_name);
+		if (nlen < 10 || strcmp(ent->d_name + nlen - 5, ".sock") != 0)
+			continue;
+
+		snprintf(path, sizeof(path), TMATE_WORKDIR "/jail/%s",
+			 ent->d_name);
+
+		if (lstat(path, &st) < 0 || !S_ISSOCK(st.st_mode)) {
+			unlink(path);
+			removed++;
+			continue;
+		}
+
+		/* Connect-test: if the socket is dead, remove it */
+		{
+			struct sockaddr_un addr;
+			int sock;
+
+			sock = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+			if (sock < 0)
+				continue;
+
+			memset(&addr, 0, sizeof(addr));
+			addr.sun_family = AF_UNIX;
+			strlcpy(addr.sun_path, path, sizeof(addr.sun_path));
+
+			if (connect(sock, (struct sockaddr *)&addr,
+				    sizeof(addr)) < 0 &&
+			    errno != EINPROGRESS && errno != EAGAIN) {
+				close(sock);
+				unlink(path);
+				removed++;
+			} else {
+				close(sock);
+			}
+		}
+	}
+
+	closedir(dir);
+
+	if (removed)
+		tmate_info("Jail GC: removed %d stale socket links", removed);
 }
 
 /*

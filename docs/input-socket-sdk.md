@@ -47,7 +47,7 @@ loop:
 | USER_JOIN | 0 | `[0, user_id:int, name:str, readonly:bool, type:str]` | Viewer connected |
 | USER_LEAVE | 1 | `[1, user_id:int]` | Viewer disconnected |
 | USER_INPUT | 2 | `[2, user_id:int, pane_id:int, keycode:uint64]` | Keystroke from viewer |
-| USER_LIST | 3 | `[3, [{id:int, name:str, readonly:bool, type:str}, ...]]` | All current viewers (response to SUBSCRIBE) |
+| USER_LIST | 3 | `[3, [[id:int, name:str, readonly:bool, type:str], ...]]` | All current viewers (response to SUBSCRIBE) |
 
 ### App → Server
 
@@ -155,8 +155,8 @@ function main():
 
         match msg[0]:
             case 3:  # USER_LIST
-                for user in msg[1]:
-                    users[user.id] = user
+                for user in msg[1]:   # each user is [id, name, readonly, type]
+                    users[user[0]] = {id: user[0], name: user[1], readonly: user[2], type: user[3]}
                 on_user_list(users)
 
             case 0:  # USER_JOIN
@@ -294,6 +294,27 @@ fn recv_msg(stream: &mut UnixStream) -> Option<Vec<rmpv::Value>> {
 5. Type in the viewer terminal — your program should print USER_INPUT
 6. Disconnect the viewer — your program should print USER_LEAVE
 
+## Error handling
+
+tmtv validates all messages from connected apps using safe msgpack parsing. Malformed data **disconnects the offending app** — it never crashes the tmtv client. Your app will see the socket close (read returns EOF / zero bytes).
+
+Conditions that cause disconnection:
+
+| Condition | What went wrong |
+|-----------|----------------|
+| Invalid msgpack | Payload bytes are not valid msgpack |
+| Not an array | Payload decoded but is not a msgpack array |
+| Empty array | Array has zero elements (no command type) |
+| Non-integer command | First array element is not an integer |
+| Missing arguments | Command needs more fields than provided (e.g., SET_MIRROR without boolean) |
+| Wrong argument type | Argument has wrong msgpack type (e.g., string instead of boolean) |
+| Oversized message | Length prefix exceeds 64 KiB (65,536 bytes) |
+| Buffer overflow | Unprocessed data exceeds 8 KiB receive buffer |
+
+Unknown command types (valid array, unrecognized integer at position 0) are silently ignored — the connection stays open. This means you can safely send commands that older tmtv versions don't understand, as long as the framing is correct.
+
+**Defensive design:** If your socket closes unexpectedly, reconnect and re-SUBSCRIBE. Don't assume it was a network error — check your message formatting. A common pattern is to log the last message you sent before disconnection for debugging.
+
 ## Common mistakes
 
 - **Forgetting to SUBSCRIBE.** You won't receive any events until you send `[0]`.
@@ -301,3 +322,4 @@ fn recv_msg(stream: &mut UnixStream) -> Option<Vec<rmpv::Value>> {
 - **Treating `user_id` as stable across reconnects.** If a viewer disconnects and reconnects, they get a new `user_id`.
 - **Ignoring `mirror` mode.** If you want exclusive input (game, chat), set `mirror=false`. Otherwise viewers see their typing echoed in the terminal AND your app gets it — which is confusing for games.
 - **Hardcoding the socket path.** Always read `$TMTV_INPUT_SOCKET`. The path includes the PID and changes every session.
+- **Sending oversized messages.** Keep messages under 64 KiB. In practice, app-to-server messages (SUBSCRIBE, SET_MIRROR) are tiny — this limit only matters if you accidentally serialize large payloads.
