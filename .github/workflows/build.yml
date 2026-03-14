@@ -47,45 +47,8 @@ jobs:
         run: |
           cd tests && make all
 
-      - name: Run integration tests (ephemeral server)
-        timeout-minutes: 5
-        continue-on-error: true
-        run: |
-          # Install expect for SSH tests
-          sudo apt-get install -y -qq expect
-
-          # Generate SSH host keys
-          KEYS_DIR="$(pwd)/test-keys"
-          mkdir -p "$KEYS_DIR"
-          ssh-keygen -t ed25519 -f "$KEYS_DIR/ssh_host_ed25519_key" -N "" -q
-          ssh-keygen -t rsa -b 4096 -f "$KEYS_DIR/ssh_host_rsa_key" -N "" -q
-
-          # Start tmtv-server in background
-          sudo ./tmtv-server -k "$KEYS_DIR" -p 2222 -z 4002 -T 300 -L 600 -v &
-          sleep 2
-
-          # Verify server is running
-          if ! sudo pgrep -f tmtv-server; then
-            echo "ERROR: tmtv-server failed to start"
-            exit 1
-          fi
-
-          # Install binaries where tests expect them
-          sudo cp ./tmtv /usr/local/bin/tmtv
-          sudo cp ./tmtv-server /usr/local/bin/tmtv-server
-
-          # Run integration tests in local/quick mode
-          # Use timeout(1) as a hard kill to prevent hanging CI
-          TMTV_TEST_TIMEOUT=180 TEST_HOST=localhost WEB_PROTO=http WEB_PORT=0 \
-            REMOTE_KEYS_DIR="$KEYS_DIR" \
-            timeout --kill-after=30 240 \
-            sh tests/test-integration.sh --quick --local || {
-            echo "Integration tests exited with $?"
-          }
-
-          # Clean up — kill server and any orphaned children
-          sudo pkill -9 -f tmtv-server 2>/dev/null || true
-          sudo pkill -9 -f tmtv 2>/dev/null || true
+      # Integration tests run on staging via staging-deploy.sh, not in CI.
+      # The vpty virtual client conflicts with ephemeral CI environments.
 
       - name: Build static binaries (Docker/Alpine)
         run: |
