@@ -409,29 +409,25 @@
   function connect() {
     setStatus('Connecting...');
 
-    /* Probe the SSE endpoint with fetch first to detect password gates.
+    /* Probe the SSE endpoint with HEAD to detect password gates.
+     * HEAD validates the token and password without creating a real
+     * SSE connection or spawning the virtual PTY on the server.
      * EventSource does not expose HTTP status codes, so we cannot
      * distinguish a 403 from a network error without this probe. */
-    fetch(buildSseUrl(), { method: 'GET' }).then(function(resp) {
+    fetch(buildSseUrl(), { method: 'HEAD' }).then(function(resp) {
       if (resp.status === 403) {
-        resp.text().then(function(body) {
-          if (body === 'password_required') {
-            showPasswordPrompt(false);
-          } else if (body === 'wrong_password') {
-            sessionPassword = '';
-            sessionStorage.removeItem('tmtv_pw_' + (sessionToken || ''));
-            showPasswordPrompt(true);
-          } else {
-            showErrorOverlay('Access denied.', false);
-          }
-        });
+        /* HEAD 403 has no body — check X-Tmtv-Reason header instead */
+        var reason = resp.headers.get('X-Tmtv-Reason');
+        if (reason === 'password_required') {
+          showPasswordPrompt(false);
+        } else if (reason === 'wrong_password') {
+          sessionPassword = '';
+          sessionStorage.removeItem('tmtv_pw_' + (sessionToken || ''));
+          showPasswordPrompt(true);
+        } else {
+          showErrorOverlay('Access denied.', false);
+        }
         return;
-      }
-      /* Token is valid and no password gate (or password accepted).
-       * Cancel the probe response body so it doesn't linger as a ghost
-       * SSE connection that inflates the web viewer count. */
-      if (resp.body && resp.body.cancel) {
-        resp.body.cancel();
       }
       connectEventSource();
     }).catch(function() {
@@ -449,7 +445,6 @@
 
     es.onopen = function() {
       setStatus('Connected', 'connected');
-      everConnected = true;
       hidePasswordPrompt();
       if (!sessionStart) {
         sessionStart = Date.now();
@@ -461,6 +456,7 @@
        * Use a shorter timeout on reconnects — we already had data
        * before, so the screen dump should arrive quickly. */
       var watchdogMs = everConnected ? 3000 : 10000;
+      everConnected = true;
       silenceTimer = setTimeout(function() {
         if (!dataReceived && !sessionEnded) {
           es.close();

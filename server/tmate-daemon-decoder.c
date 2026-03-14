@@ -219,8 +219,14 @@ static void tmate_sync_window_panes(struct window *w,
 
 		wp = window_pane_find_by_id(id);
 		if (wp && wp->window != w) {
-			/* Pane in the wrong window */
-			tmate_fatal("Pane id=%u in the wrong window", id);
+			/* Pane migrated between windows during a race.
+			 * Remove it from the old window so it can be
+			 * recreated in the correct one below. */
+			tmate_info("Pane id=%u in wrong window, "
+				   "moving to window idx=%d",
+				   id, w->id);
+			window_remove_pane(wp->window, wp);
+			wp = NULL;
 		}
 
 		if (!wp) {
@@ -232,6 +238,10 @@ static void tmate_sync_window_panes(struct window *w,
 			wp = window_add_pane(w, NULL, TMATE_HLIMIT, 0);
 			wp->ictx = input_init(wp, NULL, &wp->palette);
 			window_set_active_pane(w, wp, 0);
+
+			/* Replay any pty_data that arrived before this
+			 * sync_windows created the pane. */
+			pty_pending_replay(id);
 		}
 
 		if (seen_count < TMATE_MAX_PANES)
@@ -368,8 +378,16 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 
 	active_window_idx = unpack_int(s_uk);
 	wl = winlink_find_by_index(&s->windows, active_window_idx);
+	if (!wl) {
+		/* Active window index not found — can happen transiently
+		 * when windows are destroyed between sync messages.
+		 * Fall back to the first window. */
+		tmate_info("Active window idx=%d not found, falling back "
+			   "to first window", active_window_idx);
+		wl = RB_MIN(winlinks, &s->windows);
+	}
 	if (!wl)
-		tmate_fatal("no valid active window");
+		return; /* no windows at all — nothing to do */
 
 	{
 		struct winlink *old_wl = s->curw;
@@ -411,15 +429,94 @@ static void tmate_sync_layout(__unused struct tmate_session *session,
 
 	tmate_sync_windows(s, sx, sy, uk);
 
+	/* Discard pending buffers for panes that never appeared.
+	 * After sync_windows, all valid panes exist — anything
+	 * still pending was a temporary pane that was already gone. */
+	pty_pending_flush_stale();
+
 	/* Resize the virtual PTY client to match the host's dimensions */
 	if (tmate_has_websocket())
 		sse_vpty_resize(session, sx, sy);
+}
+
+/*
+ * Buffer pty_data for panes that don't exist yet.  The host sends
+ * pty_data before sync_windows when panes are created (e.g. Claude
+ * agents, screenshot processes).  We buffer the data and replay it
+ * once sync_windows creates the pane.
+ *
+ * Dynamic linked list — no fixed slot limit.  Each pane's buffer is
+ * capped at PTY_PENDING_MAX bytes; total memory across all panes is
+ * capped at PTY_PENDING_TOTAL_MAX.
+ */
+#define PTY_PENDING_MAX       (128 * 1024)        /* per pane */
+#define PTY_PENDING_TOTAL_MAX (2 * 1024 * 1024)   /* all panes combined */
+
+struct pty_pending {
+	TAILQ_ENTRY(pty_pending) entry;
+	int     id;
+	u_char *data;
+	size_t  len;
+	size_t  cap;
+	int     count;
+};
+
+static TAILQ_HEAD(, pty_pending) pty_pending_list =
+    TAILQ_HEAD_INITIALIZER(pty_pending_list);
+static size_t pty_pending_total;
+
+static void pty_pending_free(struct pty_pending *p)
+{
+	TAILQ_REMOVE(&pty_pending_list, p, entry);
+	pty_pending_total -= p->len;
+	free(p->data);
+	free(p);
+}
+
+/* Replay buffered data into a now-existing pane */
+void pty_pending_replay(int pane_id)
+{
+	struct pty_pending *p, *tmp;
+	struct window_pane *wp;
+
+	TAILQ_FOREACH_SAFE(p, &pty_pending_list, entry, tmp) {
+		if (p->id != pane_id)
+			continue;
+
+		wp = window_pane_find_by_id(pane_id);
+		if (wp && p->len > 0) {
+			tmate_info("Replaying %zu bytes (%d messages) "
+				   "for pane id=%d",
+				   p->len, p->count, pane_id);
+			input_parse_buffer(wp, p->data, p->len);
+			wp->window->flags |= WINDOW_SILENCE;
+		}
+		pty_pending_free(p);
+		return;
+	}
+}
+
+/* Discard buffered data for panes that never appeared */
+void pty_pending_flush_stale(void)
+{
+	struct pty_pending *p, *tmp;
+
+	TAILQ_FOREACH_SAFE(p, &pty_pending_list, entry, tmp) {
+		if (window_pane_find_by_id(p->id))
+			continue; /* pane exists — will be replayed */
+		if (p->count > 0)
+			tmate_info("Discarding %zu bytes (%d messages) "
+				   "for pane id=%d (never synced)",
+				   p->len, p->count, p->id);
+		pty_pending_free(p);
+	}
 }
 
 static void tmate_pty_data(__unused struct tmate_session *session,
 			   struct tmate_unpacker *uk)
 {
 	struct window_pane *wp;
+	struct pty_pending *p;
 	const char *buf;
 	size_t len;
 	int id;
@@ -429,8 +526,52 @@ static void tmate_pty_data(__unused struct tmate_session *session,
 
 	wp = window_pane_find_by_id(id);
 	if (!wp) {
-		tmate_info("pty_data for unknown pane id=%d (len=%zu), "
-			   "discarding", id, len);
+		/* Buffer data until sync_windows creates this pane */
+
+		/* Find existing entry for this pane */
+		TAILQ_FOREACH(p, &pty_pending_list, entry) {
+			if (p->id == id)
+				break;
+		}
+
+		if (!p) {
+			/* Enforce total memory limit — evict oldest */
+			while (pty_pending_total + len > PTY_PENDING_TOTAL_MAX
+			       && !TAILQ_EMPTY(&pty_pending_list)) {
+				struct pty_pending *oldest =
+				    TAILQ_FIRST(&pty_pending_list);
+				tmate_info("Pending buffer over total limit, "
+					   "evicting pane id=%d "
+					   "(%zu bytes, %d messages)",
+					   oldest->id, oldest->len,
+					   oldest->count);
+				pty_pending_free(oldest);
+			}
+
+			p = xcalloc(1, sizeof(*p));
+			p->id = id;
+			TAILQ_INSERT_TAIL(&pty_pending_list, p, entry);
+			tmate_info("Buffering pty_data for unknown pane "
+				   "id=%d (awaiting sync)", id);
+		}
+
+		/* Append data if within per-pane budget */
+		if (p->len + len <= PTY_PENDING_MAX) {
+			if (p->len + len > p->cap) {
+				size_t newcap = p->cap ? p->cap * 2 : 8192;
+				if (newcap < p->len + len)
+					newcap = p->len + len;
+				if (newcap > PTY_PENDING_MAX)
+					newcap = PTY_PENDING_MAX;
+				p->data = xrealloc(p->data, newcap);
+				p->cap = newcap;
+			}
+			memcpy(p->data + p->len, buf, len);
+			p->len += len;
+			pty_pending_total += len;
+		}
+
+		p->count++;
 		return;
 	}
 
@@ -494,6 +635,28 @@ static void tmate_exec_cmd(__unused struct tmate_session *session,
 		tmate_hook_set_option_auth("tmtv-set", argv[2]);
 		cmd_free_argv(argc, argv);
 		return;
+	}
+
+	/*
+	 * Log "set-option [-g] prefix[2] <value>" so integration tests
+	 * can verify the prefix was synced.  The command still runs
+	 * through the normal queue for actual option application.
+	 */
+	{
+		const char *opt_name = NULL, *opt_value = NULL;
+		for (i = 1; i < argc; i++) {
+			if (argv[i][0] == '-')
+				continue;
+			if (!opt_name)
+				opt_name = argv[i];
+			else if (!opt_value)
+				opt_value = argv[i];
+		}
+		if (opt_name && opt_value &&
+		    (!strcmp(opt_name, "prefix") ||
+		     !strcmp(opt_name, "prefix2")))
+			tmate_info("Session %s set to %s",
+				   opt_name, opt_value);
 	}
 
 	/* Build a command string from argv and parse it */
