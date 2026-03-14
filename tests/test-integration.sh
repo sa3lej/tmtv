@@ -3097,8 +3097,11 @@ if [ -n "$BASELINE_SSH_AVG" ] && [ -n "$SSH_MULTI_MS" ]; then
 fi
 
 LATENCY_REPORT="/tmp/tmtv-latency-report.txt"
+LATENCY_VER=$(remote "TERM=xterm-256color $REMOTE_TMTV -V 2>&1" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+LATENCY_VER="${LATENCY_VER:-unknown}"
 {
 	echo "=== tmtv latency report ==="
+	echo "version: $LATENCY_VER"
 	echo "date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 	echo "host: ${TEST_HOST:-unknown}"
 	echo "testid: $TESTID"
@@ -3125,8 +3128,12 @@ LATENCY_REPORT="/tmp/tmtv-latency-report.txt"
 	echo "--- overhead (tmtv - baseline) ---"
 	echo "ssh_overhead_ms: ${SSH_OVERHEAD:-n/a}"
 } > "$LATENCY_REPORT" 2>/dev/null || true
+# Save versioned copy for historical comparison
+LATENCY_HISTORY="/tmp/tmtv-latency-v${LATENCY_VER}.txt"
+cp -f "$LATENCY_REPORT" "$LATENCY_HISTORY" 2>/dev/null || true
 echo ""
 echo "  ** Latency report written to $LATENCY_REPORT **"
+echo "  ** Versioned copy saved to $LATENCY_HISTORY **"
 echo ""
 
 # Print human-readable comparison table
