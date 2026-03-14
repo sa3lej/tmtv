@@ -532,6 +532,38 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: SSH -> Web data flow (Playwright: terminal renders SSH content)
+# -------------------------------------------------------
+if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$HAS_WEB" = "true" ] && [ -n "$TOKEN" ]; then
+	SSHWEB_SCREENSHOT_DIR="/tmp/tmtv-ssh-web-screenshots-$$"
+	mkdir -p "$SSHWEB_SCREENSHOT_DIR"
+	SSHWEB_TEST_SCRIPT="$(dirname "$0")/test-ssh-web.js"
+	SSHWEB_MARKER="SSHWEB_MARKER_$$_$(date +%s)"
+
+	# Type marker into the session so the web viewer can find it
+	remote_tmtv "send-keys -t main 'echo $SSHWEB_MARKER' Enter"
+	sleep 2
+
+	SSHWEB_EXIT=0
+	SSHWEB_OUTPUT=$(TMTV_MARKER="$SSHWEB_MARKER" \
+		NODE_PATH="$PW_NODE_PATH" PLAYWRIGHT_BROWSERS_PATH="$PW_BROWSERS_PATH" \
+		node "$SSHWEB_TEST_SCRIPT" \
+		"$WEB_URL/s/$TOKEN" "$SSHWEB_SCREENSHOT_DIR" 2>&1) || SSHWEB_EXIT=$?
+	if [ $SSHWEB_EXIT -eq 0 ]; then
+		echo "$SSHWEB_OUTPUT" | grep "PASS step 1" >/dev/null && pass "SSH->Web: terminal renders in browser"
+		echo "$SSHWEB_OUTPUT" | grep "PASS step 2" >/dev/null && pass "SSH->Web: SSH content visible in web viewer"
+	elif echo "$SSHWEB_OUTPUT" | grep -q "MODULE_NOT_FOUND"; then
+		skip "SSH->Web browser tests" "playwright not installed"
+	else
+		echo "    SSH->Web test output: $SSHWEB_OUTPUT" >&2
+		fail "SSH->Web: terminal renders in browser" "exit=$SSHWEB_EXIT"
+	fi
+	rm -rf "$SSHWEB_SCREENSHOT_DIR"
+else
+	skip "SSH->Web browser tests" "no playwright, no web, or no token"
+fi
+
+# -------------------------------------------------------
 # Test: SSE viewer count — verify W count increments and decrements
 # -------------------------------------------------------
 if [ -n "$TOKEN" ]; then
