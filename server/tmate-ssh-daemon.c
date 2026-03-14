@@ -52,6 +52,27 @@ static int on_ssh_channel_read(__unused ssh_session _session,
 	return written;
 }
 
+/*
+ * Backpressure retry timer.  When ssh_channel_write() fails but the
+ * connection is alive, retry after a short delay instead of spinning
+ * the CPU with immediate event_active() calls.
+ */
+#define BACKPRESSURE_RETRY_MS 10
+
+static void on_backpressure_retry(__unused evutil_socket_t fd,
+				  __unused short what, void *arg)
+{
+	struct tmate_session *session = arg;
+	struct tmate_encoder *enc = &session->daemon_encoder;
+
+	/* Re-trigger the encoder's flush via event_active so the
+	 * normal on_encoder_buffer_ready path runs. */
+	if (!enc->ev_active) {
+		event_active(enc->ev_buffer, EV_READ, 0);
+		enc->ev_active = true;
+	}
+}
+
 static void on_daemon_encoder_write(void *userdata, struct evbuffer *buffer)
 {
 	struct tmate_session *session = userdata;
@@ -76,13 +97,16 @@ static void on_daemon_encoder_write(void *userdata, struct evbuffer *buffer)
 				tmate_debug("daemon_encoder_write: backpressure "
 					    "(%zd bytes buffered), will retry",
 					    len);
-				struct tmate_encoder *enc =
-				    &session->daemon_encoder;
-				if (!enc->ev_active) {
-					event_active(enc->ev_buffer,
-						     EV_READ, 0);
-					enc->ev_active = true;
+				/* Retry after delay instead of spinning CPU */
+				if (!session->ev_backpressure) {
+					session->ev_backpressure =
+					    evtimer_new(session->ev_base,
+							on_backpressure_retry,
+							session);
 				}
+				struct timeval tv = { 0,
+				    BACKPRESSURE_RETRY_MS * 1000 };
+				evtimer_add(session->ev_backpressure, &tv);
 			}
 			break;
 		}
@@ -514,8 +538,9 @@ void tmate_spawn_daemon(struct tmate_session *session)
 
 	event_reinit(session->ev_base);
 
-	/* Re-create websocket encoder event on the new base (old one
-	 * was orphaned by fork + event_reinit) */
+	/* Re-create encoder events on the new base (old ones were
+	 * orphaned by fork + event_reinit) */
+	tmate_encoder_rebind(&session->daemon_encoder, session->ev_base);
 	if (tmate_has_websocket())
 		tmate_encoder_rebind(&session->websocket_encoder, session->ev_base);
 

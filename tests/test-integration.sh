@@ -1334,25 +1334,29 @@ fi
 teardown_section "multi-session"
 
 # -------------------------------------------------------
-# Test: bare tmtv creates new session (matches tmux default behavior)
+# Test: bare tmtv creates isolated session (v1.6.0 session isolation)
 # -------------------------------------------------------
+# Bare `tmtv` uses a PID-based socket so it gets its own isolated
+# server.  It must NOT add sessions to an existing server — that
+# causes layout oscillation and 100% server CPU (tmtv-jdx).
 remote "timeout 10 env TERM=xterm-256color $REMOTE_TMTV new -d -s existing1" 2>/dev/null
 wait_for 10 1 "existing1 session ready" \
 	"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q existing1'"
 if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q "existing1"; then
-	# Bare tmtv against existing server — should create a new session, not attach
-	# Use script to provide a pty (tmtv needs one for an interactive session)
+	# Bare tmtv should create its own isolated server (PID-based socket),
+	# NOT add a session to the existing server.
 	remote "timeout 3 script -qc 'TERM=xterm-256color $REMOTE_TMTV' /dev/null </dev/null" 2>/dev/null || true
 	sleep 1
+	# The existing server should still have exactly 1 session
 	COUNT=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | wc -l)
-	if [ "$COUNT" -ge 2 ]; then
-		pass "bare tmtv creates new session (count=$COUNT)"
+	if [ "$COUNT" -eq 1 ]; then
+		pass "bare tmtv creates isolated session (existing server unchanged, count=$COUNT)"
 	else
-		fail "bare tmtv creates new session" "expected >= 2 sessions, got $COUNT"
+		fail "bare tmtv creates isolated session" "expected 1 session in existing server, got $COUNT"
 	fi
 	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 else
-	fail "bare tmtv creates new session" "could not create test session"
+	fail "bare tmtv creates isolated session" "could not create test session"
 fi
 teardown_section "bare-tmtv"
 
@@ -3093,8 +3097,11 @@ if [ -n "$BASELINE_SSH_AVG" ] && [ -n "$SSH_MULTI_MS" ]; then
 fi
 
 LATENCY_REPORT="/tmp/tmtv-latency-report.txt"
+LATENCY_VER=$(remote "TERM=xterm-256color $REMOTE_TMTV -V 2>&1" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+LATENCY_VER="${LATENCY_VER:-unknown}"
 {
 	echo "=== tmtv latency report ==="
+	echo "version: $LATENCY_VER"
 	echo "date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 	echo "host: ${TEST_HOST:-unknown}"
 	echo "testid: $TESTID"
@@ -3121,8 +3128,12 @@ LATENCY_REPORT="/tmp/tmtv-latency-report.txt"
 	echo "--- overhead (tmtv - baseline) ---"
 	echo "ssh_overhead_ms: ${SSH_OVERHEAD:-n/a}"
 } > "$LATENCY_REPORT" 2>/dev/null || true
+# Save versioned copy for historical comparison
+LATENCY_HISTORY="/tmp/tmtv-latency-v${LATENCY_VER}.txt"
+cp -f "$LATENCY_REPORT" "$LATENCY_HISTORY" 2>/dev/null || true
 echo ""
 echo "  ** Latency report written to $LATENCY_REPORT **"
+echo "  ** Versioned copy saved to $LATENCY_HISTORY **"
 echo ""
 
 # Print human-readable comparison table

@@ -274,6 +274,7 @@ struct tmate_session {
 
 	struct tmate_encoder daemon_encoder;
 	struct tmate_decoder daemon_decoder;
+	struct event *ev_backpressure;	/* SSH write backpressure retry timer */
 	const char *client_version;
 	int client_protocol_version;
 	struct event *ev_notify_timer;	/* libevent2: heap-allocated */
@@ -313,6 +314,9 @@ struct tmate_session {
 	struct event *ev_vpty_read;
 	bool vpty_active;	/* true once child is running */
 	char *jail_sock_name;	/* per-session jail socket name (e.g. "/tmux-AbCd1234.sock") */
+	struct event *ev_vpty_resize;	/* debounce timer for vpty resize */
+	u_int vpty_pending_sx;		/* pending resize dimensions */
+	u_int vpty_pending_sy;
 
 	/* only for role client-pty */
 	int pty;
