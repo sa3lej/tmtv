@@ -257,7 +257,7 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		memset(&ws, 0, sizeof(ws));
 		if (s && s->curw && s->curw->window) {
 			ws.ws_col = s->curw->window->sx;
-			ws.ws_row = s->curw->window->sy;
+			ws.ws_row = s->curw->window->sy + 1; /* +1 for status bar */
 		} else {
 			ws.ws_col = 80;
 			ws.ws_row = 24;
@@ -408,9 +408,9 @@ void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy)
 
 	memset(&ws, 0, sizeof(ws));
 	ws.ws_col = sx;
-	ws.ws_row = sy;
+	ws.ws_row = sy + 1; /* +1 for status bar */
 	ws.ws_xpixel = sx * 15;
-	ws.ws_ypixel = sy * 15;
+	ws.ws_ypixel = (sy + 1) * 15;
 
 	if (ioctl(session->vpty_master_fd, TIOCSWINSZ, &ws) < 0)
 		tmate_info("vpty resize ioctl failed: %s", strerror(errno));
@@ -1007,6 +1007,8 @@ static int sse_do_handshake(struct ws_client *wc)
 	static const char *reject_password =
 		"HTTP/1.1 403 Forbidden\r\n"
 		"Content-Type: text/plain\r\n"
+		"X-Tmtv-Reason: password_required\r\n"
+		"Access-Control-Expose-Headers: X-Tmtv-Reason\r\n"
 		"Content-Length: 17\r\n"
 		"Connection: close\r\n"
 		"\r\n"
@@ -1015,6 +1017,8 @@ static int sse_do_handshake(struct ws_client *wc)
 	static const char *reject_wrong_password =
 		"HTTP/1.1 403 Forbidden\r\n"
 		"Content-Type: text/plain\r\n"
+		"X-Tmtv-Reason: wrong_password\r\n"
+		"Access-Control-Expose-Headers: X-Tmtv-Reason\r\n"
 		"Content-Length: 14\r\n"
 		"Connection: close\r\n"
 		"\r\n"
@@ -1025,7 +1029,7 @@ static int sse_do_handshake(struct ws_client *wc)
 		static const char *cors_response =
 			"HTTP/1.1 204 No Content\r\n"
 			"Access-Control-Allow-Origin: *\r\n"
-			"Access-Control-Allow-Methods: GET, POST\r\n"
+			"Access-Control-Allow-Methods: GET, HEAD, POST\r\n"
 			"Access-Control-Allow-Headers: Content-Type, X-Tmtv-Input\r\n"
 			"Access-Control-Max-Age: 86400\r\n"
 			"Content-Length: 0\r\n"
@@ -1036,11 +1040,15 @@ static int sse_do_handshake(struct ws_client *wc)
 		return -1;
 	}
 
-	/* Accept GET and POST requests */
+	/* Accept GET, HEAD, and POST requests */
 	bool is_post_method = false;
+	bool is_head_method = false;
 	int method_len;
 	if (strncmp(data, "GET ", 4) == 0) {
 		method_len = 4;
+	} else if (strncmp(data, "HEAD ", 5) == 0) {
+		method_len = 5;
+		is_head_method = true;
 	} else if (strncmp(data, "POST ", 5) == 0) {
 		method_len = 5;
 		is_post_method = true;
@@ -1049,7 +1057,7 @@ static int sse_do_handshake(struct ws_client *wc)
 		evbuffer_drain(input, (header_end - data) + 4);
 		static const char *method_reject =
 			"HTTP/1.1 405 Method Not Allowed\r\n"
-			"Allow: GET, POST\r\n"
+			"Allow: GET, HEAD, POST\r\n"
 			"Content-Length: 0\r\n"
 			"Connection: close\r\n"
 			"\r\n";
@@ -1105,6 +1113,23 @@ static int sse_do_handshake(struct ws_client *wc)
 			tmate_debug("SSE password accepted");
 			free(pw);
 		}
+	}
+
+	if (is_head_method) {
+		/* HEAD probe: token/password validated, return 200 OK
+		 * without creating an SSE connection or spawning vpty.
+		 * Used by the browser to detect password gates. */
+		static const char *head_ok =
+			"HTTP/1.1 200 OK\r\n"
+			"Content-Type: text/event-stream\r\n"
+			"Access-Control-Allow-Origin: *\r\n"
+			"Content-Length: 0\r\n"
+			"Connection: close\r\n"
+			"\r\n";
+		evbuffer_drain(input, (header_end - data) + 4);
+		bufferevent_write(wc->bev, head_ok, strlen(head_ok));
+		tmate_debug("HEAD probe handled — no SSE connection created");
+		return -1; /* close after flush */
 	}
 
 	if (is_post_method) {
@@ -1337,6 +1362,9 @@ void tmate_broadcast_viewer_count(struct tmate_session *session)
 	count_ssh_viewers(&ssh_rw, &ssh_ro);
 	web = count_web_viewers(session);
 
+	tmate_info("Viewer count update: SSH(rw=%d ro=%d) Web=%d",
+		   ssh_rw, ssh_ro, web);
+
 	/* Update format variables for status bar */
 	snprintf(buf, sizeof(buf), "%d", ssh_rw + ssh_ro);
 	tmate_set_env("tmtv_ssh_viewers", buf);
@@ -1367,7 +1395,8 @@ static void ws_client_free(struct ws_client *wc)
 	if (was_connected && session->input_mode_enabled && wc->viewer_id > 0)
 		tmate_send_user_leave(session, wc->viewer_id);
 
-	tmate_info("SSE client disconnected");
+	tmate_info("SSE %s disconnected",
+		   wc->is_post ? "POST client" : "client");
 	TAILQ_REMOVE(&session->ws_clients, wc, entry);
 	if (wc->bev)
 		bufferevent_free(wc->bev);
