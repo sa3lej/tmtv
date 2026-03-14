@@ -121,15 +121,16 @@ static void on_encoder_write(void *userdata, struct evbuffer *buffer)
 					    "(%zd bytes buffered), will retry",
 					    len);
 				/*
-				 * Re-activate the encoder event so we retry
-				 * on the next event loop iteration.
+				 * Schedule a timer-based retry instead of
+				 * event_active().  event_active() fires
+				 * before the next poll() with zero timeout,
+				 * causing a 100% CPU busy-loop when the SSH
+				 * channel window stays full.  A 25ms timer
+				 * lets the event loop sleep and gives the
+				 * server time to drain.
 				 */
-				struct tmate_encoder *enc =
-				    &client->tmate_session->encoder;
-				if (!enc->ev_active) {
-					event_active(enc->ev_buffer, EV_READ, 0);
-					enc->ev_active = true;
-				}
+				tmate_encoder_schedule_retry(
+				    &client->tmate_session->encoder);
 			}
 			break;
 		}
