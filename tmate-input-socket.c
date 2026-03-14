@@ -410,6 +410,12 @@ tmtv_input_socket_create(void)
 
 	input_listen_fd = fd;
 	setenv("TMTV_INPUT_SOCKET", input_socket_path, 1);
+	/* Also propagate to tmux's global_environ so spawned shells
+	 * inherit it.  setenv() only updates the C-level environ,
+	 * but global_environ was already snapshot before this runs. */
+	if (global_environ != NULL)
+		environ_set(global_environ, "TMTV_INPUT_SOCKET", 0,
+			    "%s", input_socket_path);
 	tmate_info("input socket: listening on %s", input_socket_path);
 }
 
