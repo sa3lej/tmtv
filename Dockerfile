@@ -48,7 +48,7 @@ COPY . .
 RUN sh autogen.sh && \
     # Static builds break AC_SEARCH_LIBS checks (can't link test programs).
     # Override the results for functions we know exist on musl/Alpine.
-    ./configure --enable-static --enable-utf8proc \
+    ./configure --enable-static --enable-utf8proc --enable-sixel \
     ac_cv_search_utf8proc_charwidth="-lutf8proc" \
     ac_cv_search_forkpty="none required"
 RUN make -j $(nproc)

@@ -35,7 +35,7 @@ jobs:
       - name: Build (dynamic, for tests)
         run: |
           sh autogen.sh
-          ./configure
+          ./configure --enable-sixel
           make -j$(nproc)
 
       - name: Verify binaries
@@ -173,7 +173,7 @@ jobs:
           export PKG_CONFIG_PATH="/tmp/utf8proc-static/lib/pkgconfig:${PKG_CONFIG_PATH}"
 
           sh autogen.sh
-          ./configure --enable-utf8proc \
+          ./configure --enable-utf8proc --enable-sixel \
             CPPFLAGS="-I${BREW}/include -I${OPENSSL}/include -I/tmp/utf8proc-static/include" \
             LDFLAGS="-L${BREW}/lib -L${OPENSSL}/lib -L/tmp/utf8proc-static/lib"
           make -j$(sysctl -n hw.ncpu) \
@@ -259,7 +259,7 @@ jobs:
             export PKG_CONFIG_PATH="/tmp/utf8proc-static/lib/pkgconfig:${PKG_CONFIG_PATH}"
 
             sh autogen.sh
-            ./configure --enable-utf8proc \
+            ./configure --enable-utf8proc --enable-sixel \
               CPPFLAGS="-I${BREW}/include -I${OPENSSL}/include -I/tmp/utf8proc-static/include" \
               LDFLAGS="-L${BREW}/lib -L${OPENSSL}/lib -L/tmp/utf8proc-static/lib"
             make -j$(sysctl -n hw.ncpu) \

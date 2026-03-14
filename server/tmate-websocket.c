@@ -235,7 +235,6 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 {
 	int master_fd, slave_fd;
 	pid_t pid;
-	struct sockaddr_un sa;
 	int sock_fd;
 
 	if (session->vpty_active) {
@@ -243,8 +242,11 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		return;
 	}
 
-	if (openpty(&master_fd, &slave_fd, NULL, NULL, NULL) < 0) {
-		tmate_info("vpty: openpty failed: %s", strerror(errno));
+	/* Use pre-created PTY pair (created before chroot jail) */
+	master_fd = session->vpty_master_fd;
+	slave_fd = session->vpty_slave_fd;
+	if (master_fd < 0 || slave_fd < 0) {
+		tmate_info("vpty: no pre-created PTY available");
 		return;
 	}
 
@@ -263,59 +265,73 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		ioctl(slave_fd, TIOCSWINSZ, &ws);
 	}
 
+	/* Connect to the tmux socket via the hard link inside the jail.
+	 * The original socket_path is outside the chroot but a hard link
+	 * at /tmux.sock was created before entering the jail. */
+	{
+		struct sockaddr_un sa;
+		memset(&sa, 0, sizeof(sa));
+		sa.sun_family = AF_UNIX;
+		strlcpy(sa.sun_path, "/tmux.sock", sizeof(sa.sun_path));
+
+		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (sock_fd < 0) {
+			tmate_info("vpty: socket() failed: %s",
+				   strerror(errno));
+			return;
+		}
+		if (connect(sock_fd, (struct sockaddr *)&sa,
+			    sizeof(sa)) < 0) {
+			tmate_info("vpty: connect(/tmux.sock) failed: %s",
+				   strerror(errno));
+			close(sock_fd);
+			return;
+		}
+	}
+
 	pid = fork();
 	if (pid < 0) {
 		tmate_info("vpty: fork failed: %s", strerror(errno));
+		close(sock_fd);
 		close(master_fd);
 		close(slave_fd);
 		return;
 	}
 
 	if (pid == 0) {
-		/* Child: connect to tmux socket and run client_main */
+		/* Child: use pre-connected tmux socket and run client_main */
 
-		/* Redirect stdio to slave PTY */
+		/* Redirect stdin/stdout to slave PTY */
 		dup2(slave_fd, STDIN_FILENO);
 		dup2(slave_fd, STDOUT_FILENO);
-		dup2(slave_fd, STDERR_FILENO);
 		if (slave_fd > STDERR_FILENO)
 			close(slave_fd);
 		close(master_fd);
 
-		/* Connect to the tmux socket */
-		memset(&sa, 0, sizeof(sa));
-		sa.sun_family = AF_UNIX;
-		strlcpy(sa.sun_path, socket_path, sizeof(sa.sun_path));
-
-		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (sock_fd < 0)
-			_exit(1);
-
-		if (connect(sock_fd, (struct sockaddr *)&sa,
-			    sizeof(sa)) < 0) {
-			close(sock_fd);
-			_exit(1);
-		}
-
 		server_fd = sock_fd;
-
-		setup_ncurse(STDIN_FILENO, "xterm-256color");
 		setenv("TERM", "xterm-256color", 1);
 
 		close_fds_except((int[]){STDIN_FILENO, STDOUT_FILENO,
 					  STDERR_FILENO, sock_fd}, 4);
 
-		event_reinit(session->ev_base);
+		/* Create a fresh event base for the child.  The parent's
+		 * base has registered events that conflict after fork.
+		 * event_reinit() is not sufficient — we need a clean base. */
+		{
+			struct event_base *child_base = event_base_new();
 
-		/* Attach read-only */
-		char *argv_ro[] = {(char *)"attach", (char *)"-r", NULL};
-		int ret = client_main(session->ev_base, 2, argv_ro,
-				      CLIENT_UTF8, 0);
-		_exit(ret);
+			/* Attach read-only */
+			char *argv_ro[] = {(char *)"attach", (char *)"-r", NULL};
+			int ret = client_main(child_base, 2, argv_ro,
+					      CLIENT_UTF8, 0);
+			_exit(ret);
+		}
 	}
 
-	/* Parent: store master fd and register read event */
+	/* Parent: close fds the child owns */
 	close(slave_fd);
+	close(sock_fd);
+	session->vpty_slave_fd = -1;
 
 	session->vpty_master_fd = master_fd;
 	session->vpty_child_pid = pid;
@@ -2413,6 +2429,7 @@ void tmate_init_websocket(struct tmate_session *session)
 	session->ev_ipc = NULL;
 
 	session->vpty_master_fd = -1;
+	session->vpty_slave_fd = -1;
 	session->vpty_child_pid = -1;
 	session->ev_vpty_read = NULL;
 	session->vpty_active = false;

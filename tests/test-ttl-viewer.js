@@ -31,8 +31,8 @@ if (!url) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
     // --- Step 1: /j/ URL connects to the terminal ---
-    const terminal = page.locator('.xterm-screen, #terminal-wrap canvas');
-    await terminal.first().waitFor({ state: 'visible', timeout: 15000 });
+    const terminal = page.locator('#fullscreen-term .xterm-screen');
+    await terminal.waitFor({ state: 'visible', timeout: 15000 });
 
     // Verify status shows connected (not an error state)
     const status = page.locator('#status');
@@ -60,10 +60,10 @@ if (!url) {
       throw new Error('Step 2: expected session ended message, got: ' + msgText);
     }
 
-    // Verify status bar also reflects the ended state
+    // Verify status pill also reflects the ended state
     const endStatus = await status.textContent();
     if (!endStatus || !endStatus.toLowerCase().includes('ended')) {
-      throw new Error('Step 2: expected "Session ended" in status bar, got: ' + endStatus);
+      throw new Error('Step 2: expected "Session ended" in status pill, got: ' + endStatus);
     }
 
     await page.screenshot({ path: screenshotDir + '/ttl-2-expired.png' });
