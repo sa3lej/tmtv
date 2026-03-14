@@ -122,6 +122,20 @@ static void cleanup_session_files(void)
 		unlinkat(dirfd, s->session_token_named, 0);
 	if (s->session_token_rw_named)
 		unlinkat(dirfd, s->session_token_rw_named, 0);
+
+	/* Clean up the per-session jail socket hard-link.
+	 * The path is relative to the jail root, but we can unlink via
+	 * the real filesystem path since cleanup runs before exit.
+	 * Note: unlink() is async-signal-safe. */
+	if (s->jail_sock_name) {
+		/* jail_sock_name is "/tmux-<token>.sock" — prepend jail dir
+		 * for the unlink.  We do this in-place since we're exiting. */
+		char path[128];
+		int n = snprintf(path, sizeof(path), TMATE_WORKDIR "/jail%s",
+				 s->jail_sock_name);
+		if (n > 0 && (size_t)n < sizeof(path))
+			unlink(path);
+	}
 }
 
 /*
@@ -420,15 +434,27 @@ void tmate_spawn_daemon(struct tmate_session *session)
 	/* Prepare the jail for the virtual PTY client:
 	 * 1. Hard-link the tmux socket so the child can connect
 	 * 2. Make jail traversable (0711) so nobody can reach files
-	 * 3. Copy terminfo so client_main() can initialize the terminal */
+	 * 3. Copy terminfo so client_main() can initialize the terminal
+	 *
+	 * Use a per-session socket name (tmux-<token>.sock) so concurrent
+	 * daemons don't clobber each other's hard-links.  All daemons
+	 * share the same jail directory; a fixed name caused the second
+	 * daemon's unlink+link to destroy the first daemon's link.
+	 */
 	if (tmate_has_websocket()) {
 		char *jail_sock;
-		xasprintf(&jail_sock, TMATE_WORKDIR "/jail/tmux.sock");
+		xasprintf(&jail_sock, TMATE_WORKDIR "/jail/tmux-%s.sock",
+			  session->session_token);
 		unlink(jail_sock);
 		if (link(socket_path, jail_sock) < 0)
 			tmate_info("vpty jail link failed: %s",
 				   strerror(errno));
 		chmod(TMATE_WORKDIR "/jail", 0711);
+
+		/* Save the in-jail path for sse_spawn_virtual_client().
+		 * After chroot, the path becomes /tmux-<token>.sock. */
+		xasprintf(&session->jail_sock_name, "/tmux-%s.sock",
+			  session->session_token);
 		free(jail_sock);
 
 		/* Copy terminfo for xterm-256color into the jail.

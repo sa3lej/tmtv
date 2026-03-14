@@ -47,11 +47,13 @@ TEST(session_struct_fields)
 	s.vpty_child_pid = -1;
 	s.ev_vpty_read = NULL;
 	s.vpty_active = false;
+	s.jail_sock_name = NULL;
 
 	ASSERT(s.ssh_client.role == TMATE_ROLE_DAEMON);
 	ASSERT(s.client_protocol_version == TMATE_PROTOCOL_VERSION);
 	ASSERT(s.vpty_master_fd == -1);
 	ASSERT(s.vpty_active == false);
+	ASSERT(s.jail_sock_name == NULL);
 }
 
 /* Verify tmate_settings struct */

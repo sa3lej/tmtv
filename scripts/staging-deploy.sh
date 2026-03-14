@@ -97,6 +97,23 @@ remote() {
     ssh $SSH_OPTS "$STAGING_TARGET" "$@"
 }
 
+# --- Cleanup trap ---
+# Ensure remote temp files from test uploads are cleaned up on exit (success,
+# failure, or interrupt). Deploy artifacts (/tmp/tmtv-bin etc.) are moved into
+# place by the deploy steps so they don't need cleanup here.
+
+_uploaded_test_files=""
+
+cleanup_on_exit() {
+    # Clean up local temp files
+    rm -f /tmp/tmtv-test-output.* /tmp/tmtv-test-exit.* 2>/dev/null || true
+    # Remove uploaded test scripts from /tmp/ on the remote host
+    if [ -n "$_uploaded_test_files" ]; then
+        remote "rm -f $_uploaded_test_files" 2>/dev/null || true
+    fi
+}
+trap cleanup_on_exit EXIT
+
 # --- Step 1: Preflight checks ---
 
 step "Preflight checks"
@@ -350,13 +367,28 @@ else
 
     step "Running integration tests on staging"
 
-    # Upload latest test scripts (auto-discover all test-*.sh and test-*.js)
+    # Verify test scripts exist locally before uploading
+    if [ ! -f "$REPO_ROOT/tests/test-integration.sh" ]; then
+        err "test-integration.sh not found at $REPO_ROOT/tests/"
+        err "Are you running from the tmtv repository root?"
+        exit 5
+    fi
+
+    # Upload latest test scripts (auto-discover all test-*.sh and test-*.js).
+    # The integration test script locates .js helpers via $(dirname "$0"), so
+    # all files must land in the same directory (/tmp/).
+    UPLOAD_COUNT=0
     for f in "$REPO_ROOT"/tests/test-*.sh "$REPO_ROOT"/tests/test-*.js; do
-        [ -f "$f" ] && scp $SCP_OPTS "$f" "${STAGING_TARGET}:/tmp/$(basename "$f")" || {
-            err "Failed to upload $(basename "$f")"
+        [ -f "$f" ] || continue
+        _basename="$(basename "$f")"
+        scp $SCP_OPTS "$f" "${STAGING_TARGET}:/tmp/${_basename}" || {
+            err "Failed to upload ${_basename}"
             exit 5
         }
+        _uploaded_test_files="$_uploaded_test_files /tmp/${_basename}"
+        UPLOAD_COUNT=$((UPLOAD_COUNT + 1))
     done
+    ok "Uploaded $UPLOAD_COUNT test file(s)"
 
     # Build test command
     TEST_FLAGS="--local"
@@ -364,15 +396,39 @@ else
         TEST_FLAGS="$TEST_FLAGS --quick"
     fi
 
-    # Run tests.
+    # Run tests and capture output for summary parsing.
     # TEST_HOST=localhost — test runner runs on the server itself, uses local SSH/SSE ports.
     # WEB_HOST=staging.tmtv.se — Caddy TLS certs are valid for this domain (resolves to
     # 127.0.0.1 on the staging box), so HTTPS web tests work correctly.
-    if remote "TEST_HOST=localhost WEB_HOST=${STAGING_HOST} WEB_PROTO=https WEB_PORT=443 sh /tmp/test-integration.sh $TEST_FLAGS"; then
-        ok "Integration tests passed"
-    else
-        err "Integration tests FAILED"
+    #
+    # Capture output to a file so we can parse the summary line. Stream to
+    # the terminal in real time via tee. In POSIX sh (no pipefail), a pipe's
+    # exit code is the LAST command's (tee), not the remote command's. To get
+    # the actual test exit code we write it to a file from within the subshell.
+    TEST_OUTPUT_FILE=$(mktemp /tmp/tmtv-test-output.XXXXXX)
+    TEST_EXIT_FILE=$(mktemp /tmp/tmtv-test-exit.XXXXXX)
+    (
+        remote "TEST_HOST=localhost WEB_HOST=${STAGING_HOST} WEB_PROTO=https WEB_PORT=443 sh /tmp/test-integration.sh $TEST_FLAGS" 2>&1
+        echo $? > "$TEST_EXIT_FILE"
+    ) | tee "$TEST_OUTPUT_FILE" || true
+    TEST_EXIT=$(cat "$TEST_EXIT_FILE" 2>/dev/null || echo "1")
+    rm -f "$TEST_EXIT_FILE"
+
+    # Parse the summary line: "N tests: X passed, Y failed, Z skipped"
+    TEST_SUMMARY=$(grep -E '^[0-9]+ tests:' "$TEST_OUTPUT_FILE" 2>/dev/null | tail -1 || echo "")
+    rm -f "$TEST_OUTPUT_FILE"
+
+    if [ "$TEST_EXIT" != "0" ]; then
+        err "Integration tests FAILED (exit code $TEST_EXIT)"
+        if [ -n "$TEST_SUMMARY" ]; then
+            err "Results: $TEST_SUMMARY"
+        fi
         exit 5
+    fi
+
+    ok "Integration tests passed"
+    if [ -n "$TEST_SUMMARY" ]; then
+        info "Results: $TEST_SUMMARY"
     fi
 
     # Fetch latency report if it exists
@@ -387,9 +443,17 @@ fi
 
 # --- Summary ---
 
-step "Deploy complete"
-if [ "$MODE" != "test-only" ]; then
+if [ "$MODE" = "test-only" ]; then
+    step "Tests complete"
+    if [ -n "$TEST_SUMMARY" ]; then
+        info "$TEST_SUMMARY"
+    fi
+else
+    step "Deploy complete"
     info "Server: $(remote 'tmtv-server -V 2>&1' || echo 'unknown')"
     info "Health: $(remote 'curl -s -m 3 http://127.0.0.1:4002/healthz' 2>/dev/null || echo 'unavailable')"
+    if [ -n "${TEST_SUMMARY:-}" ]; then
+        info "Tests: $TEST_SUMMARY"
+    fi
 fi
 echo ""

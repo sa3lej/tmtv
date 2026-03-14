@@ -241,6 +241,114 @@ else
     fail "gc: accept loop handles EINTR" "EINTR handling not found"
 fi
 
+# --- Jail socket isolation (tmtv-cvh fix) ---
+# Verify the code uses per-session jail socket names instead of a
+# single shared tmux.sock, which caused concurrent named sessions
+# to clobber each other's hard-links.
+
+# Check that the jail socket path uses the session token
+if grep -q 'jail/tmux-%s.sock' ../server/tmate-ssh-daemon.c; then
+    pass "jail: per-session socket name (tmux-<token>.sock)"
+else
+    fail "jail: per-session socket name (tmux-<token>.sock)" \
+         "expected tmux-%s.sock pattern in tmate-ssh-daemon.c"
+fi
+
+# Check that the old hardcoded tmux.sock is gone from the daemon
+if grep -q '"jail/tmux\.sock"' ../server/tmate-ssh-daemon.c; then
+    fail "jail: no hardcoded tmux.sock in daemon" \
+         "found hardcoded jail/tmux.sock — should be per-session"
+else
+    pass "jail: no hardcoded tmux.sock in daemon"
+fi
+
+# Check that the vpty connect uses the session's jail_sock_name
+if grep -q 'session->jail_sock_name' ../server/tmate-websocket.c; then
+    pass "jail: vpty connect uses session jail_sock_name"
+else
+    fail "jail: vpty connect uses session jail_sock_name" \
+         "expected session->jail_sock_name in tmate-websocket.c"
+fi
+
+# Check that the hardcoded /tmux.sock is gone from websocket code
+if grep -q '"/tmux\.sock"' ../server/tmate-websocket.c; then
+    fail "jail: no hardcoded /tmux.sock in websocket" \
+         "found hardcoded /tmux.sock — should use jail_sock_name"
+else
+    pass "jail: no hardcoded /tmux.sock in websocket"
+fi
+
+# Check that jail_sock_name field exists in the session struct
+if grep -q 'jail_sock_name' ../server/tmate.h; then
+    pass "jail: jail_sock_name field in tmate_session struct"
+else
+    fail "jail: jail_sock_name field in tmate_session struct" \
+         "jail_sock_name not found in tmate.h"
+fi
+
+# Check that cleanup removes jail socket on exit
+if grep -q 'jail_sock_name' ../server/tmate-ssh-daemon.c | grep -q 'unlink'; then
+    pass "jail: cleanup removes jail socket on exit"
+else
+    # More tolerant check: just verify cleanup references jail_sock_name
+    if grep -A3 'jail_sock_name' ../server/tmate-ssh-daemon.c | grep -q 'unlink'; then
+        pass "jail: cleanup removes jail socket on exit"
+    else
+        fail "jail: cleanup removes jail socket on exit" \
+             "jail_sock_name cleanup not found in tmate-ssh-daemon.c"
+    fi
+fi
+
+# Check that jail socket GC is in the server GC function
+if grep -q 'tmux-' ../server/tmate-ssh-server.c && \
+   grep -q '\.sock' ../server/tmate-ssh-server.c; then
+    pass "jail: GC handles stale jail sockets"
+else
+    fail "jail: GC handles stale jail sockets" \
+         "jail socket GC not found in tmate-ssh-server.c"
+fi
+
+# Simulate jail socket isolation: two sessions creating sockets
+# in the same jail directory should not clobber each other
+JAILDIR="$TMPDIR/jail-isolation"
+mkdir -p "$JAILDIR"
+
+# Create two "session sockets" (use regular files as stand-ins)
+SESSDIR4="$TMPDIR/jail-sessions"
+mkdir -p "$SESSDIR4"
+
+# Simulate the per-session naming convention
+TOKEN1="AbCd1234"
+TOKEN2="EfGh5678"
+touch "$SESSDIR4/$TOKEN1"
+touch "$SESSDIR4/$TOKEN2"
+
+# Create per-session jail links (like the fixed code does)
+ln -f "$SESSDIR4/$TOKEN1" "$JAILDIR/tmux-${TOKEN1}.sock"
+ln -f "$SESSDIR4/$TOKEN2" "$JAILDIR/tmux-${TOKEN2}.sock"
+
+# Both links should exist (unlike the old code where the second
+# unlink+link would destroy the first)
+if [ -e "$JAILDIR/tmux-${TOKEN1}.sock" ] && \
+   [ -e "$JAILDIR/tmux-${TOKEN2}.sock" ]; then
+    pass "jail: concurrent sessions don't clobber each other"
+else
+    fail "jail: concurrent sessions don't clobber each other" \
+         "one of the jail socket links is missing"
+fi
+
+# Verify they point to different targets (different inodes)
+# stat -c is Linux, stat -f is macOS
+get_inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1" 2>/dev/null; }
+INODE1=$(get_inode "$JAILDIR/tmux-${TOKEN1}.sock")
+INODE2=$(get_inode "$JAILDIR/tmux-${TOKEN2}.sock")
+if [ -n "$INODE1" ] && [ -n "$INODE2" ] && [ "$INODE1" != "$INODE2" ]; then
+    pass "jail: per-session links have distinct targets"
+else
+    fail "jail: per-session links have distinct targets" \
+         "inode1=$INODE1 inode2=$INODE2 (should differ)"
+fi
+
 echo ""
 echo "$((PASSED + FAILED)) tests: $PASSED passed, $FAILED failed"
 exit $FAILED

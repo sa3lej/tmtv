@@ -32,10 +32,10 @@ These are sent by tmtv to your connected program.
 ### USER_LIST (3)
 
 ```
-[3, [{id: int, name: string, readonly: bool, type: string}, ...]]
+[3, [[id: int, name: string, readonly: bool, type: string], ...]]
 ```
 
-Sent immediately after you subscribe. Contains all currently connected viewers. `type` is `"ssh"` or `"web"`. `readonly` is `true` for read-only token connections.
+Sent immediately after you subscribe. Contains all currently connected viewers. Each user is a positional array `[id, name, readonly, type]` — not a map. `type` is `"ssh"` or `"web"`. `readonly` is `true` for read-only token connections.
 
 ### USER_JOIN (0)
 
@@ -124,7 +124,7 @@ while True:
     if msg is None:
         break
     msg_type = msg[0]
-    if msg_type == 3:  # USER_LIST
+    if msg_type == 3:  # USER_LIST — each user is [id, name, readonly, type]
         print(f"Connected viewers: {msg[1]}")
     elif msg_type == 0:  # USER_JOIN
         print(f"Join: user_id={msg[1]} name={msg[2]} ro={msg[3]} type={msg[4]}")
@@ -161,6 +161,21 @@ while pos < len(data):
     pos += length
 "
 ```
+
+## Error handling
+
+tmtv validates all incoming messages from connected apps. Malformed data disconnects the offending app — it never crashes tmtv.
+
+Conditions that cause disconnection:
+
+- **Invalid msgpack:** Payload bytes that cannot be decoded as valid msgpack.
+- **Wrong structure:** Payload is not a msgpack array, or the array is empty, or the first element is not an integer.
+- **Missing arguments:** A command requires more fields than were sent (e.g., SET_MIRROR without the boolean argument).
+- **Wrong argument type:** An argument has the wrong msgpack type (e.g., SET_MIRROR with a string instead of boolean).
+- **Oversized message:** The length prefix exceeds 64 KiB (65,536 bytes).
+- **Buffer overflow:** Accumulated unprocessed data exceeds the 8 KiB receive buffer (e.g., sending many messages faster than they can be dispatched).
+
+Unknown command types (valid msgpack array with an unrecognized integer at position 0) are silently ignored — the connection stays open.
 
 ## Lifecycle
 

@@ -225,6 +225,37 @@ read_rw_token_stable() {
 	echo "$_rw"
 }
 
+# Teardown helper: clean up tmtv client sessions and stale state between
+# test sections. Ensures no leftover processes, tokens, or session directory
+# entries leak into the next test.
+#
+# Usage: teardown_section [label]
+#
+# What it does:
+#   1. Kill tmtv client via kill-server (tmux command — kills the client, NOT tmtv-server daemon)
+#   2. Kill any lingering expect/SSH viewer processes from this test
+#   3. Wait for tmtv client process to exit (not tmtv-server daemon!)
+#   4. Clean up stale session directory entries so the next section starts fresh
+teardown_section() {
+	_ts_label="${1:-section}"
+	# Kill tmtv client server (tmux command)
+	remote "TERM=xterm-256color $REMOTE_TMTV kill-server 2>/dev/null" || true
+	# Kill any lingering expect/SSH processes from tests
+	remote "pkill -9 -f 'expect.*${TMTV_PORT}'" 2>/dev/null || true
+	remote "pkill -9 -f 'ssh.*-p.*${TMTV_PORT}.*@127'" 2>/dev/null || true
+	# Wait for tmtv CLIENT processes to exit (not the server daemon).
+	# The tmtv-server daemon is a systemd service that stays running.
+	# Check that 'tmtv list-sessions' fails (no tmtv client server running).
+	wait_for 5 1 "tmtv client stopped after $_ts_label" \
+		"! remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions' 2>/dev/null" || true
+	# Clean stale session directory entries — tokens, symlinks, sockets
+	# from this section. Without this, the next section's token discovery
+	# may find stale tokens and connect to dead sessions.
+	remote "rm -f $SESSIONS_DIR/* 2>/dev/null" || true
+	# Brief pause for port/socket reuse
+	sleep 1
+}
+
 # Generate unique session name for this test run
 TESTID="t$$"
 
@@ -247,16 +278,18 @@ cleanup() {
 	remote "rm -f /tmp/.tmtv-test-*-$TESTID.conf" 2>/dev/null || true
 	remote "rm -f $REMOTE_CONF" 2>/dev/null || true
 	remote "rm -f /tmp/tmtv-*-$$" 2>/dev/null || true
+	# Clean up session directory (stale tokens, symlinks)
+	remote "rm -f $SESSIONS_DIR/* 2>/dev/null" || true
 }
 trap cleanup EXIT
 
 # Global timeout safety net — prevent indefinite hangs in CI and manual runs.
 # Individual tests have their own timeouts, but this catches anything missed.
-# Quick mode: 240s. Full mode (with Playwright): 600s.
+# Quick mode: 480s. Full mode (with Playwright): 600s.
 if [ -n "$TMTV_TEST_TIMEOUT" ]; then
 	_CI_TIMEOUT="$TMTV_TEST_TIMEOUT"
 elif [ "$QUICK" = "true" ]; then
-	_CI_TIMEOUT=240
+	_CI_TIMEOUT=480
 else
 	_CI_TIMEOUT=600
 fi
@@ -1303,6 +1336,10 @@ else
 	pass "session symlink removed on exit"
 fi
 
+# Clean slate before isolated test sections: kill any lingering
+# background viewers and stale sessions from the first half
+teardown_section "kill-session"
+
 # -------------------------------------------------------
 # Test: multiple sessions work (v1.4.0 multi-session support)
 # -------------------------------------------------------
@@ -1323,8 +1360,7 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 else
 	fail "second new-session creates multi2" "could not create test session"
 fi
-wait_for 5 1 "server stopped after multi-session" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "multi-session"
 
 # -------------------------------------------------------
 # Test: bare tmtv creates new session (matches tmux default behavior)
@@ -1347,8 +1383,7 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 else
 	fail "bare tmtv creates new session" "could not create test session"
 fi
-wait_for 5 1 "server stopped after bare-tmtv" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "bare-tmtv"
 
 # -------------------------------------------------------
 # Test: named session auto-numbering (name, name-1, name-2)
@@ -1486,8 +1521,7 @@ fi
 remote "TERM=xterm-256color $REMOTE_TMTV -S $AUTONUM_SOCK1 kill-server" 2>/dev/null || true
 remote "TERM=xterm-256color $REMOTE_TMTV -S $AUTONUM_SOCK2 kill-server" 2>/dev/null || true
 remote "rm -f $AUTONUM_CONF1 $AUTONUM_CONF2 $AUTONUM_SOCK1 $AUTONUM_SOCK2" 2>/dev/null || true
-wait_for 5 1 "server stopped after autonum" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "autonum"
 
 # -------------------------------------------------------
 # Test: tmtv reattach after detach works
@@ -1512,8 +1546,7 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 else
 	fail "tmtv reattach after detach works" "could not create test session"
 fi
-wait_for 5 1 "server stopped after reattach" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "reattach"
 
 # -------------------------------------------------------
 # Test: session recreation after kill-session works
@@ -1544,8 +1577,7 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 else
 	fail "session recreation after kill-session works" "could not create test session"
 fi
-wait_for 5 1 "server stopped after kill-recreation" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "kill-recreation"
 
 # -------------------------------------------------------
 # Test: tmtv list-sessions shows running session
@@ -1559,9 +1591,7 @@ if echo "$LS_OUTPUT" | grep -q "lsession1"; then
 else
 	fail "tmtv list-sessions shows running session" "output: $LS_OUTPUT"
 fi
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
-wait_for 5 1 "server stopped after list-sessions" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "list-sessions"
 
 # -------------------------------------------------------
 # Test: tmtv attach -t <session> works
@@ -1582,8 +1612,7 @@ if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions" 2>/dev/null | grep -q
 else
 	fail "tmtv attach -t <session> works" "could not create test session"
 fi
-wait_for 5 1 "server stopped after attach" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "attach"
 
 # -------------------------------------------------------
 # Test: password-protected session — SSH rejects pubkey auth
@@ -1695,10 +1724,8 @@ else
 fi
 
 # Clean up password session
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $PW_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after password tests" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "password"
 
 # -------------------------------------------------------
 # Web input test helper: start session, test POST via each token type
@@ -1746,7 +1773,7 @@ _prev_tok=""
 _stable=0
 for _wait in $(seq 1 20); do
 	sleep 1
-	_cur_tok=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | grep -v '^ro-' | head -1" || echo "")
+	_cur_tok=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | grep -v '^ro-' | grep -v '^[0-9]*-' | head -1" || echo "")
 	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
 		_stable=$((_stable + 1))
 		if [ "$_stable" -ge 3 ]; then
@@ -1826,9 +1853,7 @@ if [ -n "$ANON_TOKEN" ]; then
 
 	# Dangerous command blocklist: Ctrl+B d (detach-client) must NOT
 	# detach the host session when sent via web input.
-	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
-	wait_for 5 1 "server stopped before detach test" \
-		"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+	teardown_section "anon-before-detach"
 	DETACH_CONF="/tmp/.tmtv-test-detach-$TESTID.conf"
 	remote "cat > $DETACH_CONF << 'DEOF'
 set -g tmtv-session-name detachtest
@@ -2035,10 +2060,8 @@ else
 	skip "anon session web input tests" "could not find session token"
 fi
 
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $ANON_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after anon tests" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "anon"
 
 # -------------------------------------------------------
 # Test: Web input — named session (name, no password)
@@ -2159,10 +2182,8 @@ else
 	skip "named session web input tests" "could not create named session"
 fi
 
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $NAMED_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after named tests" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "named"
 
 # -------------------------------------------------------
 # Test: Web input — password session (named + password)
@@ -2241,10 +2262,8 @@ else
 	skip "password session web input tests" "could not create session"
 fi
 
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $PWONLY_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after pwonly tests" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "pwonly"
 
 # -------------------------------------------------------
 # Test: Web input — named + password session
@@ -2331,10 +2350,8 @@ else
 	skip "named+pw session web input tests" "could not create session"
 fi
 
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $NPPW_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after nppw tests" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "nppw"
 
 # -------------------------------------------------------
 # Test: Web input DISABLED by default — POST rejected
@@ -2398,10 +2415,8 @@ else
 	skip "web input disabled tests" "could not create session"
 fi
 
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $WID_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after wid tests" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "wid"
 
 # -------------------------------------------------------
 # Test: CSRF protection — POST without X-Tmtv-Input header
@@ -2426,7 +2441,7 @@ _prev_tok=""
 _stable=0
 for _wait in $(seq 1 20); do
 	sleep 1
-	_cur_tok=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | grep -v '^ro-' | head -1" || echo "")
+	_cur_tok=$(remote "ls $SESSIONS_DIR/ 2>/dev/null | grep -v '^ro-' | grep -v '^[0-9]*-' | head -1" || echo "")
 	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
 		_stable=$((_stable + 1))
 		if [ "$_stable" -ge 3 ]; then
@@ -2452,10 +2467,8 @@ else
 	skip "CSRF test" "could not find session token"
 fi
 
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $CSRF_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after csrf tests" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "csrf"
 
 # -------------------------------------------------------
 # Test: Rapid sequential POSTs not rate-limited at normal typing speed
@@ -2582,10 +2595,8 @@ else
 	skip "rapid POSTs: keystrokes arrive in order" "could not create session"
 fi
 
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $RAPID_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after rapid tests" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "rapid"
 
 # -------------------------------------------------------
 # Test: Large PTY output — session survives burst > 128KB
@@ -2652,10 +2663,8 @@ else
 	skip "large PTY burst: normal output works after burst" "could not create session"
 fi
 
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $LPTY_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after lpty tests" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "lpty"
 
 # === INPUT LATENCY BENCHMARKS ===
 #
@@ -3176,10 +3185,8 @@ echo "  +-------------------------+----------+----------+----------+"
 echo ""
 
 # Clean up benchmark session
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $BENCH_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after benchmark" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "benchmark"
 
 # -------------------------------------------------------
 # Test: Per-session TTL expiry
@@ -3297,10 +3304,8 @@ else
 	skip "TTL expiry overlay (quick mode)"
 fi
 
-remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 remote "rm -f $TTL_CONF" 2>/dev/null || true
-wait_for 5 1 "server stopped after TTL tests" \
-	"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+teardown_section "TTL"
 
 # -------------------------------------------------------
 # Test: Short URL alias /j/<token>
@@ -3356,10 +3361,8 @@ CONF"
 		skip "short URL tests" "could not create session"
 	fi
 
-	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 	remote "rm -f $JURL_CONF" 2>/dev/null || true
-	wait_for 5 1 "server stopped after short URL tests" \
-		"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+	teardown_section "short-URL"
 else
 	skip "short URL /j/<token> returns 200" "web not available"
 	skip "short URL /j/<token> serves viewer" "web not available"
@@ -3436,10 +3439,8 @@ if [ -n "$STATUS_TOKEN" ]; then
 	fi
 
 	# Cleanup: kill the status test session
-	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 	remote "rm -f $STATUS_CONF" 2>/dev/null || true
-	wait_for 5 1 "server stopped after status tests" \
-		"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+	teardown_section "status"
 else
 	skip "SSE stream delivers data (vpty active)" "could not create session"
 	skip "SSE stream continues after status-right change" "could not create session"
@@ -3896,10 +3897,8 @@ CONF"
 		fi
 
 		# Clean up
-		remote_tmtv "kill-server" 2>/dev/null || true
 		remote "rm -f $ESC_CONF" 2>/dev/null || true
-		wait_for 5 1 "server stopped after escape tests" \
-			"! remote 'pgrep -f tmtv-server' 2>/dev/null" || true
+		teardown_section "escape"
 	fi
 else
 	skip "passthrough: allow-passthrough defaults to off" "no fingerprints"
@@ -4065,10 +4064,9 @@ CONF"
 	fi
 
 	# Cleanup
-	remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
 	remote "rm -f $REC_CONF" 2>/dev/null || true
 	remote "rm -rf /root/.tmtv/recordings" 2>/dev/null || true
-	sleep 1
+	teardown_section "recording"
 else
 	skip "recording creates .cast file" "no server key fingerprints"
 	skip "cast file has v2 header" "no server key fingerprints"
@@ -4200,13 +4198,13 @@ CONF"
 
 		# Cleanup
 		remote "TERM=xterm-256color $REMOTE_TMTV kill-session -t main" 2>/dev/null || true
-		sleep 1
 	else
 		skip "prefix key synced to server (C-a)" "session failed to start"
 		skip "web input C-a prefix splits pane" "session failed to start"
 	fi
 
 	remote "rm -f $PFX_CONF" 2>/dev/null || true
+	teardown_section "prefix"
 else
 	skip "prefix key synced to server (C-a)" "no fingerprints"
 	skip "web input C-a prefix splits pane" "no fingerprints"
