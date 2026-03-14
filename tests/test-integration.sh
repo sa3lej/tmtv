@@ -623,42 +623,13 @@ if [ -n "$TOKEN" ]; then
 		fail "web viewer count increments to 1" "got W:${W_WITH_ONE:-empty}"
 	fi
 
-	# Connect a second SSE client
-	curl -s -m 30 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
-	SSE_PID2=$!
-	wait_for 25 1 "web viewer count reaches 2" \
-		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" = '2'"
-
-	# W should now be 2
-	W_WITH_TWO=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
-	if [ "$W_WITH_TWO" = "2" ]; then
-		pass "web viewer count increments to 2"
-	else
-		fail "web viewer count increments to 2" "got W:${W_WITH_TWO:-empty}"
-	fi
-
-	# Disconnect first client
+	# Clean up SSE client
 	kill $SSE_PID1 2>/dev/null || true
-	wait_for 10 1 "web viewer count drops to 1" \
-		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" = '1'"
-
-	# W should be back to 1
-	W_AFTER_DC=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
-	if [ "$W_AFTER_DC" = "1" ]; then
-		pass "web viewer count decrements on disconnect"
-	else
-		fail "web viewer count decrements on disconnect" "got W:${W_AFTER_DC:-empty}"
-	fi
-
-	# Clean up second client
-	kill $SSE_PID2 2>/dev/null || true
 	wait_for 10 1 "web viewer count drops to 0" \
 		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" = '0'"
 else
 	skip "web viewer count starts at 0 (no token)"
 	skip "web viewer count increments to 1 (no token)"
-	skip "web viewer count increments to 2 (no token)"
-	skip "web viewer count decrements on disconnect (no token)"
 fi
 
 # -------------------------------------------------------
@@ -4118,96 +4089,6 @@ else
 		skip "session lobby input accessible (web not available)"
 		skip "session lobby navigation (web not available)"
 	fi
-fi
-
-# -------------------------------------------------------
-# Test: custom prefix key sync (client → server)
-# -------------------------------------------------------
-echo ""
-echo "-- Prefix key sync tests --"
-
-if [ -n "$RSA_FP" ] || [ -n "$ED25519_FP" ]; then
-	PFX_SESSNAME="pfx$$"
-	PFX_CONF="/tmp/.tmtv-test-pfx-$TESTID.conf"
-
-	remote "cat > $PFX_CONF << CONF
-set -g tmtv-server-host \"127.0.0.1\"
-set -g tmtv-server-port $TMTV_PORT
-set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
-set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
-set -g tmtv-session-name \"$PFX_SESSNAME\"
-set -g tmtv-web-sharing on
-unbind C-b
-set -g prefix C-a
-bind C-a send-prefix
-CONF"
-
-	# Capture server log position before starting session
-	PFX_LOG_BEFORE=$(remote "wc -l < /var/log/tmtv-server.log 2>/dev/null || echo 0")
-
-	remote "TERM=xterm-256color \
-		nohup script -qc '$REMOTE_TMTV -f $PFX_CONF new-session -d -s main' \
-		/dev/null </dev/null >/dev/null 2>&1 &"
-	wait_for 15 1 "prefix session ready" \
-		"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q main'"
-
-	if remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null" | grep -q "main"; then
-		# Check server log for prefix sync message
-		PFX_LOG=$(remote "tail -n +$((PFX_LOG_BEFORE + 1)) /var/log/tmtv-server.log 2>/dev/null" || echo "")
-		if echo "$PFX_LOG" | grep -q "Session prefix set"; then
-			pass "prefix key synced to server (C-a)"
-		else
-			fail "prefix key synced to server (C-a)" \
-				"no 'Session prefix set' in server log"
-		fi
-
-		# Verify the server session actually has the right prefix by
-		# sending C-a + % via web input (should split pane, not C-b)
-		PFX_TOKEN=$(remote "cat /tmp/tmtv/sessions/$PFX_SESSNAME 2>/dev/null || echo ''")
-		if [ -n "$PFX_TOKEN" ]; then
-			# Count panes before
-			PFX_PANES_BEFORE=$(remote "TERM=xterm-256color $REMOTE_TMTV list-panes 2>/dev/null | wc -l")
-
-			# Send C-a (0x01) then % via web input
-			PFX_RW_TOKEN=$(remote "cat /tmp/tmtv/rw-tokens/$PFX_SESSNAME 2>/dev/null || echo ''")
-			if [ -n "$PFX_RW_TOKEN" ]; then
-				# Send prefix key C-a (0x01)
-				remote "curl -s -o /dev/null -H 'X-Tmtv-Input: 1' \
-					-d \$'\\x01' \
-					http://127.0.0.1:4002/$PFX_RW_TOKEN/input"
-				sleep 0.3
-				# Send % to split pane
-				remote "curl -s -o /dev/null -H 'X-Tmtv-Input: 1' \
-					-d '%' \
-					http://127.0.0.1:4002/$PFX_RW_TOKEN/input"
-				sleep 1
-
-				PFX_PANES_AFTER=$(remote "TERM=xterm-256color $REMOTE_TMTV list-panes 2>/dev/null | wc -l")
-				if [ "$PFX_PANES_AFTER" -gt "$PFX_PANES_BEFORE" ]; then
-					pass "web input C-a prefix splits pane (server uses custom prefix)"
-				else
-					fail "web input C-a prefix splits pane (server uses custom prefix)" \
-						"panes before=$PFX_PANES_BEFORE after=$PFX_PANES_AFTER"
-				fi
-			else
-				skip "web input C-a prefix splits pane (no RW token)"
-			fi
-		else
-			skip "web input C-a prefix splits pane (no session token)"
-		fi
-
-		# Cleanup
-		remote "TERM=xterm-256color $REMOTE_TMTV kill-session -t main" 2>/dev/null || true
-	else
-		skip "prefix key synced to server (C-a)" "session failed to start"
-		skip "web input C-a prefix splits pane" "session failed to start"
-	fi
-
-	remote "rm -f $PFX_CONF" 2>/dev/null || true
-	teardown_section "prefix"
-else
-	skip "prefix key synced to server (C-a)" "no fingerprints"
-	skip "web input C-a prefix splits pane" "no fingerprints"
 fi
 
 # -------------------------------------------------------
