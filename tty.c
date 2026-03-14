@@ -158,8 +158,9 @@ tty_resize(struct tty *tty)
 		xpixel = 0;
 		ypixel = 0;
 	}
-	log_debug("%s: %s now %ux%u (%ux%u)", __func__, c->name, sx, sy,
-	    xpixel, ypixel);
+	log_debug("%s: %s now %ux%u (%ux%u) ws_xpixel=%u ws_ypixel=%u",
+	    __func__, c->name, sx, sy, xpixel, ypixel,
+	    (unsigned)ws.ws_xpixel, (unsigned)ws.ws_ypixel);
 	tty_set_size(tty, sx, sy, xpixel, ypixel);
 	tty_invalidate(tty);
 }
