@@ -505,9 +505,9 @@ void pty_pending_flush_stale(void)
 		if (window_pane_find_by_id(p->id))
 			continue; /* pane exists — will be replayed */
 		if (p->count > 0)
-			tmate_info("Discarding %zu bytes (%d messages) "
-				   "for pane id=%d (never synced)",
-				   p->len, p->count, p->id);
+			tmate_debug("Discarding %zu bytes (%d messages) "
+				    "for pane id=%d (never synced)",
+				    p->len, p->count, p->id);
 		pty_pending_free(p);
 	}
 }
@@ -551,8 +551,8 @@ static void tmate_pty_data(__unused struct tmate_session *session,
 			p = xcalloc(1, sizeof(*p));
 			p->id = id;
 			TAILQ_INSERT_TAIL(&pty_pending_list, p, entry);
-			tmate_info("Buffering pty_data for unknown pane "
-				   "id=%d (awaiting sync)", id);
+			tmate_debug("Buffering pty_data for unknown pane "
+				    "id=%d (awaiting sync)", id);
 		}
 
 		/* Append data if within per-pane budget */
