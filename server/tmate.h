@@ -310,6 +310,7 @@ struct tmate_session {
 	pid_t vpty_child_pid;
 	struct event *ev_vpty_read;
 	bool vpty_active;	/* true once child is running */
+	char *jail_sock_name;	/* per-session jail socket name (e.g. "/tmux-AbCd1234.sock") */
 
 	/* only for role client-pty */
 	int pty;

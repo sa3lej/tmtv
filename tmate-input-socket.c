@@ -56,11 +56,24 @@ struct input_user {
 	TAILQ_ENTRY(input_user)	 entry;
 };
 
+/*
+ * Input socket receive buffer.
+ * Messages are length-prefixed: [4-byte big-endian length][msgpack payload].
+ * We accumulate bytes here until we have a complete message, then parse it.
+ */
+#define INPUT_APP_BUFSIZE 8192
+#define INPUT_APP_MAX_MSG 65536
+
+struct input_app_buf {
+	char			 data[INPUT_APP_BUFSIZE];
+	size_t			 len;
+};
+
 /* Input socket client -- an app connected to TMTV_INPUT_SOCKET */
 struct input_app {
 	int			 fd;
 	struct event		*ev_read;
-	struct tmate_decoder	 decoder;
+	struct input_app_buf	 buf;
 	bool			 subscribed;
 	bool			 mirror;
 	TAILQ_ENTRY(input_app)	 entry;
@@ -74,7 +87,8 @@ static char input_socket_path[256];
 
 /* Forward declarations */
 static void input_app_free(struct input_app *app);
-static void on_app_command(void *userdata, struct tmate_unpacker *uk);
+static int  input_app_dispatch(struct input_app *app, const char *data,
+			       size_t len);
 
 /*
  * Send a length-prefixed msgpack message to a connected app.
@@ -254,11 +268,47 @@ send_user_list(struct input_app *app)
 	msgpack_sbuffer_destroy(&sbuf);
 }
 
-static void
-on_app_command(void *userdata, struct tmate_unpacker *uk)
+/*
+ * Safe msgpack validation helpers for the input socket protocol.
+ *
+ * These return -1 on malformed input instead of calling fatalx().
+ * The tmate_decoder / unpack_* functions were designed for the SSH
+ * protocol where a bad message is catastrophic.  For the local input
+ * socket, a bad message from a buggy app must disconnect that app,
+ * not crash the entire tmtv client.
+ */
+static int
+input_app_dispatch(struct input_app *app, const char *data, size_t len)
 {
-	struct input_app *app = userdata;
-	int cmd = unpack_int(uk);
+	msgpack_unpacked result;
+	msgpack_object *arr;
+	int cmd;
+
+	msgpack_unpacked_init(&result);
+	if (msgpack_unpack_next(&result, data, len, NULL)
+	    != MSGPACK_UNPACK_SUCCESS) {
+		tmate_info("input socket: malformed msgpack from app");
+		msgpack_unpacked_destroy(&result);
+		return -1;
+	}
+
+	if (result.data.type != MSGPACK_OBJECT_ARRAY ||
+	    result.data.via.array.size < 1) {
+		tmate_info("input socket: message is not an array");
+		msgpack_unpacked_destroy(&result);
+		return -1;
+	}
+
+	arr = result.data.via.array.ptr;
+
+	if (arr[0].type != MSGPACK_OBJECT_POSITIVE_INTEGER &&
+	    arr[0].type != MSGPACK_OBJECT_NEGATIVE_INTEGER) {
+		tmate_info("input socket: command type is not an integer");
+		msgpack_unpacked_destroy(&result);
+		return -1;
+	}
+
+	cmd = (int)arr[0].via.i64;
 
 	switch (cmd) {
 	case TMTV_INPUT_CMD_SUBSCRIBE:
@@ -271,7 +321,17 @@ on_app_command(void *userdata, struct tmate_unpacker *uk)
 		break;
 
 	case TMTV_INPUT_CMD_SET_MIRROR:
-		app->mirror = unpack_bool(uk);
+		if (result.data.via.array.size < 2) {
+			tmate_info("input socket: SET_MIRROR missing argument");
+			msgpack_unpacked_destroy(&result);
+			return -1;
+		}
+		if (arr[1].type != MSGPACK_OBJECT_BOOLEAN) {
+			tmate_info("input socket: SET_MIRROR arg not boolean");
+			msgpack_unpacked_destroy(&result);
+			return -1;
+		}
+		app->mirror = arr[1].via.boolean;
 		tmtv_input_send_mode(true, app->mirror);
 		break;
 
@@ -279,49 +339,95 @@ on_app_command(void *userdata, struct tmate_unpacker *uk)
 		tmate_info("input socket: unknown command %d", cmd);
 		break;
 	}
+
+	msgpack_unpacked_destroy(&result);
+	return 0;
 }
 
 /* --- Accept loop and app lifecycle --- */
+
+/*
+ * Process complete length-prefixed messages from the app's receive buffer.
+ * Returns -1 if the app should be disconnected (malformed data).
+ */
+static int
+input_app_process_buf(struct input_app *app)
+{
+	uint32_t msg_len;
+
+	while (app->buf.len >= 4) {
+		memcpy(&msg_len, app->buf.data, 4);
+		msg_len = ntohl(msg_len);
+
+		if (msg_len > INPUT_APP_MAX_MSG) {
+			tmate_info("input socket: message too large (%u bytes)",
+				   msg_len);
+			return -1;
+		}
+
+		if (app->buf.len < 4 + msg_len)
+			break; /* need more data */
+
+		if (input_app_dispatch(app, app->buf.data + 4, msg_len) < 0)
+			return -1;
+
+		/* Consume the message */
+		size_t consumed = 4 + msg_len;
+		app->buf.len -= consumed;
+		if (app->buf.len > 0)
+			memmove(app->buf.data, app->buf.data + consumed,
+				app->buf.len);
+	}
+
+	return 0;
+}
 
 static void
 on_app_read(__unused evutil_socket_t fd, __unused short what, void *arg)
 {
 	struct input_app *app = arg;
-	char *dbuf;
-	size_t dlen;
-	char buf[4096];
-	ssize_t len;
+	ssize_t n;
+	size_t space;
 
-	len = read(app->fd, buf, sizeof(buf));
-	if (len <= 0) {
+	space = sizeof(app->buf.data) - app->buf.len;
+	if (space == 0) {
+		tmate_info("input socket: app buffer full, disconnecting");
 		input_app_free(app);
 		return;
 	}
 
-	tmate_decoder_get_buffer(&app->decoder, &dbuf, &dlen);
-	if ((size_t)len > dlen)
-		len = dlen;
-	memcpy(dbuf, buf, len);
-	tmate_decoder_commit(&app->decoder, len);
+	n = read(app->fd, app->buf.data + app->buf.len, space);
+	if (n <= 0) {
+		input_app_free(app);
+		return;
+	}
+
+	app->buf.len += n;
+
+	if (input_app_process_buf(app) < 0)
+		input_app_free(app);
 }
 
 static void
 input_app_free(struct input_app *app)
 {
+	bool was_subscribed = app->subscribed;
+
 	TAILQ_REMOVE(&input_apps, app, entry);
 
 	if (app->ev_read) {
 		event_del(app->ev_read);
 		event_free(app->ev_read);
 	}
-	tmate_decoder_destroy(&app->decoder);
 	close(app->fd);
+	free(app);
 
-	/* If no subscribers remain, disable input mode on server */
-	if (input_count_subscribers() == 0)
+	/* If no subscribers remain, disable input mode on server.
+	 * Check after free so input_count_subscribers() doesn't count
+	 * the app we just removed. */
+	if (was_subscribed && input_count_subscribers() == 0)
 		tmtv_input_send_mode(false, true);
 
-	free(app);
 	tmate_info("input socket: app disconnected");
 }
 
@@ -347,7 +453,7 @@ on_input_accept(__unused evutil_socket_t fd, __unused short what,
 	app = xcalloc(1, sizeof(*app));
 	app->fd = client_fd;
 	app->mirror = true;
-	tmate_decoder_init(&app->decoder, on_app_command, app);
+	app->buf.len = 0;
 
 	app->ev_read = event_new(tmate_session.ev_base, client_fd,
 				 EV_READ | EV_PERSIST, on_app_read, app);
