@@ -64,8 +64,10 @@ test-session-tmate-ptr: test-session-tmate-ptr.c test-harness.h ../tmux.h ../tma
 test-sse-mux: test-sse-mux.c test-harness.h
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
+LIBBSD := $(shell [ "$$(uname -s)" = Linux ] && echo -lbsd)
+
 test-server-format: test-server-format.c test-harness.h
-	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -lbsd
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) $(LIBBSD)
 
 functional:
 	@echo ""
