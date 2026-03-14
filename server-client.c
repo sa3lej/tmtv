@@ -2628,7 +2628,8 @@ server_client_handle_key(struct client *c, struct key_event *event)
 #ifdef TMATE_SERVER_BUILD
 	{
 		extern int tmate_intercept_input_key(int pid, key_code key);
-		if (tmate_intercept_input_key(c->pid, event->key))
+		if (!c->readonly &&
+		    tmate_intercept_input_key(c->pid, event->key))
 			return (1); /* input mode: suppress normal processing */
 	}
 #endif

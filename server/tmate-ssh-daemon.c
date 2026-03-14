@@ -67,9 +67,23 @@ static void on_daemon_encoder_write(void *userdata, struct evbuffer *buffer)
 
 		written = ssh_channel_write(session->ssh_client.channel, buf, len);
 		if (written < 0) {
-			tmate_info("daemon_encoder_write: FAILED (%zd bytes): %s",
-				   len, ssh_get_error(session->ssh_client.session));
-			request_server_termination();
+			if (!ssh_is_connected(session->ssh_client.session)) {
+				tmate_info("daemon_encoder_write: connection "
+					   "lost (%zd bytes buffered)",
+					   len);
+				request_server_termination();
+			} else {
+				tmate_debug("daemon_encoder_write: backpressure "
+					    "(%zd bytes buffered), will retry",
+					    len);
+				struct tmate_encoder *enc =
+				    &session->daemon_encoder;
+				if (!enc->ev_active) {
+					event_active(enc->ev_buffer,
+						     EV_READ, 0);
+					enc->ev_active = true;
+				}
+			}
 			break;
 		}
 		evbuffer_drain(buffer, written);
