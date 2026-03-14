@@ -252,6 +252,7 @@ struct ws_client {
 	bool readonly;        /* true if connected via RO token */
 	bool is_post;         /* true if this is a POST /input request */
 	int viewer_id;        /* unique ID for input socket events */
+	time_t connect_time;  /* when handshake completed (for watermark grace) */
 	TAILQ_ENTRY(ws_client) entry;
 };
 
@@ -287,6 +288,7 @@ struct tmate_session {
 	int ipc_fd;      /* child-side IPC fd for receiving SSE fds from main */
 	struct event *ev_ipc; /* libevent2: monitors ipc_fd for incoming fds */
 	struct event *ev_ws_snapshot; /* periodic snapshot timer */
+	struct event *ev_sse_heartbeat; /* SSE keepalive timer */
 	bool web_sharing_enabled; /* client-controlled web sharing toggle */
 	bool web_input_enabled;   /* host-controlled web input toggle */
 	time_t post_rate_window;  /* start of current rate-limit window */
