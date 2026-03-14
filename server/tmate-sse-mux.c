@@ -281,6 +281,8 @@ static int extract_token_from_http(const char *buf, size_t buflen,
 
 	if (buflen >= 5 && strncmp(buf, "POST ", 5) == 0) {
 		path_start = buf + 5;
+	} else if (buflen >= 5 && strncmp(buf, "HEAD ", 5) == 0) {
+		path_start = buf + 5;
 	} else if (buflen >= 4 && strncmp(buf, "GET ", 4) == 0) {
 		path_start = buf + 4;
 	} else {
@@ -371,7 +373,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 		static const char *cors =
 			"HTTP/1.1 204 No Content\r\n"
 			"Access-Control-Allow-Origin: *\r\n"
-			"Access-Control-Allow-Methods: GET, POST\r\n"
+			"Access-Control-Allow-Methods: GET, HEAD, POST\r\n"
 			"Access-Control-Allow-Headers: Content-Type, X-Tmtv-Input\r\n"
 			"Access-Control-Max-Age: 86400\r\n"
 			"Content-Length: 0\r\n"
