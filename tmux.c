@@ -562,18 +562,36 @@ main(int argc, char **argv)
 	}
 
 	/*
-	 * If socket is specified on the command-line with -S or -L, it is
-	 * used. Otherwise, $TMUX is checked and if that fails "default" is
-	 * used.
+	 * Socket path isolation for tmtv:
+	 *
+	 * Unlike tmux, tmtv does NOT check $TMUX.  Each bare `tmtv`
+	 * invocation (argc == 0) gets its own PID-based socket so it
+	 * creates an isolated tmux server with its own SSH connection.
+	 * Sharing a server causes layout oscillation and 100% server CPU
+	 * (the tmate protocol supports one session per connection).
+	 *
+	 * Explicit commands (tmtv list-sessions, tmtv attach, tmtv
+	 * new-session -d -s name, etc.) use the default socket so they
+	 * can interact with an existing server.
+	 *
+	 * -S or -L on the command line always takes priority.
 	 */
-	if (path == NULL && label == NULL) {
-		s = getenv("TMUX");
-		if (s != NULL && *s != '\0' && *s != ',') {
-			path = xstrdup(s);
-			path[strcspn(path, ",")] = '\0';
+	if (path == NULL && label == NULL && argc == 0) {
+		/* Bare `tmtv`: isolated PID-based socket */
+		char *pidlabel;
+		xasprintf(&pidlabel, "%ld", (long)getpid());
+		if ((path = make_label(pidlabel, &cause)) == NULL) {
+			if (cause != NULL) {
+				fprintf(stderr, "%s\n", cause);
+				free(cause);
+			}
+			free(pidlabel);
+			exit(1);
 		}
-	}
-	if (path == NULL) {
+		free(pidlabel);
+		flags |= CLIENT_DEFAULTSOCKET;
+	} else if (path == NULL) {
+		/* Explicit command or -L: shared default socket */
 		if ((path = make_label(label, &cause)) == NULL) {
 			if (cause != NULL) {
 				fprintf(stderr, "%s\n", cause);
