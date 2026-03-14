@@ -266,74 +266,65 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		ioctl(slave_fd, TIOCSWINSZ, &ws);
 	}
 
+	/*
+	 * Connect to the tmux socket BEFORE forking.  After chroot,
+	 * the socket path is not accessible from inside the jail.
+	 * The connected fd is inherited by the child via fork().
+	 */
+	memset(&sa, 0, sizeof(sa));
+	sa.sun_family = AF_UNIX;
+	strlcpy(sa.sun_path, socket_path, sizeof(sa.sun_path));
+
+	sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (sock_fd < 0) {
+		tmate_info("vpty: socket() failed: %s", strerror(errno));
+		return;
+	}
+
+	if (connect(sock_fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+		tmate_info("vpty: connect(%s) failed: %s",
+			   socket_path, strerror(errno));
+		close(sock_fd);
+		return;
+	}
+
 	pid = fork();
 	if (pid < 0) {
 		tmate_info("vpty: fork failed: %s", strerror(errno));
+		close(sock_fd);
 		close(master_fd);
 		close(slave_fd);
 		return;
 	}
 
 	if (pid == 0) {
-		/* Child: connect to tmux socket and run client_main */
-		int saved_stderr = dup(STDERR_FILENO);
+		/* Child: use pre-connected tmux socket and run client_main */
 
-		/* Redirect stdin/stdout to slave PTY, keep stderr for logs */
+		/* Redirect stdin/stdout to slave PTY */
 		dup2(slave_fd, STDIN_FILENO);
 		dup2(slave_fd, STDOUT_FILENO);
 		if (slave_fd > STDERR_FILENO)
 			close(slave_fd);
 		close(master_fd);
 
-		/* Connect to the tmux socket */
-		memset(&sa, 0, sizeof(sa));
-		sa.sun_family = AF_UNIX;
-		strlcpy(sa.sun_path, socket_path, sizeof(sa.sun_path));
-
-		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (sock_fd < 0) {
-			dprintf(saved_stderr, "vpty child: socket() failed: %s\n",
-				strerror(errno));
-			_exit(1);
-		}
-
-		if (connect(sock_fd, (struct sockaddr *)&sa,
-			    sizeof(sa)) < 0) {
-			dprintf(saved_stderr, "vpty child: connect(%s) failed: %s\n",
-				socket_path, strerror(errno));
-			close(sock_fd);
-			_exit(1);
-		}
-
 		server_fd = sock_fd;
-
-		/* Skip setup_ncurse() — the parent already initialized
-		 * the terminfo database before entering the jail.
-		 * The child inherits the loaded database via fork(). */
 		setenv("TERM", "xterm-256color", 1);
 
 		close_fds_except((int[]){STDIN_FILENO, STDOUT_FILENO,
-					  saved_stderr, sock_fd}, 4);
-
-		/* Restore stderr for logging */
-		dup2(saved_stderr, STDERR_FILENO);
-		close(saved_stderr);
+					  STDERR_FILENO, sock_fd}, 4);
 
 		event_reinit(session->ev_base);
-
-		dprintf(STDERR_FILENO, "vpty child: calling client_main (socket=%s)\n",
-			socket_path);
 
 		/* Attach read-only */
 		char *argv_ro[] = {(char *)"attach", (char *)"-r", NULL};
 		int ret = client_main(session->ev_base, 2, argv_ro,
 				      CLIENT_UTF8, 0);
-		dprintf(STDERR_FILENO, "vpty child: client_main returned %d\n", ret);
 		_exit(ret);
 	}
 
-	/* Parent: store master fd and register read event */
+	/* Parent: close fds the child owns */
 	close(slave_fd);
+	close(sock_fd);
 	session->vpty_slave_fd = -1;
 
 	session->vpty_master_fd = master_fd;
