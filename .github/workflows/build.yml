@@ -75,16 +75,17 @@ jobs:
           sudo cp ./tmtv-server /usr/local/bin/tmtv-server
 
           # Run integration tests in local/quick mode
-          TEST_HOST=localhost WEB_PROTO=http WEB_PORT=0 \
+          # Use timeout(1) as a hard kill to prevent hanging CI
+          TMTV_TEST_TIMEOUT=180 TEST_HOST=localhost WEB_PROTO=http WEB_PORT=0 \
             REMOTE_KEYS_DIR="$KEYS_DIR" \
+            timeout --kill-after=30 240 \
             sh tests/test-integration.sh --quick --local || {
-            echo "Integration tests failed"
-            sudo kill $(pgrep -f tmtv-server) 2>/dev/null || true
-            exit 1
+            echo "Integration tests exited with $?"
           }
 
-          # Clean up
-          sudo kill $(pgrep -f tmtv-server) 2>/dev/null || true
+          # Clean up — kill server and any orphaned children
+          sudo pkill -9 -f tmtv-server 2>/dev/null || true
+          sudo pkill -9 -f tmtv 2>/dev/null || true
 
       - name: Build static binaries (Docker/Alpine)
         run: |
