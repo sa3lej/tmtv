@@ -35,7 +35,9 @@ These are sent by tmtv to your connected program.
 [3, [[id: int, name: string, readonly: bool, type: string], ...]]
 ```
 
-Sent immediately after you subscribe. Contains all currently connected viewers. Each user is a positional array `[id, name, readonly, type]` — not a map. `type` is `"ssh"` or `"web"`. `readonly` is `true` for read-only token connections.
+Sent immediately after you subscribe. Contains all currently connected read-write viewers. Each user is a positional array `[id, name, readonly, type]` — not a map. `type` is `"ssh"` or `"web"`.
+
+**Read-only viewers are excluded.** They cannot send input (SSH drops it, web rejects it), so they never appear in USER_LIST, USER_JOIN, or USER_INPUT events. This prevents games and interactive apps from selecting a readonly viewer as a participant.
 
 ### USER_JOIN (0)
 
@@ -43,7 +45,7 @@ Sent immediately after you subscribe. Contains all currently connected viewers. 
 [0, user_id: int, name: string, readonly: bool, type: string]
 ```
 
-A viewer connected to the session.
+A read-write viewer connected to the session.
 
 ### USER_LEAVE (1)
 
@@ -51,7 +53,7 @@ A viewer connected to the session.
 [1, user_id: int]
 ```
 
-A viewer disconnected.
+A read-write viewer disconnected.
 
 ### USER_INPUT (2)
 

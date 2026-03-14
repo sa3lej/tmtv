@@ -211,7 +211,12 @@
       return true;
     });
 
-    sizeToServer();
+    /* Defer sizing until xterm.js has rendered so getActualTerminalDims()
+     * can read the real canvas height.  Without this, the fallback
+     * estimated height clips the status bar row. */
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() { sizeToServer(); });
+    });
 
     /* Focus terminal on touch (mobile) */
     container.addEventListener('touchstart', function() {
@@ -784,7 +789,8 @@
               term.resize(sx, newRows);
             }
           }
-          sizeToServer();
+          /* Defer so xterm.js render dimensions are up to date */
+          requestAnimationFrame(function() { sizeToServer(); });
         }
         break;
       case OUT_VIEWER_COUNT:

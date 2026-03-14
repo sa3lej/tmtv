@@ -179,56 +179,77 @@ static void on_vpty_read(evutil_socket_t fd, short what, void *arg)
 	ssize_t len;
 	msgpack_sbuffer sbuf;
 	msgpack_packer pk;
+	/*
+	 * Accumulate all available PTY data before sending.
+	 * Sending per-read chunks caused xterm.js to render intermediate
+	 * states (clear → flash → redraw) with fast output (e.g. Claude Code).
+	 */
+	msgpack_sbuffer accum;
+	int have_data = 0;
 
 	(void)what;
+
+	msgpack_sbuffer_init(&accum);
 
 	for (;;) {
 		len = read(fd, buf, sizeof(buf));
 		if (len < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				return;
+				break;
 			tmate_info("vpty read error: %s", strerror(errno));
+			msgpack_sbuffer_destroy(&accum);
 			sse_kill_virtual_client(session);
 			return;
 		}
 		if (len == 0) {
 			tmate_info("vpty EOF — child exited");
+			msgpack_sbuffer_destroy(&accum);
 			sse_kill_virtual_client(session);
 			return;
 		}
 
-		/* Wrap as [CTL_DEAMON_OUT_MSG, [OUT_PTY_DATA, -1, data]] */
-		msgpack_sbuffer_init(&sbuf);
-		msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
-
-		msgpack_pack_array(&pk, 2);
-		msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
-
-		msgpack_pack_array(&pk, 3);
-		msgpack_pack_int(&pk, TMATE_OUT_PTY_DATA);
-		msgpack_pack_int(&pk, -1);  /* pane_id -1 = full screen */
-		msgpack_pack_bin(&pk, len);
-		msgpack_pack_bin_body(&pk, buf, len);
-
-		/* Store in replay buffer for late-joining clients */
-		pty_replay_append((unsigned char *)sbuf.data, sbuf.size);
-
-		/* Broadcast to all connected SSE clients */
-		TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp) {
-			if (!wc->handshake_done || wc->is_post)
-				continue;
-			if (sse_client_over_watermark(wc)) {
-				tmate_info("SSE client over watermark, "
-					   "disconnecting");
-				ws_client_free(wc);
-				continue;
-			}
-			sse_send_data(wc->bev,
-				      (unsigned char *)sbuf.data, sbuf.size);
-		}
-
-		msgpack_sbuffer_destroy(&sbuf);
+		msgpack_sbuffer_write(&accum, (const char *)buf, len);
+		have_data = 1;
 	}
+
+	if (!have_data) {
+		msgpack_sbuffer_destroy(&accum);
+		return;
+	}
+
+	/* Wrap accumulated data as a single message */
+	msgpack_sbuffer_init(&sbuf);
+	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+
+	msgpack_pack_array(&pk, 3);
+	msgpack_pack_int(&pk, TMATE_OUT_PTY_DATA);
+	msgpack_pack_int(&pk, -1);  /* pane_id -1 = full screen */
+	msgpack_pack_bin(&pk, accum.size);
+	msgpack_pack_bin_body(&pk, accum.data, accum.size);
+
+	msgpack_sbuffer_destroy(&accum);
+
+	/* Store in replay buffer for late-joining clients */
+	pty_replay_append((unsigned char *)sbuf.data, sbuf.size);
+
+	/* Broadcast to all connected SSE clients */
+	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp) {
+		if (!wc->handshake_done || wc->is_post)
+			continue;
+		if (sse_client_over_watermark(wc)) {
+			tmate_info("SSE client over watermark, "
+				   "disconnecting");
+			ws_client_free(wc);
+			continue;
+		}
+		sse_send_data(wc->bev,
+			      (unsigned char *)sbuf.data, sbuf.size);
+	}
+
+	msgpack_sbuffer_destroy(&sbuf);
 }
 
 void sse_spawn_virtual_client(struct tmate_session *session)
@@ -1392,7 +1413,8 @@ static void ws_client_free(struct ws_client *wc)
 	struct tmate_session *session = wc->session;
 	bool was_connected = wc->handshake_done;
 
-	if (was_connected && session->input_mode_enabled && wc->viewer_id > 0)
+	if (was_connected && session->input_mode_enabled &&
+	    wc->viewer_id > 0 && !wc->readonly)
 		tmate_send_user_leave(session, wc->viewer_id);
 
 	tmate_info("SSE %s disconnected",
@@ -1706,18 +1728,15 @@ web_input_forward_to_ssh_client(int pane_id, key_code key)
 }
 
 static void
-tmate_web_input_key(int pane_id, key_code key)
+tmate_web_input_key(int viewer_id, int pane_id, key_code key)
 {
 	struct session *s;
 	struct key_binding *bd;
 	key_code prefix, prefix2, normalized;
 	int have_ssh_client;
 
-	if (tmate_session->input_mode_enabled) {
-		/* Send per-user input event to host client.
-		 * Web viewer ID 0 for now (TODO: track per-request). */
-		int web_id = 0;
-		tmate_send_user_input(tmate_session, web_id, pane_id, key);
+	if (tmate_session->input_mode_enabled && viewer_id > 0) {
+		tmate_send_user_input(tmate_session, viewer_id, pane_id, key);
 		if (!tmate_session->input_mirror)
 			return;
 	}
@@ -1885,7 +1904,7 @@ static void handle_post_input(struct ws_client *wc)
 
 		if (c < 0x80) {
 			/* ASCII byte — route through tmux key bindings */
-			tmate_web_input_key(-1, (key_code)c);
+			tmate_web_input_key(wc->viewer_id, -1, (key_code)c);
 			i++;
 		} else {
 			struct utf8_data ud;
@@ -1899,7 +1918,7 @@ static void handle_post_input(struct ws_client *wc)
 
 			if (more == UTF8_DONE &&
 			    utf8_from_data(&ud, &uc) == UTF8_DONE) {
-				tmate_web_input_key(-1, (key_code)uc);
+				tmate_web_input_key(wc->viewer_id, -1, (key_code)uc);
 			} else {
 				/* Invalid UTF-8 — skip */
 				tmate_debug("POST input: skipping "
@@ -1980,10 +1999,9 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		}
 		/* Broadcast updated viewer counts to all clients */
 		tmate_broadcast_viewer_count(wc->session);
-		if (wc->session->input_mode_enabled) {
+		if (wc->session->input_mode_enabled && !wc->readonly) {
 			tmate_send_user_join(wc->session, wc->viewer_id,
-					     wc->readonly ? "web-ro" : "web",
-					     wc->readonly, "web");
+					     "web", false, "web");
 		}
 		return;
 	}
@@ -2244,7 +2262,7 @@ static void ctl_pane_keys(struct tmate_session *session,
 		unsigned char c = (unsigned char)str[i];
 
 		if (c < 0x80) {
-			tmate_web_input_key(pane_id, (key_code)c);
+			tmate_web_input_key(0, pane_id, (key_code)c);
 			i++;
 		} else {
 			struct utf8_data ud;
@@ -2259,7 +2277,7 @@ static void ctl_pane_keys(struct tmate_session *session,
 
 			if (more == UTF8_DONE &&
 			    utf8_from_data(&ud, &uc) == UTF8_DONE) {
-				tmate_web_input_key(pane_id, (key_code)uc);
+				tmate_web_input_key(0, pane_id, (key_code)uc);
 			} else {
 				tmate_debug("ws input: skipping "
 				    "invalid UTF-8 at offset %zu", i);
@@ -2366,7 +2384,7 @@ void tmate_notify_client_join(__unused struct tmate_session *session,
 
 	tmate_broadcast_viewer_count(session);
 
-	if (session->input_mode_enabled) {
+	if (session->input_mode_enabled && !c->readonly) {
 		char name[64];
 		snprintf(name, sizeof(name), "ssh-%d", c->pid);
 		tmate_send_user_join(session, c->pid, name,
@@ -2390,7 +2408,7 @@ void tmate_notify_client_left(__unused struct tmate_session *session,
 
 	c->flags &= ~CLIENT_TMATE_NOTIFIED_JOIN;
 
-	if (session->input_mode_enabled)
+	if (session->input_mode_enabled && !c->readonly)
 		tmate_send_user_leave(session, c->pid);
 
 	pack(array, 2);
