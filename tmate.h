@@ -27,6 +27,7 @@ struct tmate_encoder {
 	struct evbuffer *buffer;
 	struct event *ev_buffer;
 	bool ev_active;
+	struct event *ev_retry;	/* backpressure retry timer */
 };
 
 extern void tmate_encoder_init(struct tmate_encoder *encoder,
@@ -36,6 +37,7 @@ extern void tmate_encoder_destroy(struct tmate_encoder *encoder);
 extern void tmate_encoder_set_ready_callback(struct tmate_encoder *encoder,
 					     tmate_encoder_write_cb *callback,
 					     void *userdata);
+extern void tmate_encoder_schedule_retry(struct tmate_encoder *encoder);
 
 extern void msgpack_pack_string(msgpack_packer *pk, const char *str);
 extern void msgpack_pack_boolean(msgpack_packer *pk, bool value);
