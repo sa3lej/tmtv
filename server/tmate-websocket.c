@@ -314,11 +314,15 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		close_fds_except((int[]){STDIN_FILENO, STDOUT_FILENO,
 					  STDERR_FILENO, sock_fd}, 4);
 
-		/* Create a fresh event base for the child.  The parent's
-		 * base has registered events that conflict after fork.
-		 * event_reinit() is not sufficient — we need a clean base. */
+		/* Replace the inherited default event base with a fresh one.
+		 * osdep_event_init() calls event_init(), which creates a
+		 * new base AND makes it the global default.  This is
+		 * critical because tmux's proc_loop() / event_set() use
+		 * the global default — event_base_new() only creates a
+		 * non-default base, causing the child to reenter the
+		 * parent's stale event loop (blank web viewer). */
 		{
-			struct event_base *child_base = event_base_new();
+			struct event_base *child_base = osdep_event_init();
 
 			/* Attach read-only */
 			char *argv_ro[] = {(char *)"attach", (char *)"-r", NULL};
