@@ -918,21 +918,25 @@ static void tmate_input_mode(struct tmate_session *session,
 		TAILQ_FOREACH(c, &clients, entry) {
 			if (!(c->flags & CLIENT_IDENTIFIED))
 				continue;
+			if (c->flags & CLIENT_TMATE_VPTY)
+				continue;
+			if (c->readonly)
+				continue;
 			char name[64];
 			snprintf(name, sizeof(name), "ssh-%d", c->pid);
 			tmate_send_user_join(session, c->pid, name,
-					     c->readonly, "ssh");
+					     false, "ssh");
 		}
 
 		if (tmate_has_websocket()) {
 			struct ws_client *wc;
 			TAILQ_FOREACH(wc, &session->ws_clients, entry) {
 				if (wc->handshake_done && !wc->is_post &&
-				    wc->viewer_id > 0)
+			    wc->viewer_id > 0 && !wc->readonly)
 					tmate_send_user_join(session,
 							     wc->viewer_id,
-							     wc->readonly ? "web-ro" : "web",
-							     wc->readonly, "web");
+							     "web",
+							     false, "web");
 			}
 		}
 	}

@@ -96,12 +96,41 @@ static void on_encoder_write(void *userdata, struct evbuffer *buffer)
 
 		written = ssh_channel_write(client->channel, buf, len);
 		if (written < 0) {
-			tmate_info("on_encoder_write: write failed (%zd bytes): "
-				   "connected=%d error=%s",
-				   len, ssh_is_connected(client->session),
-				   ssh_get_error(client->session));
-			kill_ssh_client(client, "Error writing to channel: %s",
-					ssh_get_error(client->session));
+			/*
+			 * Distinguish transient backpressure from a dead
+			 * connection.  Fast output (e.g. Claude Code) can
+			 * fill the SSH window faster than the link drains
+			 * it.  Killing the client on every write failure
+			 * causes a reconnect loop because the snapshot on
+			 * reconnect produces even more data.
+			 *
+			 * If the connection is truly gone, let the SSH
+			 * event handler detect it and clean up.  Otherwise
+			 * leave the data in the buffer — the next
+			 * on_encoder_write call will retry.
+			 */
+			if (!ssh_is_connected(client->session)) {
+				tmate_info("on_encoder_write: connection lost "
+					   "(%zd bytes buffered)",
+					   len);
+				kill_ssh_client(client,
+				    "Error writing to channel: %s",
+				    ssh_get_error(client->session));
+			} else {
+				tmate_debug("on_encoder_write: backpressure "
+					    "(%zd bytes buffered), will retry",
+					    len);
+				/*
+				 * Re-activate the encoder event so we retry
+				 * on the next event loop iteration.
+				 */
+				struct tmate_encoder *enc =
+				    &client->tmate_session->encoder;
+				if (!enc->ev_active) {
+					event_active(enc->ev_buffer, EV_READ, 0);
+					enc->ev_active = true;
+				}
+			}
 			break;
 		}
 

@@ -44,10 +44,12 @@ loop:
 
 | Type | ID | Fields | Description |
 |------|-----|--------|-------------|
-| USER_JOIN | 0 | `[0, user_id:int, name:str, readonly:bool, type:str]` | Viewer connected |
-| USER_LEAVE | 1 | `[1, user_id:int]` | Viewer disconnected |
+| USER_JOIN | 0 | `[0, user_id:int, name:str, readonly:bool, type:str]` | Read-write viewer connected |
+| USER_LEAVE | 1 | `[1, user_id:int]` | Read-write viewer disconnected |
 | USER_INPUT | 2 | `[2, user_id:int, pane_id:int, keycode:uint64]` | Keystroke from viewer |
-| USER_LIST | 3 | `[3, [[id:int, name:str, readonly:bool, type:str], ...]]` | All current viewers (response to SUBSCRIBE) |
+| USER_LIST | 3 | `[3, [[id:int, name:str, readonly:bool, type:str], ...]]` | All current read-write viewers (response to SUBSCRIBE) |
+
+> **Note:** Read-only viewers are excluded from all input mode events. They cannot send input, so they never appear in USER_LIST, USER_JOIN, or USER_INPUT.
 
 ### App → Server
 
