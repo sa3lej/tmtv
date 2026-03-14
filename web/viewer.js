@@ -136,6 +136,14 @@
 
     term.open(el);
 
+    /* Load image addon for SIXEL graphics support */
+    if (window.ImageAddon && window.ImageAddon.ImageAddon) {
+      try {
+        var imageAddon = new window.ImageAddon.ImageAddon();
+        term.loadAddon(imageAddon);
+      } catch (e) {}
+    }
+
     /* Bind input if web input is active */
     if (!sessionReadonly && webInputEnabled) {
       term.options.disableStdin = false;

@@ -297,7 +297,7 @@ sudo apt-get install build-essential autoconf automake pkg-config \
   bison libutf8proc-dev
 
 sh autogen.sh
-./configure
+./configure --enable-sixel
 make -j$(nproc)
 ```
 
@@ -310,7 +310,7 @@ brew install autoconf automake pkg-config libevent libssh msgpack-c bison utf8pr
 
 export PATH="$(brew --prefix bison)/bin:$PATH"
 sh autogen.sh
-./configure --enable-utf8proc
+./configure --enable-utf8proc --enable-sixel
 make -j$(sysctl -n hw.ncpu)
 ```
 

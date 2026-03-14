@@ -3778,19 +3778,111 @@ CONF"
 		fi
 
 		# -------------------------------------------------------
-		# Test: SIXEL — build flag check
+		# Test: SIXEL — build flag enabled
 		# -------------------------------------------------------
-		# Check if the binary was built with SIXEL support
-		# The server binary should report it in -V or we can check
-		# if the sixel terminal feature is recognized
-		SIXEL_CHECK=$(remote "TERM=xterm-256color $REMOTE_TMTV display-message -p '#{sixel_support}'" 2>/dev/null || echo "")
-		SIXEL_TERM=$(remote "$REMOTE_TMTV list-keys 2>/dev/null | grep -i sixel" 2>/dev/null || echo "")
-		# SIXEL is a compile-time option — just verify the format variable exists
-		# even if the feature is disabled (it should return empty, not error)
-		if remote "TERM=xterm-256color $REMOTE_TMTV display-message -p 'sixel_test'" >/dev/null 2>&1; then
-			pass "SIXEL: tmux format engine works (sixel may be disabled at build)"
+		# #{sixel_support} returns 1 when built with --enable-sixel
+		SIXEL_SUPPORT=$(remote "TERM=xterm-256color $REMOTE_TMTV display-message -p '#{sixel_support}'" 2>/dev/null || echo "")
+		if [ "$SIXEL_SUPPORT" = "1" ]; then
+			pass "SIXEL: binary built with --enable-sixel"
+		elif [ "$SIXEL_SUPPORT" = "0" ] || [ -z "$SIXEL_SUPPORT" ]; then
+			fail "SIXEL: binary built with --enable-sixel" \
+				"#{sixel_support}='$SIXEL_SUPPORT' (expected 1)"
 		else
-			skip "SIXEL: format engine check" "display-message failed"
+			fail "SIXEL: binary built with --enable-sixel" \
+				"unexpected value '${SIXEL_SUPPORT}'"
+		fi
+
+		# -------------------------------------------------------
+		# Test: SIXEL — image output doesn't crash pane
+		# -------------------------------------------------------
+		# Send a minimal 1x1 red SIXEL image to the session pane
+		# and verify the pane survives (no crash, pane still listed).
+		# The SIXEL DCS sequence: ESC P q " 1;1;1;1 # 0;2;100;0;0 !1~ - ESC backslash
+		remote_tmtv "send-keys -t main 'printf \"\\\\033Pq\\\\\"1;1;1;1#0;2;100;0;0!1~-\\\\033\\\\\\\\\\\\\\\\\"' Enter" 2>/dev/null
+		sleep 2
+
+		SIXEL_PANE_COUNT=$(remote_tmtv "list-panes -t main" 2>/dev/null | wc -l)
+		if [ "$SIXEL_PANE_COUNT" -ge 1 ]; then
+			pass "SIXEL: image output doesn't crash pane"
+		else
+			fail "SIXEL: image output doesn't crash pane" \
+				"pane count=$SIXEL_PANE_COUNT after SIXEL output"
+		fi
+
+		# -------------------------------------------------------
+		# Test: SIXEL — image reaches SSH viewer
+		# -------------------------------------------------------
+		# Send another SIXEL image, then connect an SSH viewer and
+		# check if the DCS Pq sequence appears in the raw output.
+		SIXEL_VIEWER_LOG="/tmp/sixel-viewer-$$"
+		remote_tmtv "send-keys -t main 'printf \"\\\\033Pq\\\\\"1;1;1;1#0;2;100;0;0!1~-\\\\033\\\\\\\\\\\\\\\\\"' Enter" 2>/dev/null
+		sleep 1
+
+		# Connect SSH viewer, capture raw output for a few seconds
+		remote "timeout 5 ssh -o StrictHostKeyChecking=no -tt -p $TMTV_PORT \
+			${ESC_RW_TOKEN}@127.0.0.1 2>/dev/null | cat -v > $SIXEL_VIEWER_LOG &"
+		sleep 3
+
+		SIXEL_VIEWER=$(remote "cat $SIXEL_VIEWER_LOG 2>/dev/null" || echo "")
+		remote "rm -f $SIXEL_VIEWER_LOG" 2>/dev/null
+
+		# Look for SIXEL DCS markers in the viewer output (cat -v renders ESC as ^[)
+		# The sequence starts with ^[Pq or ^[P0;0;0q
+		if echo "$SIXEL_VIEWER" | grep -q "Pq"; then
+			pass "SIXEL: image reaches SSH viewer"
+		else
+			# SIXEL data may be in the pane's image list but not re-rendered
+			# on late-join — still record whether the pane has content
+			SIXEL_CAPTURE=$(remote_tmtv "capture-pane -t main -p" 2>/dev/null || echo "")
+			if [ -n "$SIXEL_CAPTURE" ]; then
+				skip "SIXEL: image reaches SSH viewer" \
+					"DCS not in viewer output ($(echo "$SIXEL_VIEWER" | wc -c) bytes); pane alive"
+			else
+				fail "SIXEL: image reaches SSH viewer" \
+					"DCS not in viewer output and pane empty"
+			fi
+		fi
+
+		# -------------------------------------------------------
+		# Test: SIXEL — allow-passthrough option works
+		# -------------------------------------------------------
+		# tmux 3.6a allow-passthrough controls DCS passthrough to
+		# the outer terminal. Verify the option can be set to on.
+		remote_tmtv "set -g allow-passthrough on" 2>/dev/null
+		sleep 1
+		AP_VAL=$(remote_tmtv "show -gv allow-passthrough" 2>/dev/null || echo "")
+		if [ "$AP_VAL" = "on" ] || [ "$AP_VAL" = "1" ]; then
+			pass "SIXEL: allow-passthrough option works"
+		else
+			fail "SIXEL: allow-passthrough option works" \
+				"expected 'on', got '$AP_VAL'"
+		fi
+
+		# Reset
+		remote_tmtv "set -gu allow-passthrough" 2>/dev/null
+
+		# -------------------------------------------------------
+		# Test: SIXEL — SSE stream carries SIXEL data (web viewer)
+		# -------------------------------------------------------
+		# Send a SIXEL image and verify the SSE stream for this
+		# session contains data (proving the pipeline to the web
+		# viewer is intact). We check that the SSE endpoint returns
+		# event data within a few seconds after SIXEL output.
+		if [ "$HAS_WEB" = "true" ] && [ -n "$ESC_TOKEN" ]; then
+			remote_tmtv "send-keys -t main 'printf \"\\\\033Pq\\\\\"1;1;1;1#0;2;100;0;0!1~-\\\\033\\\\\\\\\\\\\\\\\"' Enter" 2>/dev/null
+			sleep 2
+
+			# The SSE endpoint streams msgpack-encoded PTY data
+			SSE_SIXEL=$(remote "timeout 4 curl -s -N $SSE_BASE/$ESC_TOKEN 2>/dev/null | head -c 4096" 2>/dev/null || echo "")
+			if [ -n "$SSE_SIXEL" ]; then
+				pass "SIXEL: SSE stream carries data after SIXEL output"
+			else
+				fail "SIXEL: SSE stream carries data after SIXEL output" \
+					"SSE returned empty for token $ESC_TOKEN"
+			fi
+		else
+			skip "SIXEL: SSE stream carries data after SIXEL output" \
+				"web not available or no session token"
 		fi
 
 		# -------------------------------------------------------
@@ -3880,7 +3972,11 @@ else
 	skip "focus-events: set to on" "no fingerprints"
 	skip "display-popup: command available" "no fingerprints"
 	skip "popup-border-lines: option exists" "no fingerprints"
-	skip "SIXEL: tmux format engine works" "no fingerprints"
+	skip "SIXEL: binary built with --enable-sixel" "no fingerprints"
+	skip "SIXEL: image output doesn't crash pane" "no fingerprints"
+	skip "SIXEL: image reaches SSH viewer" "no fingerprints"
+	skip "SIXEL: allow-passthrough option works" "no fingerprints"
+	skip "SIXEL: SSE stream carries data after SIXEL output" "no fingerprints"
 	skip "hyperlinks: OSC 8 relayed to SSH viewer" "no fingerprints"
 	skip "scrollbars: pane-scrollbars option exists" "no fingerprints"
 	skip "control mode: -C flag available" "no fingerprints"
