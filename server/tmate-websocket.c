@@ -302,7 +302,9 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 
 		server_fd = sock_fd;
 
-		setup_ncurse(STDIN_FILENO, "xterm-256color");
+		/* Skip setup_ncurse() — the parent already initialized
+		 * the terminfo database before entering the jail.
+		 * The child inherits the loaded database via fork(). */
 		setenv("TERM", "xterm-256color", 1);
 
 		close_fds_except((int[]){STDIN_FILENO, STDOUT_FILENO,
