@@ -306,6 +306,7 @@ struct tmate_session {
 
 	/* virtual PTY client for full-screen SSE streaming */
 	int vpty_master_fd;
+	int vpty_slave_fd;	/* pre-created before jail, used on first SSE connect */
 	pid_t vpty_child_pid;
 	struct event *ev_vpty_read;
 	bool vpty_active;	/* true once child is running */

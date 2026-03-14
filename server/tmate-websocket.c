@@ -243,8 +243,11 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		return;
 	}
 
-	if (openpty(&master_fd, &slave_fd, NULL, NULL, NULL) < 0) {
-		tmate_info("vpty: openpty failed: %s", strerror(errno));
+	/* Use pre-created PTY pair (created before chroot jail) */
+	master_fd = session->vpty_master_fd;
+	slave_fd = session->vpty_slave_fd;
+	if (master_fd < 0 || slave_fd < 0) {
+		tmate_info("vpty: no pre-created PTY available");
 		return;
 	}
 
@@ -316,6 +319,7 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 
 	/* Parent: store master fd and register read event */
 	close(slave_fd);
+	session->vpty_slave_fd = -1;
 
 	session->vpty_master_fd = master_fd;
 	session->vpty_child_pid = pid;
@@ -2413,6 +2417,7 @@ void tmate_init_websocket(struct tmate_session *session)
 	session->ev_ipc = NULL;
 
 	session->vpty_master_fd = -1;
+	session->vpty_slave_fd = -1;
 	session->vpty_child_pid = -1;
 	session->ev_vpty_read = NULL;
 	session->vpty_active = false;

@@ -399,12 +399,29 @@ void tmate_spawn_daemon(struct tmate_session *session)
 	 */
 	register_tokens_with_main(session);
 
+	/* Pre-create PTY pair for virtual client before entering jail.
+	 * openpty() needs /dev/ptmx which is not available inside the
+	 * chroot. The fds are kept open and used when the first SSE
+	 * client connects. */
+	if (tmate_has_websocket()) {
+		int m, s;
+		if (openpty(&m, &s, NULL, NULL, NULL) < 0) {
+			tmate_info("vpty pre-create failed: %s", strerror(errno));
+			session->vpty_master_fd = -1;
+			session->vpty_slave_fd = -1;
+		} else {
+			session->vpty_master_fd = m;
+			session->vpty_slave_fd = s;
+			tmate_info("vpty PTY pair pre-created (master=%d slave=%d)", m, s);
+		}
+	}
+
 	/* Open sessions dir fd before jail for post-jail named session symlinks */
 	session->sessions_dir_fd = open(TMATE_WORKDIR "/sessions",
 					O_RDONLY | O_DIRECTORY);
 
 	{
-		int keep_fds[7];
+		int keep_fds[9];
 		int nfds = 0;
 		keep_fds[nfds++] = session->tmux_socket_fd;
 		keep_fds[nfds++] = ssh_get_fd(session->ssh_client.session);
@@ -414,6 +431,10 @@ void tmate_spawn_daemon(struct tmate_session *session)
 			keep_fds[nfds++] = session->ipc_fd;
 		if (session->sessions_dir_fd >= 0)
 			keep_fds[nfds++] = session->sessions_dir_fd;
+		if (session->vpty_master_fd >= 0)
+			keep_fds[nfds++] = session->vpty_master_fd;
+		if (session->vpty_slave_fd >= 0)
+			keep_fds[nfds++] = session->vpty_slave_fd;
 		close_fds_except(keep_fds, nfds);
 	}
 
