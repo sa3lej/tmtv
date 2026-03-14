@@ -531,7 +531,7 @@ scripts/staging-deploy.sh --test-only --full-tests  # includes Playwright
 sudo apt-get install build-essential autoconf automake pkg-config \
   libevent-dev libncurses-dev libssh-dev libmsgpack-dev libbsd-dev \
   bison libutf8proc-dev
-sh autogen.sh && ./configure && make -j$(nproc)
+sh autogen.sh && ./configure --enable-sixel && make -j$(nproc)
 # Produces: tmtv (client) and tmtv-server
 ```
 
@@ -540,7 +540,7 @@ sh autogen.sh && ./configure && make -j$(nproc)
 ```bash
 brew install autoconf automake pkg-config libevent libssh msgpack-c bison utf8proc
 export PATH="$(brew --prefix bison)/bin:$PATH"
-sh autogen.sh && ./configure --enable-utf8proc && make -j$(sysctl -n hw.ncpu)
+sh autogen.sh && ./configure --enable-utf8proc --enable-sixel && make -j$(sysctl -n hw.ncpu)
 ```
 
 ### Static Linux binaries (Docker)
