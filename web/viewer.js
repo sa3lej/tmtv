@@ -87,6 +87,8 @@
   var currentTheme = params.get('theme') || '';
   if (currentTheme) document.body.className = 'theme-' + currentTheme;
 
+  var TITLEBAR_H = 38;
+
   function computeFontSize() {
     measureCellRatio();
     var availW, availH;
@@ -95,11 +97,11 @@
       availH = window.innerHeight - 140 - 48;
     } else {
       availW = window.innerWidth - 32;
-      availH = window.innerHeight - 32;
+      availH = window.innerHeight - 32 - TITLEBAR_H;
     }
     var maxFromW = availW / (serverCols * cellRatioW);
     var maxFromH = availH / (contentRows * cellRatioH);
-    fontSize = Math.max(10, Math.min(Math.floor(Math.min(maxFromW, maxFromH)), 36));
+    fontSize = Math.max(10, Math.floor(Math.min(maxFromW, maxFromH)));
     cellW = fontSize * cellRatioW;
     cellH = fontSize * cellRatioH;
   }
@@ -193,8 +195,9 @@
     } else {
       var maxW = window.innerWidth - 32;
       var maxH = window.innerHeight - 32;
+      var wrapH = contentH + TITLEBAR_H;
       wrap.style.width = Math.min(contentW, maxW) + 'px';
-      wrap.style.height = Math.min(contentH, maxH) + 'px';
+      wrap.style.height = Math.min(wrapH, maxH) + 'px';
       container.style.height = contentH + 'px';
     }
 
