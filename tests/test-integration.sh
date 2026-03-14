@@ -942,8 +942,8 @@ if [ -n "$TOKEN" ]; then
 
 	# Poll capture-pane until marker appears or 3s timeout
 	FOUND=false
-	for _lat_i in $(seq 1 30); do
-		remote "usleep 100000 2>/dev/null || sleep 0.1"
+	for _lat_i in $(seq 1 300); do
+		remote "usleep 10000 2>/dev/null || sleep 0.01"
 		CAP=$(remote_tmtv "capture-pane -t main.0 -p" 2>/dev/null || echo "")
 		if echo "$CAP" | grep -q "$LATENCY_MARKER"; then
 			FOUND=true
@@ -3013,8 +3013,8 @@ if [ -n "$BENCH_RW_TOKEN" ]; then
 
 		# Poll capture-pane until marker appears
 		_ssh_found=false
-		for _sp in $(seq 1 40); do
-			remote "usleep 50000 2>/dev/null || sleep 0.05"
+		for _sp in $(seq 1 80); do
+			remote "usleep 10000 2>/dev/null || sleep 0.01"
 			_cap=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
 			if echo "$_cap" | grep -q "$_ssh_marker"; then
 				_ssh_found=true

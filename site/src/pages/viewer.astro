@@ -7,6 +7,9 @@ import Viewer from '../layouts/Viewer.astro';
 
   <div id="status" class="status">Connecting...</div>
 
+  <!-- Copy toast notification -->
+  <div id="copy-toast" class="copy-toast hidden" role="status" aria-live="polite">Copied!</div>
+
   <div id="error-overlay" class="error-overlay hidden">
     <div class="error-card">
       <div class="error-icon" id="error-icon">
@@ -50,17 +53,48 @@ import Viewer from '../layouts/Viewer.astro';
     <div class="tv-antenna-r"></div>
 
     <div id="titlebar" class="titlebar">
-      <div class="dot red"></div>
-      <div class="dot yellow"></div>
-      <div class="dot green"></div>
+      <div class="titlebar-dots">
+        <div class="dot red"></div>
+        <div class="dot yellow"></div>
+        <div class="dot green"></div>
+      </div>
       <span id="titlebar-text" class="titlebar-text">
         <span id="titlebar-label">tmtv</span>
         <span id="titlebar-meta"></span>
       </span>
-      <span id="session-mode" class="session-mode hidden"></span>
+      <span class="titlebar-right">
+        <span id="conn-quality" class="conn-quality" role="status" aria-label="Connection quality"></span>
+        <span id="viewer-count" class="viewer-count hidden" aria-label="Viewers watching">0</span>
+        <button id="copy-btn" class="titlebar-btn" aria-label="Copy selection" title="Copy selection (Ctrl+Shift+C)">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+        </button>
+        <span id="session-mode" class="session-mode hidden"></span>
+      </span>
     </div>
 
-    <div id="terminal-container" class="terminal-container"></div>
+    <!-- Search bar -->
+    <div id="search-bar" class="search-bar hidden" role="search" aria-label="Search terminal">
+      <input type="text" id="search-input" class="search-input" placeholder="Find..." aria-label="Search text">
+      <button id="search-prev" class="search-btn" aria-label="Previous match" title="Previous (Shift+Enter)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+      </button>
+      <button id="search-next" class="search-btn" aria-label="Next match" title="Next (Enter)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <button id="search-close" class="search-btn" aria-label="Close search" title="Close (Escape)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+      </button>
+    </div>
+
+    <div id="terminal-container" class="terminal-container">
+      <!-- Reconnect overlay — sits on top of terminal to avoid flash -->
+      <div id="reconnect-overlay" class="reconnect-overlay hidden" role="status" aria-live="polite">
+        <div class="reconnect-badge">
+          <div class="reconnect-spinner"></div>
+          <span>Reconnecting...</span>
+        </div>
+      </div>
+    </div>
 
     <div class="tv-controls">
       <div class="tv-speaker"></div>
@@ -84,6 +118,7 @@ import Viewer from '../layouts/Viewer.astro';
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" is:inline></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-search@0.16.0/lib/addon-search.min.js" is:inline></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-image@0.8.0/lib/addon-image.min.js" is:inline></script>
   <script src="https://cdn.jsdelivr.net/npm/@msgpack/msgpack@3.0.0-beta2/dist.es5+umd/msgpack.min.js" is:inline></script>
   <script is:inline src="/viewer.js"></script>
@@ -118,6 +153,19 @@ import Viewer from '../layouts/Viewer.astro';
   .status.connected.fade { opacity: 0; pointer-events: none; }
   .status.error { color: #df6c5a; border-color: rgba(223, 108, 90, 0.2); }
 
+  /* Copy toast */
+  .copy-toast {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-family: "JetBrains Mono", monospace; font-size: 13px;
+    color: #e0e0e0; background: rgba(30, 34, 50, 0.95);
+    padding: 8px 20px; border-radius: 8px; z-index: 200;
+    backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.1);
+    opacity: 0; transition: opacity 0.3s ease;
+    pointer-events: none;
+  }
+  .copy-toast.hidden { display: none; }
+  .copy-toast.show { opacity: 1; display: block; }
+
   .terminal-wrap {
     border-radius: 10px; overflow: hidden;
     box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 8px 40px rgba(0,0,0,0.6), 0 2px 12px rgba(0,0,0,0.3);
@@ -130,7 +178,8 @@ import Viewer from '../layouts/Viewer.astro';
     height: 38px; min-height: 38px; display: flex; align-items: center;
     padding: 0 14px; position: relative; border-bottom: 1px solid rgba(0,0,0,0.4);
   }
-  .dot { width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
+  .titlebar-dots { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
   .dot.red { background: #ff5f57; box-shadow: 0 0 4px #ff5f57; }
   .dot.yellow { background: #febc2e; box-shadow: 0 0 4px #febc2e; }
   .dot.green { background: #28c840; box-shadow: 0 0 4px #28c840; }
@@ -139,11 +188,53 @@ import Viewer from '../layouts/Viewer.astro';
     color: #888; font-family: "JetBrains Mono", monospace;
     font-size: 12px; font-weight: 500; letter-spacing: 0.3px;
     display: flex; align-items: center; gap: 8px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 50%;
   }
   #titlebar-meta { color: #666; font-size: 10px; font-weight: 400; }
 
-  .session-mode {
+  .titlebar-right {
     position: absolute; right: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* Connection quality indicator */
+  .conn-quality {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #555; display: inline-block;
+    transition: background 0.4s ease, box-shadow 0.4s ease;
+  }
+  .conn-quality.good { background: #28c840; box-shadow: 0 0 4px rgba(40, 200, 64, 0.4); }
+  .conn-quality.fair { background: #febc2e; box-shadow: 0 0 4px rgba(254, 188, 46, 0.4); }
+  .conn-quality.poor { background: #df6c5a; box-shadow: 0 0 4px rgba(223, 108, 90, 0.4); }
+  .conn-quality.disconnected { background: #555; box-shadow: none; }
+
+  /* Viewer count badge */
+  .viewer-count {
+    font-family: "JetBrains Mono", monospace; font-size: 10px;
+    color: #888; background: rgba(255,255,255,0.06);
+    padding: 1px 6px; border-radius: 8px;
+    display: inline-flex; align-items: center;
+  }
+  .viewer-count::before {
+    content: '';
+    display: inline-block; width: 8px; height: 8px;
+    margin-right: 4px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
+    background-size: contain; background-repeat: no-repeat;
+  }
+  .viewer-count.hidden { display: none; }
+
+  /* Titlebar button */
+  .titlebar-btn {
+    background: none; border: none; color: #666; cursor: pointer;
+    padding: 4px; border-radius: 4px; display: flex; align-items: center;
+    transition: color 0.2s ease, background 0.2s ease;
+  }
+  .titlebar-btn:hover { color: #aaa; background: rgba(255,255,255,0.06); }
+  .titlebar-btn:focus-visible { outline: 2px solid #6c9efc; outline-offset: 1px; }
+
+  .session-mode {
     font-family: "JetBrains Mono", monospace; font-size: 10px;
     font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
     padding: 2px 8px; border-radius: 3px;
@@ -152,8 +243,58 @@ import Viewer from '../layouts/Viewer.astro';
   .session-mode.ro { background: rgba(255,255,255,0.08); color: #888; }
   .session-mode.rw { background: rgba(61,220,132,0.15); color: #3ddc84; }
 
+  /* Search bar */
+  .search-bar {
+    background: linear-gradient(180deg, #222838 0%, #1e2430 100%);
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px 8px; border-bottom: 1px solid rgba(0,0,0,0.3);
+  }
+  .search-bar.hidden { display: none; }
+  .search-input {
+    font-family: "JetBrains Mono", monospace; font-size: 12px;
+    background: rgba(0,0,0,0.3); color: #e0e0e0;
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 4px;
+    padding: 4px 8px; flex: 1; min-width: 0;
+    outline: none; transition: border-color 0.2s ease;
+  }
+  .search-input:focus { border-color: rgba(108, 158, 252, 0.4); }
+  .search-input::placeholder { color: #555; }
+  .search-btn {
+    background: none; border: none; color: #666; cursor: pointer;
+    padding: 4px; border-radius: 4px; display: flex; align-items: center;
+    transition: color 0.2s ease, background 0.2s ease;
+  }
+  .search-btn:hover { color: #aaa; background: rgba(255,255,255,0.06); }
+  .search-btn:focus-visible { outline: 2px solid #6c9efc; outline-offset: 1px; }
+
   .terminal-container {
     background: #191d27; position: relative; flex: 0 0 auto; overflow: hidden;
+  }
+
+  /* Reconnect overlay — subtle, sits on top of terminal content */
+  .reconnect-overlay {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(25, 29, 39, 0.6);
+    backdrop-filter: blur(2px);
+    animation: overlay-fade-in 0.3s ease-out;
+  }
+  .reconnect-overlay.hidden { display: none; }
+  .reconnect-badge {
+    display: flex; align-items: center; gap: 8px;
+    font-family: "JetBrains Mono", monospace; font-size: 12px;
+    color: #888; background: rgba(30, 34, 50, 0.9);
+    padding: 8px 16px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .reconnect-spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.1);
+    border-top-color: #6c9efc;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 
   /* scanlines removed — caused visible banding artifacts */
@@ -168,6 +309,7 @@ import Viewer from '../layouts/Viewer.astro';
       radial-gradient(ellipse at 50% 50%, rgba(30, 25, 15, 0.6) 0%, transparent 80%);
   }
   .theme-tv .titlebar { display: none; }
+  .theme-tv .search-bar { display: none; }
   .theme-tv .terminal-wrap {
     border-radius: 40px 40px 34px 34px; overflow: visible;
     box-shadow: 0 6px 40px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
@@ -341,15 +483,55 @@ import Viewer from '../layouts/Viewer.astro';
 
   /* WCAG 2.1 AA focus-visible outlines */
   .session-input:focus-visible,
-  .password-input:focus-visible {
+  .password-input:focus-visible,
+  .search-input:focus-visible {
     border-color: #6c9efc;
     box-shadow: 0 0 0 2px rgba(108, 158, 252, 0.3);
     outline: none;
   }
   .session-submit:focus-visible,
   .password-submit:focus-visible,
-  .error-link:focus-visible {
+  .error-link:focus-visible,
+  .search-btn:focus-visible,
+  .titlebar-btn:focus-visible {
     outline: 2px solid #6c9efc;
     outline-offset: 2px;
+  }
+
+  /* === Mobile responsiveness === */
+  @media (max-width: 640px) {
+    .titlebar { padding: 0 8px; height: 32px; min-height: 32px; }
+    .titlebar-dots { gap: 6px; }
+    .dot { width: 10px; height: 10px; }
+    .titlebar-text { font-size: 11px; max-width: 40%; }
+    #titlebar-meta { font-size: 9px; }
+    .titlebar-right { right: 8px; gap: 6px; }
+    .session-mode { font-size: 9px; padding: 1px 6px; }
+    .terminal-wrap { max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); border-radius: 8px; }
+    .error-card { padding: 24px 16px; }
+    .error-title { font-size: 16px; }
+    .password-input, .session-input { width: 200px; font-size: 13px; }
+    .search-bar { padding: 3px 6px; }
+    .search-input { font-size: 11px; padding: 3px 6px; }
+  }
+
+  @media (max-width: 400px) {
+    .titlebar-dots { display: none; }
+    .titlebar-text { position: static; transform: none; max-width: 60%; }
+    .titlebar { justify-content: space-between; }
+  }
+
+  /* Touch-friendly targets (minimum 44px) */
+  @media (pointer: coarse) {
+    .search-btn { min-width: 44px; min-height: 44px; justify-content: center; }
+    .titlebar-btn { min-width: 44px; min-height: 38px; justify-content: center; }
+  }
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .reconnect-spinner { animation: none; border-top-color: #6c9efc; }
+    .copy-toast { transition: none; }
+    .conn-quality { transition: none; }
+    .status { transition: none; }
   }
 </style>
