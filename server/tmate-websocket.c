@@ -388,6 +388,8 @@ void sse_kill_virtual_client(struct tmate_session *session)
 	tmate_info("Virtual PTY client killed");
 }
 
+static void sse_broadcast_sync_layout(struct tmate_session *session);
+
 void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy)
 {
 	struct winsize ws;
@@ -406,6 +408,10 @@ void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy)
 
 	if (session->vpty_child_pid > 0)
 		kill(session->vpty_child_pid, SIGWINCH);
+
+	/* Tell all SSE clients about the new dimensions so the
+	 * browser can resize its xterm.js terminal to match. */
+	sse_broadcast_sync_layout(session);
 
 	tmate_debug("vpty resized to %ux%u", sx, sy);
 }
@@ -740,6 +746,19 @@ void sse_broadcast_screen_dump(struct tmate_session *session)
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
 		if (wc->handshake_done && !wc->is_post)
 			sse_send_screen_dump(wc->bev);
+	}
+}
+
+static void sse_broadcast_sync_layout(struct tmate_session *session)
+{
+	struct ws_client *wc;
+
+	if (!tmate_has_websocket())
+		return;
+
+	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+		if (wc->handshake_done && !wc->is_post)
+			sse_send_sync_layout(wc->bev);
 	}
 }
 
@@ -1911,7 +1930,9 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 				      wc->session->web_input_enabled);
 
 		if (wc->session->vpty_active) {
-			/* vpty mode: replay buffered full-screen data */
+			/* vpty mode: send layout first so the browser
+			 * knows the terminal dimensions, then replay. */
+			sse_send_sync_layout(wc->bev);
 			pty_replay_send(wc->bev);
 		} else {
 			/* Fallback: per-pane grid dump */
