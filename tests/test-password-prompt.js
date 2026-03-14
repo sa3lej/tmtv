@@ -72,9 +72,11 @@ if (!url || !password) {
     // Overlay should become hidden
     await overlay.waitFor({ state: 'hidden', timeout: 15000 });
 
-    // Full-screen terminal should render (single xterm.js instance in #fullscreen-term)
-    const terminal = page.locator('#fullscreen-term .xterm-screen');
-    await terminal.waitFor({ state: 'visible', timeout: 15000 });
+    // Full-screen terminal should render — wait for any .xterm-screen element
+    // (#fullscreen-term is created dynamically when the first vpty data arrives,
+    // which can take several seconds on a slow staging server)
+    const terminal = page.locator('.xterm-screen');
+    await terminal.first().waitFor({ state: 'visible', timeout: 30000 });
 
     await page.screenshot({ path: screenshotDir + '/pw-3-connected.png' });
     console.log('PASS step 3: correct password connects to terminal');

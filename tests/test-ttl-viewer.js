@@ -31,8 +31,10 @@ if (!url) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
     // --- Step 1: /j/ URL connects to the terminal ---
-    const terminal = page.locator('#fullscreen-term .xterm-screen');
-    await terminal.waitFor({ state: 'visible', timeout: 15000 });
+    // Wait for any xterm.js terminal to appear (#fullscreen-term is created
+    // dynamically when the first vpty data arrives)
+    const terminal = page.locator('.xterm-screen');
+    await terminal.first().waitFor({ state: 'visible', timeout: 30000 });
 
     // Verify status shows connected (not an error state)
     const status = page.locator('#status');

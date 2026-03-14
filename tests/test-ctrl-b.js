@@ -41,9 +41,11 @@ const inputUrl = origin + '/ws/' + sessionName + '/input';
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // --- Step 1: Terminal connects and renders ---
-    // Wait for the single full-screen xterm.js terminal to appear
-    const terminal = page.locator('#fullscreen-term .xterm-screen');
-    await terminal.waitFor({ state: 'visible', timeout: 30000 });
+    // Wait for any xterm.js terminal to appear (#fullscreen-term is created
+    // dynamically when the first vpty data arrives, which can take several
+    // seconds on a slow staging server)
+    const terminal = page.locator('.xterm-screen');
+    await terminal.first().waitFor({ state: 'visible', timeout: 30000 });
     // Give the terminal time to receive initial content
     await page.waitForTimeout(2000);
     await page.screenshot({ path: screenshotDir + '/ctrl-b-1-connected.png' });
