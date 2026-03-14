@@ -52,6 +52,9 @@
 #define SSE_MAX_CLIENTS_PER_SESSION 50
 #define SSE_WRITE_TIMEOUT_SEC 60
 #define SSE_WRITE_BUFFER_MAX (1024 * 1024)  /* 1 MB */
+#define SSE_WATERMARK_GRACE_SEC 5  /* seconds after connect before watermark applies */
+#define SSE_HEARTBEAT_INTERVAL_SEC 15  /* SSE keepalive comment interval */
+#define PTY_REPLAY_RECONNECT_MAX (64 * 1024) /* max replay bytes for reconnecting clients */
 
 /*
  * Enable TCP keepalive on a socket so dead peers behind NAT are
@@ -81,7 +84,10 @@ static void sse_enable_tcp_keepalive(int fd)
 static void sse_send_data(struct bufferevent *bev,
 			  const unsigned char *data, size_t len);
 static bool sse_client_over_watermark(struct ws_client *wc);
+static bool sse_client_hopelessly_stuck(struct ws_client *wc);
 static void ws_client_free(struct ws_client *wc);
+static void pty_replay_send_limited(struct bufferevent *bev,
+				    size_t max_bytes);
 
 /* --- PTY replay buffer ---
  * Message-level ring buffer: each entry is a complete encoder write
@@ -142,14 +148,46 @@ static void pty_replay_append(const unsigned char *data, size_t len)
 
 static void pty_replay_send(struct bufferevent *bev)
 {
-	int i, idx, tail;
+	pty_replay_send_limited(bev, 0);
+}
+
+/*
+ * Send replay buffer to a client, optionally limiting total bytes.
+ * When max_bytes > 0, only the most recent messages up to that
+ * byte limit are sent.  This prevents reconnecting clients from
+ * getting a 256KB replay dump that overwhelms their write buffer.
+ */
+static void pty_replay_send_limited(struct bufferevent *bev,
+				    size_t max_bytes)
+{
+	int i, idx, tail, start;
+	size_t total;
 
 	if (pty_replay_count == 0)
 		return;
 
 	tail = (pty_replay_head - pty_replay_count +
 		PTY_REPLAY_MAX_MSGS) % PTY_REPLAY_MAX_MSGS;
-	for (i = 0; i < pty_replay_count; i++) {
+
+	/* If no limit, send everything */
+	if (max_bytes == 0) {
+		start = 0;
+	} else {
+		/* Walk backwards from newest to find how many fit */
+		total = 0;
+		start = pty_replay_count;
+		for (i = pty_replay_count - 1; i >= 0; i--) {
+			idx = (tail + i) % PTY_REPLAY_MAX_MSGS;
+			if (!pty_replay_msgs[idx].data)
+				continue;
+			if (total + pty_replay_msgs[idx].len > max_bytes)
+				break;
+			total += pty_replay_msgs[idx].len;
+			start = i;
+		}
+	}
+
+	for (i = start; i < pty_replay_count; i++) {
 		idx = (tail + i) % PTY_REPLAY_MAX_MSGS;
 		if (pty_replay_msgs[idx].data)
 			sse_send_data(bev, pty_replay_msgs[idx].data,
@@ -239,10 +277,21 @@ static void on_vpty_read(evutil_socket_t fd, short what, void *arg)
 	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp) {
 		if (!wc->handshake_done || wc->is_post)
 			continue;
-		if (sse_client_over_watermark(wc)) {
-			tmate_info("SSE client over watermark, "
-				   "disconnecting");
+		if (sse_client_hopelessly_stuck(wc)) {
+			/* 10MB+ buffered — connection is dead, disconnect */
+			tmate_info("SSE client buffer at %zuKB, disconnecting",
+				   evbuffer_get_length(
+				       bufferevent_get_output(wc->bev))
+				   / 1024);
 			ws_client_free(wc);
+			continue;
+		}
+		if (sse_client_over_watermark(wc)) {
+			/* Client can't keep up — skip this frame instead
+			 * of disconnecting.  The client stays connected
+			 * and catches up when its buffer drains.  This
+			 * avoids the reconnect→replay→watermark death
+			 * spiral that froze both web and SSH. */
 			continue;
 		}
 		sse_send_data(wc->bev,
@@ -1961,6 +2010,7 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 		}
 
 		wc->handshake_done = true;
+		wc->connect_time = time(NULL);
 		/* Replace handshake read timeout with a write-side timeout.
 		 * If the client cannot accept data within 60s, it's dead. */
 		{
@@ -1988,9 +2038,12 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 
 		if (wc->session->vpty_active) {
 			/* vpty mode: send layout first so the browser
-			 * knows the terminal dimensions, then replay. */
+			 * knows the terminal dimensions, then replay.
+			 * Limit replay size to prevent write buffer
+			 * overflow that triggers watermark disconnects. */
 			sse_send_sync_layout(wc->bev);
-			pty_replay_send(wc->bev);
+			pty_replay_send_limited(wc->bev,
+			    PTY_REPLAY_RECONNECT_MAX);
 		} else {
 			/* Fallback: per-pane grid dump */
 			sse_send_sync_layout(wc->bev);
@@ -2192,10 +2245,26 @@ void tmate_setup_ipc_receiver(struct tmate_session *session)
  * watermark.  Returns true if the client is lagging and should be
  * disconnected.
  */
+/*
+ * Check if an SSE client's write buffer is congested.
+ * Returns true if the client can't keep up and should be skipped
+ * for this frame (not disconnected — see on_vpty_read).
+ */
 static bool sse_client_over_watermark(struct ws_client *wc)
 {
 	struct evbuffer *out = bufferevent_get_output(wc->bev);
 	return evbuffer_get_length(out) > SSE_WRITE_BUFFER_MAX;
+}
+
+/*
+ * Check if an SSE client is hopelessly dead (buffer 10x over limit).
+ * Only then do we actually disconnect — the client's TCP connection
+ * is likely broken or the process is not reading at all.
+ */
+static bool sse_client_hopelessly_stuck(struct ws_client *wc)
+{
+	struct evbuffer *out = bufferevent_get_output(wc->bev);
+	return evbuffer_get_length(out) > SSE_WRITE_BUFFER_MAX * 10;
 }
 
 /* --- Encoder broadcast callback --- */
@@ -2345,6 +2414,25 @@ static void on_snapshot_timer(__unused evutil_socket_t fd,
 	 * escape sequences (not parsed characters).  SSE clients
 	 * receive PTY data directly and xterm.js handles parsing. */
 	(void)session;
+}
+
+/*
+ * SSE heartbeat: send a `:keepalive` comment to all connected SSE clients.
+ * SSE comments (lines starting with ':') are ignored by EventSource but
+ * keep the TCP connection alive through proxies and NAT gateways.
+ */
+static void on_sse_heartbeat_timer(__unused evutil_socket_t fd,
+				   __unused short what, void *arg)
+{
+	struct tmate_session *session = arg;
+	struct ws_client *wc;
+	static const char heartbeat[] = ":keepalive\n\n";
+
+	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+		if (!wc->handshake_done || wc->is_post)
+			continue;
+		bufferevent_write(wc->bev, heartbeat, sizeof(heartbeat) - 1);
+	}
 }
 
 /* --- Public API --- */
@@ -2610,5 +2698,18 @@ void tmate_start_websocket_listener(struct tmate_session *session)
 						    session);
 		event_add(session->ev_ws_snapshot, &tv);
 		tmate_info("SSE snapshot timer started (%dms)", SSE_SNAPSHOT_INTERVAL_MS);
+	}
+
+	/* SSE heartbeat timer: send keepalive comments to prevent
+	 * proxies/browsers from timing out idle connections. */
+	{
+		struct timeval tv = { SSE_HEARTBEAT_INTERVAL_SEC, 0 };
+		session->ev_sse_heartbeat = event_new(session->ev_base, -1,
+						      EV_PERSIST,
+						      on_sse_heartbeat_timer,
+						      session);
+		event_add(session->ev_sse_heartbeat, &tv);
+		tmate_debug("SSE heartbeat timer started (%ds)",
+			    SSE_HEARTBEAT_INTERVAL_SEC);
 	}
 }

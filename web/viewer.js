@@ -318,12 +318,6 @@
 
   function updateMeta() {
     var parts = [];
-    if (webViewers > 0 || sshViewers > 0) {
-      var viewerParts = [];
-      if (sshViewers > 0) viewerParts.push('SSH:' + sshViewers);
-      if (webViewers > 0) viewerParts.push('W:' + webViewers);
-      parts.push(viewerParts.join(' '));
-    }
     if (sessionStart) {
       var elapsed = Math.floor((Date.now() - sessionStart) / 1000);
       var m = Math.floor(elapsed / 60);
@@ -643,6 +637,15 @@
 
   function connect() {
     setStatus('Connecting...');
+
+    /* Skip the HEAD probe on reconnect — we already know the password
+     * status from the first connection.  The HEAD probe creates a full
+     * ws_client through IPC on the server, doubling connection load
+     * and generating "handshake failed" noise on every reconnect. */
+    if (everConnected) {
+      connectEventSource();
+      return;
+    }
 
     /* Probe the SSE endpoint with HEAD to detect password gates.
      * HEAD validates the token and password without creating a real
