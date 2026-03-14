@@ -11,6 +11,15 @@ static void on_encoder_buffer_ready(__unused evutil_socket_t fd,
 		encoder->ready_callback(encoder->userdata, encoder->buffer);
 }
 
+static void on_encoder_retry_timer(__unused evutil_socket_t fd,
+				   __unused short what, void *arg)
+{
+	struct tmate_encoder *encoder = arg;
+
+	if (encoder->ready_callback && evbuffer_get_length(encoder->buffer))
+		encoder->ready_callback(encoder->userdata, encoder->buffer);
+}
+
 /*
  * Cap encoder buffer at 16 MB. When no SSH connection is draining the buffer
  * (ready_callback is NULL), PTY data accumulates here indefinitely and will
@@ -90,6 +99,11 @@ void tmate_encoder_init(struct tmate_encoder *encoder,
 
 	event_add(encoder->ev_buffer, NULL);
 
+	encoder->ev_retry = evtimer_new(tmate_session.ev_base,
+		on_encoder_retry_timer, encoder);
+	if (!encoder->ev_retry)
+		tmate_fatal("Can't allocate retry timer");
+
 	encoder->ev_active = false;
 }
 
@@ -99,7 +113,24 @@ void tmate_encoder_destroy(struct tmate_encoder *encoder)
 	evbuffer_free(encoder->buffer);
 	event_del(encoder->ev_buffer);
 	event_free(encoder->ev_buffer);
+	if (encoder->ev_retry) {
+		event_del(encoder->ev_retry);
+		event_free(encoder->ev_retry);
+	}
 	memset(encoder, 0, sizeof(*encoder));
+}
+
+/*
+ * Schedule a retry after SSH backpressure.  Uses a 25ms timer instead
+ * of event_active() to avoid busy-looping when ssh_channel_write()
+ * returns -1 because the channel window is full.
+ */
+void tmate_encoder_schedule_retry(struct tmate_encoder *encoder)
+{
+	struct timeval tv = { .tv_sec = 0, .tv_usec = 25000 };
+
+	if (!evtimer_pending(encoder->ev_retry, NULL))
+		evtimer_add(encoder->ev_retry, &tv);
 }
 
 void tmate_encoder_set_ready_callback(struct tmate_encoder *encoder,
