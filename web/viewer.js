@@ -278,8 +278,15 @@
     });
   }
 
+  /* Filter out terminal query responses that xterm.js generates
+   * automatically (DA, DSR, OSC 10/11, DECRPM, CPR, etc.).
+   * These must never be sent back to the server as user input. */
+  var termResponseRe = /\x1b\[[\?>=!]?[\d;]*[cnRySut]|\x1b\]1[01];[^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
+
   function queueInput(data) {
     if (sessionReadonly || !webInputEnabled) return;
+    data = data.replace(termResponseRe, '');
+    if (!data) return;
     inputBatch += data;
     if (!inputInFlight) {
       flushInput();
