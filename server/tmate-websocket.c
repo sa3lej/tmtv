@@ -276,11 +276,11 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 
 	if (pid == 0) {
 		/* Child: connect to tmux socket and run client_main */
+		int saved_stderr = dup(STDERR_FILENO);
 
-		/* Redirect stdio to slave PTY */
+		/* Redirect stdin/stdout to slave PTY, keep stderr for logs */
 		dup2(slave_fd, STDIN_FILENO);
 		dup2(slave_fd, STDOUT_FILENO);
-		dup2(slave_fd, STDERR_FILENO);
 		if (slave_fd > STDERR_FILENO)
 			close(slave_fd);
 		close(master_fd);
@@ -291,11 +291,16 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		strlcpy(sa.sun_path, socket_path, sizeof(sa.sun_path));
 
 		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (sock_fd < 0)
+		if (sock_fd < 0) {
+			dprintf(saved_stderr, "vpty child: socket() failed: %s\n",
+				strerror(errno));
 			_exit(1);
+		}
 
 		if (connect(sock_fd, (struct sockaddr *)&sa,
 			    sizeof(sa)) < 0) {
+			dprintf(saved_stderr, "vpty child: connect(%s) failed: %s\n",
+				socket_path, strerror(errno));
 			close(sock_fd);
 			_exit(1);
 		}
@@ -308,14 +313,22 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		setenv("TERM", "xterm-256color", 1);
 
 		close_fds_except((int[]){STDIN_FILENO, STDOUT_FILENO,
-					  STDERR_FILENO, sock_fd}, 4);
+					  saved_stderr, sock_fd}, 4);
+
+		/* Restore stderr for logging */
+		dup2(saved_stderr, STDERR_FILENO);
+		close(saved_stderr);
 
 		event_reinit(session->ev_base);
+
+		dprintf(STDERR_FILENO, "vpty child: calling client_main (socket=%s)\n",
+			socket_path);
 
 		/* Attach read-only */
 		char *argv_ro[] = {(char *)"attach", (char *)"-r", NULL};
 		int ret = client_main(session->ev_base, 2, argv_ro,
 				      CLIENT_UTF8, 0);
+		dprintf(STDERR_FILENO, "vpty child: client_main returned %d\n", ret);
 		_exit(ret);
 	}
 
