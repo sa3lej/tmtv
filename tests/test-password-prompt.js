@@ -72,9 +72,9 @@ if (!url || !password) {
     // Overlay should become hidden
     await overlay.waitFor({ state: 'hidden', timeout: 15000 });
 
-    // Terminal wrap should have xterm content (canvas or .xterm-screen)
-    const terminal = page.locator('.xterm-screen, #terminal-wrap canvas');
-    await terminal.first().waitFor({ state: 'visible', timeout: 15000 });
+    // Full-screen terminal should render (single xterm.js instance in #fullscreen-term)
+    const terminal = page.locator('#fullscreen-term .xterm-screen');
+    await terminal.waitFor({ state: 'visible', timeout: 15000 });
 
     await page.screenshot({ path: screenshotDir + '/pw-3-connected.png' });
     console.log('PASS step 3: correct password connects to terminal');
