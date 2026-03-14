@@ -257,8 +257,20 @@ tty_write_callback(__unused int fd, __unused short events, void *data)
 	int		 nwrite;
 
 	nwrite = evbuffer_write(tty->out, c->fd);
-	if (nwrite == -1)
+	if (nwrite == -1) {
+#ifdef TMATE
+		/* EAGAIN: kernel PTY buffer full — re-arm the write
+		 * event so we retry when the buffer drains.  Without
+		 * this, tty output stalls permanently on large
+		 * terminals whose initial redraw exceeds the PTY
+		 * buffer capacity. */
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			if (EVBUFFER_LENGTH(tty->out) != 0)
+				event_add(&tty->event_out, NULL);
+		}
+#endif
 		return;
+	}
 	log_debug("%s: wrote %d bytes (of %zu)", c->name, nwrite, size);
 
 	if (c->redraw > 0) {
