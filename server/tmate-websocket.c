@@ -262,6 +262,11 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 			ws.ws_col = 80;
 			ws.ws_row = 24;
 		}
+		/* Set pixel dimensions so tmux can compute cell pixel
+		 * ratios for SIXEL image scaling.  Use 15px per cell
+		 * (typical for xterm.js at reasonable font sizes). */
+		ws.ws_xpixel = ws.ws_col * 15;
+		ws.ws_ypixel = ws.ws_row * 15;
 		ioctl(slave_fd, TIOCSWINSZ, &ws);
 	}
 
@@ -393,6 +398,8 @@ void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy)
 	memset(&ws, 0, sizeof(ws));
 	ws.ws_col = sx;
 	ws.ws_row = sy;
+	ws.ws_xpixel = sx * 15;
+	ws.ws_ypixel = sy * 15;
 
 	if (ioctl(session->vpty_master_fd, TIOCSWINSZ, &ws) < 0)
 		tmate_info("vpty resize ioctl failed: %s", strerror(errno));
@@ -2279,9 +2286,15 @@ void tmate_notify_client_join(__unused struct tmate_session *session,
 	if (!tmate_has_websocket())
 		return;
 
-	/* Skip the virtual PTY client — it's not a real viewer */
-	if (session->vpty_active && c->pid == session->vpty_child_pid)
+	/* Skip the virtual PTY client — it's not a real viewer.
+	 * Mark it so tmux suppresses terminal queries (DA, OSC 10/11,
+	 * XTVERSION, etc.) that would leak into the SSE stream.
+	 * Also enable SIXEL support so images are sent as SIXEL
+	 * data (not text fallback) for the web viewer's ImageAddon. */
+	if (session->vpty_active && c->pid == session->vpty_child_pid) {
+		c->flags |= CLIENT_TMATE_VPTY;
 		return;
+	}
 
 	c->flags |= CLIENT_TMATE_NOTIFIED_JOIN;
 

@@ -1,6 +1,6 @@
 # configure.ac
 
-AC_INIT([tmtv], 1.5.1)
+AC_INIT([tmtv], 1.5.2)
 AC_PREREQ([2.60])
 
 AC_CONFIG_AUX_DIR(etc)
