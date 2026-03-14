@@ -235,7 +235,6 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 {
 	int master_fd, slave_fd;
 	pid_t pid;
-	struct sockaddr_un sa;
 	int sock_fd;
 
 	if (session->vpty_active) {
@@ -266,27 +265,28 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		ioctl(slave_fd, TIOCSWINSZ, &ws);
 	}
 
-	/*
-	 * Connect to the tmux socket.  After chroot, the original
-	 * socket_path is outside the jail.  A symlink at /tmux.sock
-	 * inside the jail points to the real socket (created by
-	 * tmate_spawn_daemon before entering the jail).
-	 */
-	memset(&sa, 0, sizeof(sa));
-	sa.sun_family = AF_UNIX;
-	strlcpy(sa.sun_path, "/tmux.sock", sizeof(sa.sun_path));
+	/* Connect to the tmux socket via the hard link inside the jail.
+	 * The original socket_path is outside the chroot but a hard link
+	 * at /tmux.sock was created before entering the jail. */
+	{
+		struct sockaddr_un sa;
+		memset(&sa, 0, sizeof(sa));
+		sa.sun_family = AF_UNIX;
+		strlcpy(sa.sun_path, "/tmux.sock", sizeof(sa.sun_path));
 
-	sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (sock_fd < 0) {
-		tmate_info("vpty: socket() failed: %s", strerror(errno));
-		return;
-	}
-
-	if (connect(sock_fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-		tmate_info("vpty: connect(%s) failed: %s",
-			   socket_path, strerror(errno));
-		close(sock_fd);
-		return;
+		sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (sock_fd < 0) {
+			tmate_info("vpty: socket() failed: %s",
+				   strerror(errno));
+			return;
+		}
+		if (connect(sock_fd, (struct sockaddr *)&sa,
+			    sizeof(sa)) < 0) {
+			tmate_info("vpty: connect(/tmux.sock) failed: %s",
+				   strerror(errno));
+			close(sock_fd);
+			return;
+		}
 	}
 
 	pid = fork();
@@ -314,13 +314,18 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		close_fds_except((int[]){STDIN_FILENO, STDOUT_FILENO,
 					  STDERR_FILENO, sock_fd}, 4);
 
-		event_reinit(session->ev_base);
+		/* Create a fresh event base for the child.  The parent's
+		 * base has registered events that conflict after fork.
+		 * event_reinit() is not sufficient — we need a clean base. */
+		{
+			struct event_base *child_base = event_base_new();
 
-		/* Attach read-only */
-		char *argv_ro[] = {(char *)"attach", (char *)"-r", NULL};
-		int ret = client_main(session->ev_base, 2, argv_ro,
-				      CLIENT_UTF8, 0);
-		_exit(ret);
+			/* Attach read-only */
+			char *argv_ro[] = {(char *)"attach", (char *)"-r", NULL};
+			int ret = client_main(child_base, 2, argv_ro,
+					      CLIENT_UTF8, 0);
+			_exit(ret);
+		}
 	}
 
 	/* Parent: close fds the child owns */

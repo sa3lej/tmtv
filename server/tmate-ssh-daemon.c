@@ -1,4 +1,5 @@
 #include <sys/stat.h>
+#include <sys/un.h>
 #include "tmate.h"
 #include <ctype.h>
 #include <errno.h>
@@ -416,11 +417,10 @@ void tmate_spawn_daemon(struct tmate_session *session)
 		}
 	}
 
-	/* Hard-link the tmux socket into the jail so the virtual PTY
-	 * client can connect after chroot.  The socket lives in
-	 * /tmp/tmtv/sessions/<token> but that path is outside the jail
-	 * root (/tmp/tmtv/jail/).  A hard link makes it accessible
-	 * as /tmux.sock inside the chroot. */
+	/* Prepare the jail for the virtual PTY client:
+	 * 1. Hard-link the tmux socket so the child can connect
+	 * 2. Make jail traversable (0711) so nobody can reach files
+	 * 3. Copy terminfo so client_main() can initialize the terminal */
 	if (tmate_has_websocket()) {
 		char *jail_sock;
 		xasprintf(&jail_sock, TMATE_WORKDIR "/jail/tmux.sock");
@@ -428,10 +428,21 @@ void tmate_spawn_daemon(struct tmate_session *session)
 		if (link(socket_path, jail_sock) < 0)
 			tmate_info("vpty jail link failed: %s",
 				   strerror(errno));
-		else
-			tmate_info("vpty jail link: %s -> %s",
-				   jail_sock, socket_path);
+		chmod(TMATE_WORKDIR "/jail", 0711);
 		free(jail_sock);
+
+		/* Copy terminfo for xterm-256color into the jail.
+		 * client_main() needs it for terminal initialization. */
+		system("mkdir -p " TMATE_WORKDIR "/jail/usr/share/terminfo/x "
+		       "2>/dev/null; "
+		       "cp /usr/share/terminfo/x/xterm-256color "
+		       TMATE_WORKDIR "/jail/usr/share/terminfo/x/ "
+		       "2>/dev/null; "
+		       "mkdir -p " TMATE_WORKDIR "/jail/usr/share/terminfo/s "
+		       "2>/dev/null; "
+		       "cp /usr/share/terminfo/s/screen-256color "
+		       TMATE_WORKDIR "/jail/usr/share/terminfo/s/ "
+		       "2>/dev/null");
 	}
 
 	/* Open sessions dir fd before jail for post-jail named session symlinks */
@@ -439,7 +450,7 @@ void tmate_spawn_daemon(struct tmate_session *session)
 					O_RDONLY | O_DIRECTORY);
 
 	{
-		int keep_fds[9];
+		int keep_fds[10];
 		int nfds = 0;
 		keep_fds[nfds++] = session->tmux_socket_fd;
 		keep_fds[nfds++] = ssh_get_fd(session->ssh_client.session);
