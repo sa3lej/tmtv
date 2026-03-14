@@ -250,7 +250,7 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 		return;
 	}
 
-	/* Set initial terminal size from websocket or defaults */
+	/* Set initial terminal size to match host window */
 	{
 		struct session *s = RB_MIN(sessions, &sessions);
 		struct winsize ws;
