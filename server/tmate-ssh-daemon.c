@@ -416,6 +416,24 @@ void tmate_spawn_daemon(struct tmate_session *session)
 		}
 	}
 
+	/* Hard-link the tmux socket into the jail so the virtual PTY
+	 * client can connect after chroot.  The socket lives in
+	 * /tmp/tmtv/sessions/<token> but that path is outside the jail
+	 * root (/tmp/tmtv/jail/).  A hard link makes it accessible
+	 * as /tmux.sock inside the chroot. */
+	if (tmate_has_websocket()) {
+		char *jail_sock;
+		xasprintf(&jail_sock, TMATE_WORKDIR "/jail/tmux.sock");
+		unlink(jail_sock);
+		if (link(socket_path, jail_sock) < 0)
+			tmate_info("vpty jail link failed: %s",
+				   strerror(errno));
+		else
+			tmate_info("vpty jail link: %s -> %s",
+				   jail_sock, socket_path);
+		free(jail_sock);
+	}
+
 	/* Open sessions dir fd before jail for post-jail named session symlinks */
 	session->sessions_dir_fd = open(TMATE_WORKDIR "/sessions",
 					O_RDONLY | O_DIRECTORY);

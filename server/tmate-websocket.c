@@ -267,13 +267,14 @@ void sse_spawn_virtual_client(struct tmate_session *session)
 	}
 
 	/*
-	 * Connect to the tmux socket BEFORE forking.  After chroot,
-	 * the socket path is not accessible from inside the jail.
-	 * The connected fd is inherited by the child via fork().
+	 * Connect to the tmux socket.  After chroot, the original
+	 * socket_path is outside the jail.  A symlink at /tmux.sock
+	 * inside the jail points to the real socket (created by
+	 * tmate_spawn_daemon before entering the jail).
 	 */
 	memset(&sa, 0, sizeof(sa));
 	sa.sun_family = AF_UNIX;
-	strlcpy(sa.sun_path, socket_path, sizeof(sa.sun_path));
+	strlcpy(sa.sun_path, "/tmux.sock", sizeof(sa.sun_path));
 
 	sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sock_fd < 0) {
