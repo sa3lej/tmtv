@@ -510,7 +510,7 @@ const struct options_table_entry options_table[] = {
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
 	  .flags = OPTIONS_TABLE_IS_ARRAY,
-	  .default_str = "xterm*:clipboard:ccolour:cstyle:focus:title,"
+	  .default_str = "xterm*:clipboard:ccolour:cstyle:focus:title:RGB,"
 			 "screen*:title,"
 			 "rxvt*:ignorefkeys",
 	  .separator = ",",

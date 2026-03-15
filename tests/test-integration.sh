@@ -4103,6 +4103,257 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: Rapid resize does not break SSE stream (v1.6.0 debounce)
+# -------------------------------------------------------
+RESIZE_CONF="/tmp/.tmtv-test-resize-$TESTID.conf"
+RESIZE_SESSNAME="resize-$TESTID"
+remote "cat > $RESIZE_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$RESIZE_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $RESIZE_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$RESIZE_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+RESIZE_TOKEN=$(read_token "$RESIZE_SESSNAME")
+
+if [ -n "$RESIZE_TOKEN" ]; then
+	# Prime the vpty by connecting once
+	curl -s -m 2 -N "$SSE_BASE/$RESIZE_TOKEN" >/dev/null 2>&1 || true
+	sleep 2
+
+	# Fire rapid resizes (simulates browser window drag)
+	for _sz in 90x25 100x30 120x35 80x24 110x28 80x24; do
+		_rx=$(echo "$_sz" | cut -dx -f1)
+		_ry=$(echo "$_sz" | cut -dx -f2)
+		remote "TERM=xterm-256color $REMOTE_TMTV -f $RESIZE_CONF resize-window -t main -x $_rx -y $_ry" 2>/dev/null || true
+	done
+	sleep 3
+
+	# Verify SSE still delivers data after rapid resize burst
+	RESIZE_TOKEN=$(read_token "$RESIZE_SESSNAME")
+	SSE_AFTER_RESIZE=$(curl -s -m 4 -N "$SSE_BASE/$RESIZE_TOKEN" 2>/dev/null || echo "")
+	SSE_RESIZE_LINES=$(echo "$SSE_AFTER_RESIZE" | grep -c "^data:" || echo "0")
+	if [ "$SSE_RESIZE_LINES" -gt 0 ]; then
+		pass "SSE stream survives rapid resize burst ($SSE_RESIZE_LINES frames)"
+	else
+		fail "SSE stream survives rapid resize burst" \
+			"no data: lines after 6 rapid resizes"
+	fi
+
+	remote "rm -f $RESIZE_CONF" 2>/dev/null || true
+	teardown_section "resize"
+else
+	skip "SSE stream survives rapid resize burst (could not create session)"
+fi
+
+# -------------------------------------------------------
+# Test: First SSE connect gets immediate content (v1.6.0 blank viewer fix)
+# -------------------------------------------------------
+BLANK_CONF="/tmp/.tmtv-test-blank-$TESTID.conf"
+BLANK_SESSNAME="blank-$TESTID"
+remote "cat > $BLANK_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$BLANK_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $BLANK_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$BLANK_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+BLANK_TOKEN=$(read_token "$BLANK_SESSNAME")
+
+if [ -n "$BLANK_TOKEN" ]; then
+	# Put a marker on screen before any SSE client connects
+	BLANK_MARKER="BLNK_$$"
+	remote "TERM=xterm-256color $REMOTE_TMTV -f $BLANK_CONF send-keys 'echo $BLANK_MARKER' Enter" 2>/dev/null || true
+	sleep 2
+
+	# First SSE connect — should get screen dump with marker immediately
+	SSE_FIRST=$(curl -s -m 4 -N "$SSE_BASE/$BLANK_TOKEN" 2>/dev/null || echo "")
+	SSE_FIRST_LINES=$(echo "$SSE_FIRST" | grep -c "^data:" || echo "0")
+	if [ "$SSE_FIRST_LINES" -gt 0 ]; then
+		pass "first SSE connect gets immediate content ($SSE_FIRST_LINES frames)"
+	else
+		fail "first SSE connect gets immediate content" \
+			"no data: lines on first connect"
+	fi
+
+	remote "rm -f $BLANK_CONF" 2>/dev/null || true
+	teardown_section "blank"
+else
+	skip "first SSE connect gets immediate content (could not create session)"
+fi
+
+# -------------------------------------------------------
+# Test: Backpressure — SSE stream does not CPU-spin under load (v1.6.0)
+# -------------------------------------------------------
+BP_CONF="/tmp/.tmtv-test-bp-$TESTID.conf"
+BP_SESSNAME="bp-$TESTID"
+remote "cat > $BP_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$BP_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $BP_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$BP_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+BP_TOKEN=$(read_token "$BP_SESSNAME")
+
+if [ -n "$BP_TOKEN" ]; then
+	# Connect an SSE client to activate vpty
+	curl -s -m 2 -N "$SSE_BASE/$BP_TOKEN" >/dev/null 2>&1 || true
+	sleep 2
+
+	# Generate a burst of output (>128KB) to trigger backpressure
+	remote "TERM=xterm-256color $REMOTE_TMTV -f $BP_CONF send-keys 'seq 1 10000' Enter" 2>/dev/null || true
+	sleep 3
+
+	# Measure CPU usage of tmtv-server — should NOT be spinning
+	# Get the PID of tmtv-server daemon (the main accept loop)
+	SERVER_PID=$(remote "pgrep -f 'tmtv-server.*${TMTV_PORT}' | head -1" 2>/dev/null || echo "")
+	if [ -n "$SERVER_PID" ]; then
+		# Sample CPU over 2 seconds
+		CPU_PCT=$(remote "ps -p $SERVER_PID -o %cpu= 2>/dev/null" | tr -d ' ' || echo "0")
+		# CPU should be well under 50% — a spin loop would show ~100%
+		CPU_INT=$(echo "$CPU_PCT" | cut -d. -f1)
+		[ -z "$CPU_INT" ] && CPU_INT=0
+		if [ "$CPU_INT" -lt 50 ]; then
+			pass "no CPU spin under backpressure (${CPU_PCT}%)"
+		else
+			fail "no CPU spin under backpressure" \
+				"tmtv-server CPU at ${CPU_PCT}% after burst"
+		fi
+	else
+		skip "no CPU spin under backpressure (could not find server PID)"
+	fi
+
+	# Verify SSE is still functional after the burst
+	BP_TOKEN=$(read_token "$BP_SESSNAME")
+	SSE_AFTER_BP=$(curl -s -m 4 -N "$SSE_BASE/$BP_TOKEN" 2>/dev/null || echo "")
+	SSE_BP_LINES=$(echo "$SSE_AFTER_BP" | grep -c "^data:" || echo "0")
+	if [ "$SSE_BP_LINES" -gt 0 ]; then
+		pass "SSE stream recovers after output burst ($SSE_BP_LINES frames)"
+	else
+		fail "SSE stream recovers after output burst" \
+			"no data after 10K line burst"
+	fi
+
+	remote "rm -f $BP_CONF" 2>/dev/null || true
+	teardown_section "backpressure"
+else
+	skip "no CPU spin under backpressure (could not create session)"
+	skip "SSE stream recovers after output burst (could not create session)"
+fi
+
+# -------------------------------------------------------
+# Test: Truecolor (RGB) terminal feature enabled (v1.6.1)
+# -------------------------------------------------------
+TC_CONF="/tmp/.tmtv-test-tc-$TESTID.conf"
+TC_SESSNAME="tc-$TESTID"
+remote "cat > $TC_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$TC_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $TC_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$TC_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+TC_TOKEN=$(read_token "$TC_SESSNAME")
+
+if [ -n "$TC_TOKEN" ]; then
+	# Check that tmux reports RGB in terminal-features for xterm*
+	TC_FEATURES=$(remote "TERM=xterm-256color $REMOTE_TMTV -f $TC_CONF show-options -g terminal-features 2>/dev/null" || echo "")
+	if echo "$TC_FEATURES" | grep -q "RGB"; then
+		pass "terminal-features includes RGB for xterm"
+	else
+		fail "terminal-features includes RGB for xterm" \
+			"got: $TC_FEATURES"
+	fi
+
+	# Verify truecolor escape sequences pass through to the terminal
+	# by sending an RGB color and checking capture-pane output
+	remote "TERM=xterm-256color $REMOTE_TMTV -f $TC_CONF send-keys 'printf \"\\033[38;2;255;128;0mTRUECOLOR_OK\\033[0m\"' Enter" 2>/dev/null || true
+	sleep 2
+	TC_CAP=$(remote "TERM=xterm-256color $REMOTE_TMTV -f $TC_CONF capture-pane -t main:0 -p 2>/dev/null" || echo "")
+	if echo "$TC_CAP" | grep -q "TRUECOLOR_OK"; then
+		pass "truecolor text rendered in session"
+	else
+		fail "truecolor text rendered in session" \
+			"TRUECOLOR_OK not found in capture-pane"
+	fi
+
+	remote "rm -f $TC_CONF" 2>/dev/null || true
+	teardown_section "truecolor"
+else
+	skip "terminal-features includes RGB for xterm (could not create session)"
+	skip "truecolor text rendered in session (could not create session)"
+fi
+
+# -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
 echo ""

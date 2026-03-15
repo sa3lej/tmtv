@@ -277,9 +277,12 @@
       var maxW = window.innerWidth - 32;
       var maxH = window.innerHeight - 32;
       var wrapH = contentH + TITLEBAR_H;
+      var clampedWrapH = Math.min(wrapH, maxH);
       wrap.style.width = Math.min(contentW, maxW) + 'px';
-      wrap.style.height = Math.min(wrapH, maxH) + 'px';
-      container.style.height = contentH + 'px';
+      wrap.style.height = clampedWrapH + 'px';
+      /* Ensure container fits within wrap — prevents status bar clipping
+       * when actual xterm.js dimensions slightly exceed calculated height */
+      container.style.height = (clampedWrapH - TITLEBAR_H) + 'px';
     }
   }
 
