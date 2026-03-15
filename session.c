@@ -233,7 +233,20 @@ session_destroy(struct session *s, int notify, const char *from)
 	if (tmtv_recording_active())
 		tmtv_recording_stop();
 	tmate_info("Session closed");
-	tmate_write_fin(&tmate_session);
+
+	/*
+	 * Only send FIN to the server when the last tmux session is
+	 * destroyed.  Killing a secondary session (e.g. "kill-session
+	 * -t cool-session") must not tear down the SSH tunnel — other
+	 * sessions are still alive and viewers are still connected via
+	 * the current token.
+	 *
+	 * The session has already been removed from the global sessions
+	 * tree (RB_REMOVE above), so an empty tree means this was the
+	 * last one.
+	 */
+	if (RB_EMPTY(&sessions))
+		tmate_write_fin(&tmate_session);
 #endif
 }
 
