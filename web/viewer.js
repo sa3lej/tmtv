@@ -108,7 +108,7 @@
     }
     var maxFromW = availW / (serverCols * cellRatioW);
     var maxFromH = availH / (contentRows * cellRatioH);
-    fontSize = Math.max(10, Math.floor(Math.min(maxFromW, maxFromH)));
+    fontSize = Math.max(6, Math.floor(Math.min(maxFromW, maxFromH)));
     cellW = fontSize * cellRatioW;
     cellH = fontSize * cellRatioH;
   }
@@ -282,17 +282,31 @@
       term.options.fontSize = fontSize;
     }
 
-    /* Try to use actual xterm.js rendered dimensions for pixel-perfect sizing.
-     * This prevents the status bar from being clipped due to rounding errors
-     * in our cell ratio approximation. */
+    /* Content dimensions — use cell-ratio formula so we always have
+     * values that reflect the *current* fontSize (xterm.js re-renders
+     * asynchronously, so getActualTerminalDims() may lag behind). */
+    var contentW = Math.ceil(effectiveCols * cellW);
+    var contentH = Math.ceil(effectiveRows * cellH);
+
+    /* Shrink font further if terminal still doesn't fit viewport */
+    var maxH_avail = (currentTheme === 'tv')
+      ? window.innerHeight - 140 - 48
+      : window.innerHeight - 32 - TITLEBAR_H;
+    while (term && contentH > maxH_avail && fontSize > 6) {
+      fontSize--;
+      term.options.fontSize = fontSize;
+      cellW = fontSize * cellRatioW;
+      cellH = fontSize * cellRatioH;
+      contentH = Math.ceil(effectiveRows * cellH);
+      contentW = Math.ceil(effectiveCols * cellW);
+    }
+
+    /* After shrinking, try to get pixel-perfect dims from xterm.js
+     * for the final layout (only if font didn't change). */
     var actualDims = getActualTerminalDims();
-    var contentW, contentH;
-    if (actualDims) {
+    if (actualDims && Math.abs(actualDims.height - contentH) < contentH * 0.1) {
       contentW = actualDims.width;
       contentH = actualDims.height;
-    } else {
-      contentW = Math.ceil(effectiveCols * cellW);
-      contentH = Math.ceil(effectiveRows * cellH);
     }
 
     var wrap = document.getElementById('terminal-wrap');
@@ -313,12 +327,20 @@
       wrap.style.width = Math.min(contentW, maxW) + 'px';
       wrap.style.height = clampedWrapH + 'px';
       /* Ensure container fits within wrap — prevents status bar clipping
-       * when actual xterm.js dimensions slightly exceed calculated height */
-      container.style.height = (clampedWrapH - TITLEBAR_H) + 'px';
+       * when actual xterm.js dimensions slightly exceed calculated height.
+       * Allow scrolling as last resort when the terminal physically cannot
+       * fit (e.g. 50-row terminal in a 400px viewport). */
+      var containerH = clampedWrapH - TITLEBAR_H;
+      container.style.height = containerH + 'px';
+      container.style.overflowY = (contentH > containerH + 2) ? 'auto' : 'hidden';
     }
   }
 
-  window.addEventListener('resize', function() { sizeToServer(); });
+  var _resizeTimer = null;
+  window.addEventListener('resize', function() {
+    if (_resizeTimer) clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(function() { sizeToServer(); }, 150);
+  });
 
   var statusEl = document.getElementById('status');
   var fadeTimer = null;
@@ -561,9 +583,9 @@
     connQualityTimer = setInterval(function() {
       if (!lastDataTime || sessionEnded) return;
       var age = Date.now() - lastDataTime;
-      if (age < 5000) updateConnQuality('good');
-      else if (age < 15000) updateConnQuality('fair');
-      else if (age < 30000) updateConnQuality('poor');
+      if (age < 20000) updateConnQuality('good');
+      else if (age < 45000) updateConnQuality('fair');
+      else if (age < 90000) updateConnQuality('poor');
       else updateConnQuality('disconnected');
     }, 2000);
   }
@@ -747,7 +769,7 @@
        * but child process is gone). Treat as connection error.
        * Use a shorter timeout on reconnects — we already had data
        * before, so the screen dump should arrive quickly. */
-      var watchdogMs = everConnected ? 3000 : 10000;
+      var watchdogMs = everConnected ? 15000 : 15000;
       everConnected = true;
       silenceTimer = setTimeout(function() {
         if (!dataReceived && !sessionEnded) {
@@ -762,6 +784,10 @@
       reconnectAttempts = 0;
       lastDataTime = Date.now();
       if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+      if (evt.data === 'heartbeat') {
+        lastDataTime = Date.now();
+        return;
+      }
       var binary = atob(evt.data);
       var bytes = new Uint8Array(binary.length);
       for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);

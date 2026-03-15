@@ -2099,8 +2099,8 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 			/* Keep a short timeout for POST body (prevent slowloris) */
 			struct timeval post_tv = { 5, 0 };
 			bufferevent_set_timeouts(wc->bev, &post_tv, NULL);
-			tmate_info("POST input request from %s viewer",
-				   wc->readonly ? "RO" : "RW");
+			tmate_debug("POST input request from %s viewer",
+				    wc->readonly ? "RO" : "RW");
 			handle_post_input(wc);
 			return;
 		}
@@ -2172,8 +2172,17 @@ static void on_ws_client_event(__unused struct bufferevent *bev,
 {
 	struct ws_client *wc = arg;
 
-	if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR | BEV_EVENT_TIMEOUT))
+	if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR | BEV_EVENT_TIMEOUT)) {
+		const char *reason = "unknown";
+		if (events & BEV_EVENT_EOF)
+			reason = "EOF";
+		else if (events & BEV_EVENT_TIMEOUT)
+			reason = "timeout";
+		else if (events & BEV_EVENT_ERROR)
+			reason = "error";
+		tmate_info("SSE client event: %s", reason);
 		ws_client_free(wc);
+	}
 }
 
 static void on_ws_accept(__unused struct evconnlistener *listener,
@@ -2523,7 +2532,7 @@ static void on_sse_heartbeat_timer(__unused evutil_socket_t fd,
 {
 	struct tmate_session *session = arg;
 	struct ws_client *wc;
-	static const char heartbeat[] = ":keepalive\n\n";
+	static const char heartbeat[] = "data:heartbeat\n\n";
 
 	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
 		if (!wc->handshake_done || wc->is_post)
