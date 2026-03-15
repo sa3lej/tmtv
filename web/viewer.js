@@ -295,6 +295,23 @@
       contentH = Math.ceil(effectiveRows * cellH);
     }
 
+    /* Iteratively shrink font if terminal doesn't fit viewport */
+    var maxH_check = (currentTheme === 'tv')
+      ? window.innerHeight - 140
+      : window.innerHeight - 32;
+    while (term && contentH + (currentTheme === 'tv' ? 48 : TITLEBAR_H) > maxH_check && fontSize > 6) {
+      fontSize--;
+      term.options.fontSize = fontSize;
+      actualDims = getActualTerminalDims();
+      if (actualDims) {
+        contentH = actualDims.height;
+        contentW = actualDims.width;
+      } else {
+        contentH = Math.ceil(effectiveRows * fontSize * cellRatioH);
+        contentW = Math.ceil(effectiveCols * fontSize * cellRatioW);
+      }
+    }
+
     var wrap = document.getElementById('terminal-wrap');
 
     if (currentTheme === 'tv') {
@@ -318,7 +335,11 @@
     }
   }
 
-  window.addEventListener('resize', function() { sizeToServer(); });
+  var _resizeTimer = null;
+  window.addEventListener('resize', function() {
+    if (_resizeTimer) clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(function() { sizeToServer(); }, 150);
+  });
 
   var statusEl = document.getElementById('status');
   var fadeTimer = null;
@@ -561,9 +582,9 @@
     connQualityTimer = setInterval(function() {
       if (!lastDataTime || sessionEnded) return;
       var age = Date.now() - lastDataTime;
-      if (age < 5000) updateConnQuality('good');
-      else if (age < 15000) updateConnQuality('fair');
-      else if (age < 30000) updateConnQuality('poor');
+      if (age < 20000) updateConnQuality('good');
+      else if (age < 45000) updateConnQuality('fair');
+      else if (age < 90000) updateConnQuality('poor');
       else updateConnQuality('disconnected');
     }, 2000);
   }
@@ -747,7 +768,7 @@
        * but child process is gone). Treat as connection error.
        * Use a shorter timeout on reconnects — we already had data
        * before, so the screen dump should arrive quickly. */
-      var watchdogMs = everConnected ? 3000 : 10000;
+      var watchdogMs = everConnected ? 15000 : 15000;
       everConnected = true;
       silenceTimer = setTimeout(function() {
         if (!dataReceived && !sessionEnded) {
@@ -762,6 +783,10 @@
       reconnectAttempts = 0;
       lastDataTime = Date.now();
       if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+      if (evt.data === 'heartbeat') {
+        lastDataTime = Date.now();
+        return;
+      }
       var binary = atob(evt.data);
       var bytes = new Uint8Array(binary.length);
       for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
