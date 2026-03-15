@@ -161,6 +161,38 @@
       } catch (e) {}
     }
 
+    /* OSC 52 clipboard handler — intercept host clipboard set and
+     * write to the viewer's system clipboard with a toast notification.
+     * OSC 52 format: "52;c;<base64-encoded-text>" */
+    term.parser.registerOscHandler(52, function(data) {
+      var parts = data.split(';');
+      if (parts.length < 2) return false;
+      var b64 = parts[parts.length - 1];
+      if (!b64) return true; /* empty = clipboard clear, ignore */
+      try {
+        var text = atob(b64);
+        /* Enforce size limit (100KB) */
+        if (text.length > 102400) {
+          console.warn('tmtv: OSC 52 payload too large, ignoring');
+          return true;
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function() {
+            showClipboardToast(text);
+          }).catch(function() {
+            fallbackCopy(text);
+            showClipboardToast(text);
+          });
+        } else {
+          fallbackCopy(text);
+          showClipboardToast(text);
+        }
+      } catch (e) {
+        console.warn('tmtv: OSC 52 base64 decode failed');
+      }
+      return true; /* handled */
+    });
+
     /* Bind input if web input is active */
     if (!sessionReadonly && webInputEnabled) {
       term.options.disableStdin = false;
@@ -361,13 +393,13 @@
     var data = inputBatch;
     inputBatch = '';
     inputInFlight = true;
-    var url = buildSseUrl().replace(/\?.*$/, '') + '/input';
-    var pw = sessionPassword;
-    if (pw) url += '?password=' + encodeURIComponent(pw);
+    var url = sseUrl.replace(/\?.*$/, '') + '/input';
+    var hdrs = { 'Content-Type': 'text/plain', 'X-Tmtv-Input': '1' };
+    if (sessionPassword) hdrs['X-Tmtv-Password'] = sessionPassword;
     fetch(url, {
       method: 'POST',
       body: data,
-      headers: { 'Content-Type': 'text/plain', 'X-Tmtv-Input': '1' }
+      headers: hdrs
     }).then(function() {
       inputInFlight = false;
       flushInput();
@@ -632,6 +664,20 @@
     }, 1500);
   }
 
+  function showClipboardToast(text) {
+    var toast = document.getElementById('copy-toast');
+    if (!toast) return;
+    var preview = text.length > 40 ? text.substring(0, 40) + '...' : text;
+    toast.textContent = 'Copied: ' + preview;
+    toast.classList.remove('hidden');
+    toast.classList.add('show');
+    setTimeout(function() {
+      toast.classList.remove('show');
+      toast.classList.add('hidden');
+      toast.textContent = 'Copied!';
+    }, 2000);
+  }
+
   /* Bind copy button */
   var copyBtn = document.getElementById('copy-btn');
   if (copyBtn) {
@@ -655,7 +701,9 @@
      * SSE connection or spawning the virtual PTY on the server.
      * EventSource does not expose HTTP status codes, so we cannot
      * distinguish a 403 from a network error without this probe. */
-    fetch(buildSseUrl(), { method: 'HEAD' }).then(function(resp) {
+    var probeHeaders = {};
+    if (sessionPassword) probeHeaders['X-Tmtv-Password'] = sessionPassword;
+    fetch(buildSseUrl(), { method: 'HEAD', headers: probeHeaders }).then(function(resp) {
       if (resp.status === 403) {
         /* HEAD 403 has no body — check X-Tmtv-Reason header instead */
         var reason = resp.headers.get('X-Tmtv-Reason');

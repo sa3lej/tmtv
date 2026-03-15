@@ -1,0 +1,66 @@
+name: Bug Report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the sections below so we can reproduce and fix it.
+
+  - type: input
+    id: version
+    attributes:
+      label: tmtv version
+      description: "Run `tmtv -V` and paste the output"
+      placeholder: "tmtv 1.6.1 (based on tmux 3.6a)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - SSH sharing (client)
+        - SSH viewing (read-only/read-write)
+        - Web viewer (browser)
+        - Server (tmtv-server)
+        - Installation
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and architecture
+      placeholder: "macOS 15.3 arm64 / Ubuntu 24.04 amd64 / etc."
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe what you expected and what actually happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to trigger the bug.
+      placeholder: |
+        1. Run `tmtv new-session -s test`
+        2. Open the web viewer URL
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Paste terminal output, server logs, or attach screenshots.
+      render: shell
