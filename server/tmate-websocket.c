@@ -1241,11 +1241,27 @@ static int sse_do_handshake(struct ws_client *wc)
 		/* CSRF protection: require X-Tmtv-Input header.
 		 * This forces a CORS preflight for cross-origin requests,
 		 * preventing malicious websites from injecting keystrokes.
-		 * Search headers only (not body) with bounded length. */
-		char saved_end = *header_end;
-		*header_end = '\0';
-		int has_csrf = (strcasestr(data, "x-tmtv-input:") != NULL);
-		*header_end = saved_end;
+		 * Parse headers line-by-line to avoid matching the header
+		 * name inside cookie values or other header content. */
+		int has_csrf = 0;
+		{
+			const char *line = data;
+			while (line < header_end) {
+				const char *eol = memchr(line, '\n',
+							 header_end - line);
+				if (!eol)
+					eol = header_end;
+				/* Skip leading whitespace (folded headers) */
+				while (line < eol && (*line == ' ' || *line == '\t'))
+					line++;
+				if ((size_t)(eol - line) >= 13 &&
+				    strncasecmp(line, "x-tmtv-input:", 13) == 0) {
+					has_csrf = 1;
+					break;
+				}
+				line = eol + 1;
+			}
+		}
 		if (!has_csrf) {
 			static const char *reject_csrf =
 				"HTTP/1.1 400 Bad Request\r\n"

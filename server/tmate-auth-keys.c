@@ -240,7 +240,7 @@ bool tmate_has_session_password(void)
 static int write_all(int fd, const char *buf, size_t len)
 {
 	for (size_t i = 0; i < len;)  {
-		size_t ret = write(fd, buf+i, len-i);
+		ssize_t ret = write(fd, buf+i, len-i);
 		if (ret <= 0)
 			return -1;
 		i += ret;
@@ -251,7 +251,7 @@ static int write_all(int fd, const char *buf, size_t len)
 static int read_all(int fd, char *buf, size_t len)
 {
 	for (size_t i = 0; i < len;)  {
-		size_t ret = read(fd, buf+i, len-i);
+		ssize_t ret = read(fd, buf+i, len-i);
 		if (ret <= 0)
 			return -1;
 		i += ret;
