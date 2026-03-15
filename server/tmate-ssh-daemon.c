@@ -57,7 +57,7 @@ static int on_ssh_channel_read(__unused ssh_session _session,
  * connection is alive, retry after a short delay instead of spinning
  * the CPU with immediate event_active() calls.
  */
-#define BACKPRESSURE_RETRY_MS 10
+#define BACKPRESSURE_RETRY_MS 1
 
 static void on_backpressure_retry(__unused evutil_socket_t fd,
 				  __unused short what, void *arg)
