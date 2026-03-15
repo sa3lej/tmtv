@@ -108,7 +108,7 @@
     }
     var maxFromW = availW / (serverCols * cellRatioW);
     var maxFromH = availH / (contentRows * cellRatioH);
-    fontSize = Math.max(10, Math.floor(Math.min(maxFromW, maxFromH)));
+    fontSize = Math.max(6, Math.floor(Math.min(maxFromW, maxFromH)));
     cellW = fontSize * cellRatioW;
     cellH = fontSize * cellRatioH;
   }
@@ -282,34 +282,31 @@
       term.options.fontSize = fontSize;
     }
 
-    /* Try to use actual xterm.js rendered dimensions for pixel-perfect sizing.
-     * This prevents the status bar from being clipped due to rounding errors
-     * in our cell ratio approximation. */
-    var actualDims = getActualTerminalDims();
-    var contentW, contentH;
-    if (actualDims) {
-      contentW = actualDims.width;
-      contentH = actualDims.height;
-    } else {
-      contentW = Math.ceil(effectiveCols * cellW);
-      contentH = Math.ceil(effectiveRows * cellH);
-    }
+    /* Content dimensions — use cell-ratio formula so we always have
+     * values that reflect the *current* fontSize (xterm.js re-renders
+     * asynchronously, so getActualTerminalDims() may lag behind). */
+    var contentW = Math.ceil(effectiveCols * cellW);
+    var contentH = Math.ceil(effectiveRows * cellH);
 
-    /* Iteratively shrink font if terminal doesn't fit viewport */
-    var maxH_check = (currentTheme === 'tv')
-      ? window.innerHeight - 140
-      : window.innerHeight - 32;
-    while (term && contentH + (currentTheme === 'tv' ? 48 : TITLEBAR_H) > maxH_check && fontSize > 6) {
+    /* Shrink font further if terminal still doesn't fit viewport */
+    var maxH_avail = (currentTheme === 'tv')
+      ? window.innerHeight - 140 - 48
+      : window.innerHeight - 32 - TITLEBAR_H;
+    while (term && contentH > maxH_avail && fontSize > 6) {
       fontSize--;
       term.options.fontSize = fontSize;
-      actualDims = getActualTerminalDims();
-      if (actualDims) {
-        contentH = actualDims.height;
-        contentW = actualDims.width;
-      } else {
-        contentH = Math.ceil(effectiveRows * fontSize * cellRatioH);
-        contentW = Math.ceil(effectiveCols * fontSize * cellRatioW);
-      }
+      cellW = fontSize * cellRatioW;
+      cellH = fontSize * cellRatioH;
+      contentH = Math.ceil(effectiveRows * cellH);
+      contentW = Math.ceil(effectiveCols * cellW);
+    }
+
+    /* After shrinking, try to get pixel-perfect dims from xterm.js
+     * for the final layout (only if font didn't change). */
+    var actualDims = getActualTerminalDims();
+    if (actualDims && Math.abs(actualDims.height - contentH) < contentH * 0.1) {
+      contentW = actualDims.width;
+      contentH = actualDims.height;
     }
 
     var wrap = document.getElementById('terminal-wrap');
@@ -330,8 +327,12 @@
       wrap.style.width = Math.min(contentW, maxW) + 'px';
       wrap.style.height = clampedWrapH + 'px';
       /* Ensure container fits within wrap — prevents status bar clipping
-       * when actual xterm.js dimensions slightly exceed calculated height */
-      container.style.height = (clampedWrapH - TITLEBAR_H) + 'px';
+       * when actual xterm.js dimensions slightly exceed calculated height.
+       * Allow scrolling as last resort when the terminal physically cannot
+       * fit (e.g. 50-row terminal in a 400px viewport). */
+      var containerH = clampedWrapH - TITLEBAR_H;
+      container.style.height = containerH + 'px';
+      container.style.overflowY = (contentH > containerH + 2) ? 'auto' : 'hidden';
     }
   }
 
