@@ -69,9 +69,18 @@ TEST(settings_struct)
 	ts.log_level = 0;
 	ts.use_proxy_protocol = false;
 	ts.authorized_keys_only = false;
+	ts.max_sessions = 0;
 
 	ASSERT(ts.ssh_port == 2222);
 	ASSERT(ts.websocket_port == 4002);
+
+	/* max_sessions default: 0 means use TMATE_DEFAULT_MAX_SESSIONS */
+	ASSERT(ts.max_sessions == 0);
+	ASSERT(TMATE_DEFAULT_MAX_SESSIONS == 100);
+
+	/* Configurable: non-zero overrides */
+	ts.max_sessions = 500;
+	ASSERT(ts.max_sessions == 500);
 }
 
 /* Verify SSH client struct */

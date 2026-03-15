@@ -17,9 +17,12 @@
  */
 
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <sys/utsname.h>
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <langinfo.h>
@@ -243,6 +246,116 @@ make_label(const char *label, char **cause)
 fail:
 	free(base);
 	return (NULL);
+}
+
+/*
+ * Scan the tmtv socket directory for a live server socket.
+ *
+ * PID-based socket isolation (v1.6.0) gives each bare `tmtv` its own socket
+ * so that sessions don't share a tmux server (which causes layout oscillation).
+ * The downside is that after detach, `tmtv` / `tmtv ls` / `tmtv attach` can't
+ * find the orphaned socket because they look at the "default" label.
+ *
+ * This function scans the socket directory and tries to connect to each socket.
+ * If a live server responds, its path is returned (caller must free).  Stale
+ * sockets (ECONNREFUSED) are cleaned up.  Returns NULL if no live server found.
+ */
+static char *
+find_live_socket(char **cause)
+{
+	char		**paths, *base, *spath, *result = NULL;
+	u_int		  i, n;
+	struct stat	  sb;
+	uid_t		  uid;
+	DIR		 *dir;
+	struct dirent	 *de;
+	struct sockaddr_un sa;
+	int		  fd;
+
+	*cause = NULL;
+	uid = getuid();
+
+	expand_paths(TMUX_SOCK, &paths, &n, 0);
+	if (n == 0)
+		return (NULL);
+	base = paths[0];
+	for (i = 1; i < n; i++)
+		free(paths[i]);
+	free(paths);
+
+	/* Build the per-user socket directory path. */
+	{
+		char *dirpath;
+		xasprintf(&dirpath, "%s/tmtv-%ld", base, (long)uid);
+		free(base);
+		base = dirpath;
+	}
+
+	if (lstat(base, &sb) != 0 || !S_ISDIR(sb.st_mode)) {
+		free(base);
+		return (NULL);
+	}
+	if (sb.st_uid != uid || (sb.st_mode & TMUX_SOCK_PERM) != 0) {
+		free(base);
+		return (NULL);
+	}
+
+	dir = opendir(base);
+	if (dir == NULL) {
+		free(base);
+		return (NULL);
+	}
+
+	while ((de = readdir(dir)) != NULL) {
+		/* Skip dot entries and lock files. */
+		if (de->d_name[0] == '.')
+			continue;
+		if (strstr(de->d_name, ".lock") != NULL)
+			continue;
+		/* Skip the "default" socket — it's the shared label. */
+		if (strcmp(de->d_name, "default") == 0)
+			continue;
+
+		xasprintf(&spath, "%s/%s", base, de->d_name);
+
+		/* Must be a socket. */
+		if (lstat(spath, &sb) != 0 || !S_ISSOCK(sb.st_mode)) {
+			free(spath);
+			continue;
+		}
+
+		/* Try connecting. */
+		memset(&sa, 0, sizeof sa);
+		sa.sun_family = AF_UNIX;
+		if (strlcpy(sa.sun_path, spath, sizeof sa.sun_path) >=
+		    sizeof sa.sun_path) {
+			free(spath);
+			continue;
+		}
+
+		fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (fd == -1) {
+			free(spath);
+			continue;
+		}
+
+		if (connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0) {
+			/* Live server found. */
+			close(fd);
+			result = spath;
+			break;
+		}
+
+		/* Stale socket — clean it up. */
+		if (errno == ECONNREFUSED)
+			unlink(spath);
+		close(fd);
+		free(spath);
+	}
+
+	closedir(dir);
+	free(base);
+	return (result);
 }
 
 char *
@@ -562,36 +675,65 @@ main(int argc, char **argv)
 	}
 
 	/*
-	 * Socket path isolation for tmtv:
+	 * Socket path selection for tmtv:
 	 *
 	 * Unlike tmux, tmtv does NOT check $TMUX.  Each bare `tmtv`
-	 * invocation (argc == 0) gets its own PID-based socket so it
-	 * creates an isolated tmux server with its own SSH connection.
-	 * Sharing a server causes layout oscillation and 100% server CPU
-	 * (the tmate protocol supports one session per connection).
+	 * invocation gets its own PID-based socket so it creates an
+	 * isolated tmux server with its own SSH connection.  Sharing a
+	 * server causes layout oscillation and 100% server CPU (the
+	 * tmate protocol supports one session per connection).
 	 *
-	 * Explicit commands (tmtv list-sessions, tmtv attach, tmtv
-	 * new-session -d -s name, etc.) use the default socket so they
-	 * can interact with an existing server.
+	 * Before creating a new socket, we scan the socket directory for
+	 * an existing live server (a detached session).  If one is found
+	 * we reuse it — this is how reattach works.  Stale sockets from
+	 * dead servers are cleaned up during the scan.
 	 *
 	 * -S or -L on the command line always takes priority.
 	 */
-	if (path == NULL && label == NULL && argc == 0) {
-		/* Bare `tmtv`: isolated PID-based socket */
-		char *pidlabel;
-		xasprintf(&pidlabel, "%ld", (long)getpid());
-		if ((path = make_label(pidlabel, &cause)) == NULL) {
-			if (cause != NULL) {
-				fprintf(stderr, "%s\n", cause);
-				free(cause);
+	if (path == NULL && label == NULL) {
+		/* Try to find an existing live server socket first. */
+		path = find_live_socket(&cause);
+		if (path != NULL) {
+			/* Found a live server — reuse it. */
+			flags |= CLIENT_DEFAULTSOCKET;
+			if (argc == 0) {
+				/*
+				 * Bare `tmtv` with a live detached session:
+				 * reattach instead of creating a new session.
+				 * Synthesize "attach" as the command so the
+				 * server runs attach-session, not new-session.
+				 */
+				static char *attach_argv[] = { "attach", NULL };
+				argc = 1;
+				argv = attach_argv;
+			}
+		} else if (argc == 0) {
+			/* Bare `tmtv`, no live server: new PID-based socket */
+			char *pidlabel;
+			xasprintf(&pidlabel, "%ld", (long)getpid());
+			if ((path = make_label(pidlabel, &cause)) == NULL) {
+				if (cause != NULL) {
+					fprintf(stderr, "%s\n", cause);
+					free(cause);
+				}
+				free(pidlabel);
+				exit(1);
 			}
 			free(pidlabel);
-			exit(1);
+			flags |= CLIENT_DEFAULTSOCKET;
+		} else {
+			/* Explicit command, no live server: default socket */
+			if ((path = make_label(label, &cause)) == NULL) {
+				if (cause != NULL) {
+					fprintf(stderr, "%s\n", cause);
+					free(cause);
+				}
+				exit(1);
+			}
+			flags |= CLIENT_DEFAULTSOCKET;
 		}
-		free(pidlabel);
-		flags |= CLIENT_DEFAULTSOCKET;
 	} else if (path == NULL) {
-		/* Explicit command or -L: shared default socket */
+		/* -L was specified: resolve label to socket path. */
 		if ((path = make_label(label, &cause)) == NULL) {
 			if (cause != NULL) {
 				fprintf(stderr, "%s\n", cause);
