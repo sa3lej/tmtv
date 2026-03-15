@@ -222,6 +222,7 @@ extern void tmate_ssh_server_main(struct tmate_session *session,
 #define TMATE_SSH_DEFAULT_KEYS_DIR "keys"
 
 #define TMATE_DEFAULT_WEBSOCKET_PORT 4002
+#define TMATE_DEFAULT_MAX_SESSIONS  100
 
 #define TMATE_TOKEN_LEN 16
 #define TMATE_WORKDIR "/tmp/tmtv"
@@ -242,6 +243,7 @@ struct tmate_settings {
 	bool use_proxy_protocol;
 	int idle_timeout;	/* seconds, 0 = disabled */
 	int max_lifetime;	/* seconds, 0 = unlimited */
+	int max_sessions;	/* max concurrent sessions, 0 = default (100) */
 };
 extern struct tmate_settings *tmate_settings;
 

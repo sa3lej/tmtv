@@ -2960,67 +2960,82 @@ fi
 # -------------------------------------------------------
 # Test: SSH RW multi-keystroke latency — 5 echoes, min/avg/max
 # -------------------------------------------------------
-# Connects as an SSH RW viewer and measures real keystroke-to-echo
-# latency through the tmtv relay. Uses a unique output prefix (>>)
-# that only appears in the shell output line, not the command echo,
-# to avoid matching the send itself.
-# Fails if average exceeds 500ms.
+# Uses expect to SSH into the tmtv relay as a viewer and measure
+# actual keystroke-to-echo latency — same methodology as baseline
+# tests for a fair comparison.  Fails if average exceeds 500ms.
 if [ -n "$BENCH_RW_TOKEN" ]; then
-	# SSH relay latency: measures the round-trip through the tmtv relay.
-	# send-keys → pane PTY → shell echo → capture-pane. On localhost this
-	# is equivalent to SSH viewer latency (0ms network between viewer and
-	# server). The overhead vs the tmux baseline shows the relay cost.
+	remote "cat > /tmp/tmtv-ssh-latency.exp << 'EXPECT'
+set timeout 10
+spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p SSH_PORT SSH_TOKEN@127.0.0.1
 
-	# Clear pane
-	remote_tmtv "send-keys -t main:0 'clear' Enter"
-	sleep 1
+# Wait for tmux session to render
+sleep 2
 
-	_ssh_count=0
-	_ssh_sum=0
-	_ssh_min=999999
-	_ssh_max=0
-	_ssh_timeouts=0
+set results {}
+for {set i 1} {\$i <= 5} {incr i} {
+    set marker \"TMTV${i}_REPLACE_TESTID\"
+    set start_ms [clock milliseconds]
+    send \"echo \$marker\r\"
+    expect {
+        timeout {
+            lappend results -1
+            continue
+        }
+        \"\$marker\" {
+            set end_ms [clock milliseconds]
+            set elapsed [expr {\$end_ms - \$start_ms}]
+            lappend results \$elapsed
+        }
+    }
+    sleep 0.3
+}
 
-	for _si in 1 2 3 4 5; do
-		_ssh_marker="SB${_si}x$$"
-		_t0=$(_ms_now)
-		remote_tmtv "send-keys -t main:0 'echo ${_ssh_marker}' Enter"
+puts \"SSH_RELAY_RESULTS=[join \$results ,]\"
+sleep 0.5
+send \"exit\r\"
+expect eof
+wait
+EXPECT
+sed -i \"s/SSH_PORT/$TMTV_PORT/;s|SSH_TOKEN|$BENCH_RW_TOKEN|;s/REPLACE_TESTID/$TESTID/\" /tmp/tmtv-ssh-latency.exp"
 
-		# Poll capture-pane until marker appears
-		_ssh_found=false
-		for _sp in $(seq 1 80); do
-			remote "usleep 10000 2>/dev/null || sleep 0.01"
-			_cap=$(remote_tmtv "capture-pane -t main:0 -p" 2>/dev/null || echo "")
-			if echo "$_cap" | grep -q "$_ssh_marker"; then
-				_ssh_found=true
-				break
+	SSH_RELAY_OUT=$(remote "timeout 30 expect /tmp/tmtv-ssh-latency.exp 2>/dev/null" || echo "")
+	remote "rm -f /tmp/tmtv-ssh-latency.exp" 2>/dev/null || true
+
+	if echo "$SSH_RELAY_OUT" | grep -q "SSH_RELAY_RESULTS="; then
+		_sr_results=$(echo "$SSH_RELAY_OUT" | grep "SSH_RELAY_RESULTS=" | sed 's/.*SSH_RELAY_RESULTS=//' | tr -d ' \r')
+		_ssh_min=999999
+		_ssh_max=0
+		_ssh_sum=0
+		_ssh_count=0
+		_ssh_timeouts=0
+		_saved_ifs="$IFS"
+		IFS=","
+		for _val in $_sr_results; do
+			if [ "$_val" = "-1" ]; then
+				_ssh_timeouts=$((_ssh_timeouts + 1))
+			else
+				_ssh_count=$((_ssh_count + 1))
+				_ssh_sum=$((_ssh_sum + _val))
+				[ "$_val" -lt "$_ssh_min" ] 2>/dev/null && _ssh_min=$_val
+				[ "$_val" -gt "$_ssh_max" ] 2>/dev/null && _ssh_max=$_val
 			fi
 		done
-		_t1=$(_ms_now)
+		IFS="$_saved_ifs"
 
-		if [ "$_ssh_found" = "true" ]; then
-			_ssh_ms=$((_t1 - _t0))
-			_ssh_count=$((_ssh_count + 1))
-			_ssh_sum=$((_ssh_sum + _ssh_ms))
-			[ "$_ssh_ms" -lt "$_ssh_min" ] 2>/dev/null && _ssh_min=$_ssh_ms
-			[ "$_ssh_ms" -gt "$_ssh_max" ] 2>/dev/null && _ssh_max=$_ssh_ms
+		if [ "$_ssh_count" -gt 0 ]; then
+			_ssh_avg=$((_ssh_sum / _ssh_count))
+			SSH_MULTI_MS="$_ssh_avg"
+			if [ "$_ssh_avg" -lt 500 ] 2>/dev/null; then
+				pass "SSH multi-keystroke latency (min=${_ssh_min}ms avg=${_ssh_avg}ms max=${_ssh_max}ms, n=${_ssh_count})"
+			else
+				fail "SSH multi-keystroke latency" \
+					"avg ${_ssh_avg}ms exceeds 500ms (min=${_ssh_min}ms max=${_ssh_max}ms, n=${_ssh_count})"
+			fi
 		else
-			_ssh_timeouts=$((_ssh_timeouts + 1))
-		fi
-		sleep 0.3
-	done
-
-	if [ "$_ssh_count" -gt 0 ]; then
-		_ssh_avg=$((_ssh_sum / _ssh_count))
-		SSH_MULTI_MS="$_ssh_avg"
-		if [ "$_ssh_avg" -lt 500 ] 2>/dev/null; then
-			pass "SSH multi-keystroke latency (min=${_ssh_min}ms avg=${_ssh_avg}ms max=${_ssh_max}ms, n=${_ssh_count})"
-		else
-			fail "SSH multi-keystroke latency" \
-				"avg ${_ssh_avg}ms exceeds 500ms (min=${_ssh_min}ms max=${_ssh_max}ms, n=${_ssh_count})"
+			fail "SSH multi-keystroke latency" "all 5 keystrokes timed out"
 		fi
 	else
-		fail "SSH multi-keystroke latency" "all 5 keystrokes timed out"
+		fail "SSH multi-keystroke latency" "expect script produced no results"
 	fi
 
 else

@@ -22,8 +22,11 @@
 
 /*
  * Connection limits (CVE-2021-44512 DoS mitigation)
+ *
+ * max_children is set from tmate_settings->max_sessions at startup.
+ * RATE_MAX_PER_IP and RATE_WINDOW_SEC are compile-time security limits.
  */
-#define MAX_CHILDREN       100
+static int max_children;
 #define RATE_WINDOW_SEC    30
 #define RATE_MAX_PER_IP    100
 #define CONN_HISTORY_SIZE  512
@@ -325,6 +328,13 @@ static void on_ssh_read(__unused evutil_socket_t fd, __unused short what, void *
 {
 	struct tmate_ssh_client *client = arg;
 
+#ifdef TCP_QUICKACK
+	{
+		int flag = 1;
+		setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(flag));
+	}
+#endif
+
 	ssh_execute_message_callbacks(client->session);
 
 	if (!ssh_is_connected(client->session)) {
@@ -382,6 +392,10 @@ static void client_bootstrap(struct tmate_session *_session)
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 	flag = 0x10;  /* IPTOS_LOWDELAY */
 	setsockopt(fd, IPPROTO_IP, IP_TOS, &flag, sizeof(flag));
+#ifdef TCP_QUICKACK
+	flag = 1;
+	setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(flag));
+#endif
 	}
 
 	/* WebSocket listener is started later in tmate_spawn_daemon() */
@@ -609,9 +623,10 @@ time_t tmate_server_get_start_time(void)
 }
 
 /* Dead child pids collected in signal handler, processed in main loop.
- * Must be at least MAX_CHILDREN to avoid overflow if all children die
+ * Allocated to max_children entries before the signal handler is installed.
+ * Must be at least max_children to avoid overflow if all children die
  * between poll() iterations. */
-static volatile pid_t dead_pids[MAX_CHILDREN];
+static volatile pid_t *dead_pids;
 static volatile sig_atomic_t dead_pid_count = 0;
 
 static void handle_sigchld(__unused int sig)
@@ -622,7 +637,7 @@ static void handle_sigchld(__unused int sig)
 	while ((pid = waitpid(WAIT_ANY, &status, WNOHANG)) > 0) {
 		if (active_children > 0)
 			active_children--;
-		if (dead_pid_count < MAX_CHILDREN)
+		if (dead_pid_count < max_children)
 			dead_pids[dead_pid_count++] = pid;
 	}
 
@@ -826,8 +841,6 @@ struct ipc_child {
 	pid_t pid;
 };
 
-#define MAX_IPC_CHILDREN MAX_CHILDREN
-
 void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 			   const char *bind_addr, int port)
 {
@@ -837,10 +850,18 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 	int fd;
 	int sse_listen_fd = -1;
 	struct sse_registry sse_reg;
-	struct ipc_child ipc_children[MAX_IPC_CHILDREN];
+	struct ipc_child *ipc_children;
 	int num_ipc_children = 0;
 
 	tmate_catch_sigsegv();
+
+	max_children = tmate_settings->max_sessions;
+
+	/* Allocate arrays sized to max_children before installing
+	 * the SIGCHLD handler that writes to dead_pids. */
+	dead_pids = xcalloc(max_children, sizeof(pid_t));
+	ipc_children = xcalloc(max_children, sizeof(struct ipc_child));
+	struct pollfd *pfds = xcalloc(2 + max_children, sizeof(struct pollfd));
 
 	server_start_time = time(NULL);
 
@@ -914,7 +935,6 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 		 * Index 2..N: IPC fds from daemon children
 		 */
 		int nfds = 0;
-		struct pollfd pfds[2 + MAX_IPC_CHILDREN];
 
 		pfds[nfds].fd = ssh_bind_get_fd(bind);
 		pfds[nfds].events = POLLIN;
@@ -987,9 +1007,9 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 		}
 
 		/* Enforce max children limit */
-		if (active_children >= MAX_CHILDREN) {
+		if (active_children >= max_children) {
 			tmate_info("Max connections reached (%d), rejecting",
-				   MAX_CHILDREN);
+				   max_children);
 			close(fd);
 			continue;
 		}
@@ -1036,7 +1056,7 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 			if (ipc_pair[0] >= 0) {
 				close(ipc_pair[1]); /* close child end */
 
-				if (num_ipc_children < MAX_IPC_CHILDREN) {
+				if (num_ipc_children < max_children) {
 					ipc_children[num_ipc_children].ipc_fd = ipc_pair[0];
 					ipc_children[num_ipc_children].pid = pid;
 					num_ipc_children++;
