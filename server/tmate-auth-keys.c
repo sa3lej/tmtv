@@ -2,32 +2,63 @@
 #include <sys/un.h>
 #include <openssl/evp.h>
 #include <openssl/crypto.h>
+#include <openssl/rand.h>
 
 #include "tmate.h"
 
 #define TMATE_MAX_PASSWORD_LEN 128
-#define TMATE_PASSWORD_HASH_LEN 32  /* SHA-256 */
+#define TMATE_PW_SALT_LEN   16
+#define TMATE_PW_KEY_LEN    32
+#define TMATE_PW_ITERATIONS  100000
+/* Stored format: salt (16 bytes) + derived key (32 bytes) = 48 bytes */
+#define TMATE_PASSWORD_HASH_LEN (TMATE_PW_SALT_LEN + TMATE_PW_KEY_LEN)
 
 /*
- * Hash a password with SHA-256. Returns a malloc'd TMATE_PASSWORD_HASH_LEN
- * byte buffer, or NULL on failure. Caller must free.
+ * Hash a password with PBKDF2-HMAC-SHA256 and a random salt.
+ * Returns a malloc'd buffer of TMATE_PASSWORD_HASH_LEN bytes
+ * (salt + derived key), or NULL on failure. Caller must free.
  */
 static unsigned char *hash_password(const char *password)
 {
-	unsigned char *hash = xmalloc(TMATE_PASSWORD_HASH_LEN);
-	unsigned int len = 0;
+	unsigned char *buf = xmalloc(TMATE_PASSWORD_HASH_LEN);
 
-	EVP_MD_CTX *ctx = EVP_MD_CTX_new();
-	if (!ctx ||
-	    !EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) ||
-	    !EVP_DigestUpdate(ctx, password, strlen(password)) ||
-	    !EVP_DigestFinal_ex(ctx, hash, &len)) {
-		EVP_MD_CTX_free(ctx);
-		free(hash);
+	/* Generate random salt */
+	if (RAND_bytes(buf, TMATE_PW_SALT_LEN) != 1) {
+		free(buf);
 		return NULL;
 	}
-	EVP_MD_CTX_free(ctx);
-	return hash;
+
+	/* Derive key */
+	if (PKCS5_PBKDF2_HMAC(password, strlen(password),
+			       buf, TMATE_PW_SALT_LEN,
+			       TMATE_PW_ITERATIONS, EVP_sha256(),
+			       TMATE_PW_KEY_LEN,
+			       buf + TMATE_PW_SALT_LEN) != 1) {
+		free(buf);
+		return NULL;
+	}
+
+	return buf;
+}
+
+/*
+ * Derive key from password using stored salt for comparison.
+ * Returns a malloc'd buffer of TMATE_PW_KEY_LEN bytes, or NULL.
+ */
+static unsigned char *derive_key(const char *password,
+				 const unsigned char *salt)
+{
+	unsigned char *key = xmalloc(TMATE_PW_KEY_LEN);
+
+	if (PKCS5_PBKDF2_HMAC(password, strlen(password),
+			       salt, TMATE_PW_SALT_LEN,
+			       TMATE_PW_ITERATIONS, EVP_sha256(),
+			       TMATE_PW_KEY_LEN, key) != 1) {
+		free(key);
+		return NULL;
+	}
+
+	return key;
 }
 
 static void reset_and_enable_authorized_keys(void)
@@ -212,7 +243,8 @@ bool tmate_allow_auth(const char *pubkey)
 
 bool tmate_check_session_password(const char *password)
 {
-	unsigned char *candidate_hash;
+	unsigned char *candidate_key;
+	const unsigned char *stored;
 
 	if (tmate_session->session_password_hash == NULL)
 		return true;
@@ -221,14 +253,15 @@ bool tmate_check_session_password(const char *password)
 	if (strlen(password) > TMATE_MAX_PASSWORD_LEN)
 		return false;
 
-	candidate_hash = hash_password(password);
-	if (!candidate_hash)
+	stored = tmate_session->session_password_hash;
+	candidate_key = derive_key(password, stored /* salt is first 16 bytes */);
+	if (!candidate_key)
 		return false;
 
 	/* Constant-time comparison to prevent timing attacks */
-	int result = CRYPTO_memcmp(tmate_session->session_password_hash,
-				   candidate_hash, TMATE_PASSWORD_HASH_LEN);
-	free(candidate_hash);
+	int result = CRYPTO_memcmp(stored + TMATE_PW_SALT_LEN,
+				   candidate_key, TMATE_PW_KEY_LEN);
+	free(candidate_key);
 	return (result == 0);
 }
 
@@ -240,7 +273,7 @@ bool tmate_has_session_password(void)
 static int write_all(int fd, const char *buf, size_t len)
 {
 	for (size_t i = 0; i < len;)  {
-		size_t ret = write(fd, buf+i, len-i);
+		ssize_t ret = write(fd, buf+i, len-i);
 		if (ret <= 0)
 			return -1;
 		i += ret;
@@ -251,7 +284,7 @@ static int write_all(int fd, const char *buf, size_t len)
 static int read_all(int fd, char *buf, size_t len)
 {
 	for (size_t i = 0; i < len;)  {
-		size_t ret = read(fd, buf+i, len-i);
+		ssize_t ret = read(fd, buf+i, len-i);
 		if (ret <= 0)
 			return -1;
 		i += ret;

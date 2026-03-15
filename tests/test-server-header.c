@@ -96,7 +96,7 @@ TEST(ssh_client_struct)
 TEST(protocol_constants)
 {
 	ASSERT(TMATE_PROTOCOL_VERSION >= 6);
-	ASSERT(TMATE_TOKEN_LEN == 8);
+	ASSERT(TMATE_TOKEN_LEN == 16);
 }
 
 /* Verify encoder struct has ev_buffer as pointer (tmux 3.6a libevent2 pattern) */

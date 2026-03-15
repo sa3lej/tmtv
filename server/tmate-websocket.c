@@ -973,6 +973,46 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 }
 
 /*
+ * Extract password from X-Tmtv-Password HTTP header.
+ * Returns a malloc'd string or NULL if not found.
+ * Caller must free the result.
+ */
+static char *sse_extract_password_header(const char *headers,
+					 const char *header_end)
+{
+	const char *line = headers;
+
+	while (line < header_end) {
+		const char *eol = memchr(line, '\n', header_end - line);
+		if (!eol)
+			eol = header_end;
+
+		/* Skip leading whitespace */
+		const char *lp = line;
+		while (lp < eol && (*lp == ' ' || *lp == '\t'))
+			lp++;
+
+		if ((size_t)(eol - lp) > 17 &&
+		    strncasecmp(lp, "x-tmtv-password:", 16) == 0) {
+			const char *val = lp + 16;
+			while (val < eol && (*val == ' ' || *val == '\t'))
+				val++;
+			/* Trim trailing \r */
+			const char *val_end = eol;
+			if (val_end > val && val_end[-1] == '\r')
+				val_end--;
+			size_t val_len = val_end - val;
+			char *pw = xmalloc(val_len + 1);
+			memcpy(pw, val, val_len);
+			pw[val_len] = '\0';
+			return pw;
+		}
+		line = eol + 1;
+	}
+	return NULL;
+}
+
+/*
  * Extract the "password" query parameter from a URI path.
  * Returns a malloc'd string or NULL if not found.
  * Caller must free the result.
@@ -1191,10 +1231,15 @@ static int sse_do_handshake(struct ws_client *wc)
 		}
 
 		/* Password gate: if the session has a password,
-		 * the SSE client must provide it as a query param */
+		 * check X-Tmtv-Password header first (secure),
+		 * fall back to query param (for EventSource which
+		 * does not support custom headers). */
 		if (tmate_has_session_password()) {
-			char *pw = sse_extract_password(
-				path_start, path_len);
+			char *pw = sse_extract_password_header(
+				data, header_end);
+			if (!pw)
+				pw = sse_extract_password(
+					path_start, path_len);
 			if (!pw) {
 				tmate_debug("SSE password required "
 					    "but not provided");
@@ -1241,11 +1286,27 @@ static int sse_do_handshake(struct ws_client *wc)
 		/* CSRF protection: require X-Tmtv-Input header.
 		 * This forces a CORS preflight for cross-origin requests,
 		 * preventing malicious websites from injecting keystrokes.
-		 * Search headers only (not body) with bounded length. */
-		char saved_end = *header_end;
-		*header_end = '\0';
-		int has_csrf = (strcasestr(data, "x-tmtv-input:") != NULL);
-		*header_end = saved_end;
+		 * Parse headers line-by-line to avoid matching the header
+		 * name inside cookie values or other header content. */
+		int has_csrf = 0;
+		{
+			const char *line = data;
+			while (line < header_end) {
+				const char *eol = memchr(line, '\n',
+							 header_end - line);
+				if (!eol)
+					eol = header_end;
+				/* Skip leading whitespace (folded headers) */
+				while (line < eol && (*line == ' ' || *line == '\t'))
+					line++;
+				if ((size_t)(eol - line) >= 13 &&
+				    strncasecmp(line, "x-tmtv-input:", 13) == 0) {
+					has_csrf = 1;
+					break;
+				}
+				line = eol + 1;
+			}
+		}
 		if (!has_csrf) {
 			static const char *reject_csrf =
 				"HTTP/1.1 400 Bad Request\r\n"

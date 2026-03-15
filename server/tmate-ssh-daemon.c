@@ -496,17 +496,52 @@ void tmate_spawn_daemon(struct tmate_session *session)
 		free(jail_sock);
 
 		/* Copy terminfo for xterm-256color into the jail.
-		 * client_main() needs it for terminal initialization. */
-		system("mkdir -p " TMATE_WORKDIR "/jail/usr/share/terminfo/x "
-		       "2>/dev/null; "
-		       "cp /usr/share/terminfo/x/xterm-256color "
-		       TMATE_WORKDIR "/jail/usr/share/terminfo/x/ "
-		       "2>/dev/null; "
-		       "mkdir -p " TMATE_WORKDIR "/jail/usr/share/terminfo/s "
-		       "2>/dev/null; "
-		       "cp /usr/share/terminfo/s/screen-256color "
-		       TMATE_WORKDIR "/jail/usr/share/terminfo/s/ "
-		       "2>/dev/null");
+		 * client_main() needs it for terminal initialization.
+		 * Use direct syscalls instead of system() to avoid
+		 * shell injection surface while running as root. */
+		{
+			static const struct {
+				const char *dir;
+				const char *src;
+			} terminfos[] = {
+				{ TMATE_WORKDIR "/jail/usr/share/terminfo/x",
+				  "/usr/share/terminfo/x/xterm-256color" },
+				{ TMATE_WORKDIR "/jail/usr/share/terminfo/s",
+				  "/usr/share/terminfo/s/screen-256color" },
+				{ NULL, NULL }
+			};
+			for (int ti = 0; terminfos[ti].dir; ti++) {
+				const char *dir = terminfos[ti].dir;
+				const char *src = terminfos[ti].src;
+				char dst[PATH_MAX];
+				const char *base;
+				int sfd, dfd;
+				char buf[4096];
+				ssize_t n;
+
+				mkdir(TMATE_WORKDIR "/jail/usr", 0755);
+				mkdir(TMATE_WORKDIR "/jail/usr/share", 0755);
+				mkdir(TMATE_WORKDIR "/jail/usr/share/terminfo", 0755);
+				mkdir(dir, 0755);
+
+				base = strrchr(src, '/');
+				base = base ? base + 1 : src;
+				snprintf(dst, sizeof(dst), "%s/%s", dir, base);
+
+				sfd = open(src, O_RDONLY);
+				if (sfd < 0)
+					continue;
+				dfd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+				if (dfd < 0) {
+					close(sfd);
+					continue;
+				}
+				while ((n = read(sfd, buf, sizeof(buf))) > 0)
+					(void)write(dfd, buf, n);
+				close(sfd);
+				close(dfd);
+			}
+		}
 	}
 
 	/* Open sessions dir fd before jail for post-jail named session symlinks */

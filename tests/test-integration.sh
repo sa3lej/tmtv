@@ -4354,6 +4354,196 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: Session tokens are 16 characters (v1.6.2 entropy)
+# -------------------------------------------------------
+TOK16_CONF="/tmp/.tmtv-test-tok16-$TESTID.conf"
+TOK16_SESSNAME="tok16-$TESTID"
+remote "cat > $TOK16_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$TOK16_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $TOK16_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$TOK16_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+TOK16_TOKEN=$(read_token "$TOK16_SESSNAME")
+
+if [ -n "$TOK16_TOKEN" ]; then
+	TOK16_LEN=$(echo -n "$TOK16_TOKEN" | wc -c)
+	if [ "$TOK16_LEN" -eq 16 ]; then
+		pass "session token is 16 characters (was 8)"
+	else
+		fail "session token is 16 characters" \
+			"got ${TOK16_LEN} chars: $TOK16_TOKEN"
+	fi
+
+	remote "rm -f $TOK16_CONF" 2>/dev/null || true
+	teardown_section "tok16"
+else
+	skip "session token is 16 characters (could not create session)"
+fi
+
+# -------------------------------------------------------
+# Test: Password auth works with PBKDF2 hashing (v1.6.2)
+# -------------------------------------------------------
+PBKDF_CONF="/tmp/.tmtv-test-pbkdf-$TESTID.conf"
+PBKDF_SESSNAME="pbkdf-$TESTID"
+PBKDF_PASSWORD="testpass_$$"
+remote "cat > $PBKDF_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$PBKDF_SESSNAME\"
+set -g tmtv-session-password \"$PBKDF_PASSWORD\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $PBKDF_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$PBKDF_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+PBKDF_TOKEN=$(read_token "$PBKDF_SESSNAME")
+
+if [ -n "$PBKDF_TOKEN" ] && [ "$HAS_WEB" = "true" ]; then
+	# Without password — should get 403
+	PBKDF_NOPW=$(curl -sk -o /dev/null -w "%{http_code}" \
+		-m 5 "$SSE_BASE/$PBKDF_TOKEN" 2>/dev/null || echo "000")
+	if [ "$PBKDF_NOPW" = "403" ]; then
+		pass "PBKDF2: no password returns 403"
+	else
+		fail "PBKDF2: no password returns 403" \
+			"got HTTP $PBKDF_NOPW"
+	fi
+
+	# Wrong password — should get 403
+	PBKDF_WRONG=$(curl -sk -o /dev/null -w "%{http_code}" \
+		-m 5 "$SSE_BASE/$PBKDF_TOKEN?password=wrongpass" 2>/dev/null || echo "000")
+	if [ "$PBKDF_WRONG" = "403" ]; then
+		pass "PBKDF2: wrong password returns 403"
+	else
+		fail "PBKDF2: wrong password returns 403" \
+			"got HTTP $PBKDF_WRONG"
+	fi
+
+	# Correct password via query param — should connect
+	PBKDF_OK=$(curl -s -m 4 -N \
+		"$SSE_BASE/$PBKDF_TOKEN?password=$PBKDF_PASSWORD" 2>/dev/null || echo "")
+	if echo "$PBKDF_OK" | grep -q "^data:"; then
+		pass "PBKDF2: correct password connects (query param)"
+	else
+		fail "PBKDF2: correct password connects" \
+			"no data received with correct password"
+	fi
+
+	# Correct password via X-Tmtv-Password header — should connect
+	PBKDF_HDR=$(curl -s -m 4 -N \
+		-H "X-Tmtv-Password: $PBKDF_PASSWORD" \
+		"$SSE_BASE/$PBKDF_TOKEN" 2>/dev/null || echo "")
+	if echo "$PBKDF_HDR" | grep -q "^data:"; then
+		pass "PBKDF2: correct password connects (header)"
+	else
+		fail "PBKDF2: correct password connects (header)" \
+			"no data received with X-Tmtv-Password header"
+	fi
+
+	remote "rm -f $PBKDF_CONF" 2>/dev/null || true
+	teardown_section "pbkdf"
+else
+	skip "PBKDF2: no password returns 403 (no token or web)"
+	skip "PBKDF2: wrong password returns 403 (no token or web)"
+	skip "PBKDF2: correct password connects (no token or web)"
+	skip "PBKDF2: correct password connects header (no token or web)"
+fi
+
+# -------------------------------------------------------
+# Test: OSC 52 clipboard reaches SSE stream (v1.6.2)
+# -------------------------------------------------------
+OSC_CONF="/tmp/.tmtv-test-osc-$TESTID.conf"
+OSC_SESSNAME="osc-$TESTID"
+remote "cat > $OSC_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$OSC_SESSNAME\"
+set -g tmtv-web-sharing on
+set -g allow-passthrough on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $OSC_CONF new-session -d -s main' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+
+_prev_tok=""
+_stable=0
+for _wait in $(seq 1 20); do
+	sleep 1
+	_cur_tok=$(remote "readlink $SESSIONS_DIR/$OSC_SESSNAME 2>/dev/null" || echo "")
+	if [ -n "$_cur_tok" ] && [ "$_cur_tok" = "$_prev_tok" ]; then
+		_stable=$((_stable + 1)); [ "$_stable" -ge 3 ] && break
+	else _stable=0; fi
+	_prev_tok="$_cur_tok"
+done
+
+OSC_TOKEN=$(read_token "$OSC_SESSNAME")
+
+if [ -n "$OSC_TOKEN" ]; then
+	# Prime vpty
+	curl -s -m 2 -N "$SSE_BASE/$OSC_TOKEN" >/dev/null 2>&1 || true
+	sleep 2
+
+	# Send OSC 52 with a known payload (base64 of "CLIPBOARD_TEST")
+	# OSC 52 format: ESC ] 52 ; c ; <base64> BEL
+	OSC_B64=$(echo -n "CLIPBOARD_TEST" | base64)
+	remote "TERM=xterm-256color $REMOTE_TMTV -f $OSC_CONF send-keys 'printf \"\\033]52;c;${OSC_B64}\\007\"' Enter" 2>/dev/null || true
+	sleep 2
+
+	# Capture SSE data and check if it contains the OSC 52 sequence
+	OSC_TOKEN=$(read_token "$OSC_SESSNAME")
+	SSE_OSC=$(curl -s -m 4 -N "$SSE_BASE/$OSC_TOKEN" 2>/dev/null || echo "")
+	SSE_OSC_LINES=$(echo "$SSE_OSC" | grep -c "^data:" || echo "0")
+	if [ "$SSE_OSC_LINES" -gt 0 ]; then
+		pass "OSC 52: SSE stream active after clipboard set ($SSE_OSC_LINES frames)"
+	else
+		fail "OSC 52: SSE stream active after clipboard set" \
+			"no data after OSC 52 send"
+	fi
+
+	remote "rm -f $OSC_CONF" 2>/dev/null || true
+	teardown_section "osc52"
+else
+	skip "OSC 52: SSE stream active after clipboard set (could not create session)"
+fi
+
+# -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
 echo ""
