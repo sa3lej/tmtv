@@ -223,7 +223,7 @@ extern void tmate_ssh_server_main(struct tmate_session *session,
 
 #define TMATE_DEFAULT_WEBSOCKET_PORT 4002
 
-#define TMATE_TOKEN_LEN 8
+#define TMATE_TOKEN_LEN 16
 #define TMATE_WORKDIR "/tmp/tmtv"
 #define TMATE_JAIL_USER "nobody"
 
