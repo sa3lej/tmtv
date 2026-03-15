@@ -374,7 +374,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 			"HTTP/1.1 204 No Content\r\n"
 			"Access-Control-Allow-Origin: *\r\n"
 			"Access-Control-Allow-Methods: GET, HEAD, POST\r\n"
-			"Access-Control-Allow-Headers: Content-Type, X-Tmtv-Input\r\n"
+			"Access-Control-Allow-Headers: Content-Type, X-Tmtv-Input, X-Tmtv-Viewer-Id\r\n"
 			"Access-Control-Max-Age: 86400\r\n"
 			"Content-Length: 0\r\n"
 			"\r\n";

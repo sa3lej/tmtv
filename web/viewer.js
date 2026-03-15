@@ -424,6 +424,7 @@
   var everConnected = false;
   var sessionReadonly = true;     /* assume RO until server says otherwise */
   var webInputEnabled = false;
+  var myViewerId = 0;            /* assigned by server in SESSION_MODE */
   var inputInFlight = false;
   var inputBatch = '';
 
@@ -434,6 +435,7 @@
     inputInFlight = true;
     var url = sseUrl.replace(/\?.*$/, '') + '/input';
     var hdrs = { 'Content-Type': 'text/plain', 'X-Tmtv-Input': '1' };
+    if (myViewerId) hdrs['X-Tmtv-Viewer-Id'] = String(myViewerId);
     if (sessionPassword) hdrs['X-Tmtv-Password'] = sessionPassword;
     fetch(url, {
       method: 'POST',
@@ -901,6 +903,8 @@
         if (inner.length >= 3) {
           sessionReadonly = !!inner[1];
           webInputEnabled = !!inner[2];
+          if (inner.length >= 4 && typeof inner[3] === 'number')
+            myViewerId = inner[3];
           updateSessionModeBadge();
           if (!sessionReadonly && webInputEnabled) enableTerminalInput();
         }

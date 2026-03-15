@@ -86,7 +86,7 @@ enum tmate_daemon_out_msg_types {
 [TMATE_OUT_UNAME, string: name.sysname, string: name.nodename,
                   string: name.release, string: name.version, string: name.machine]
 [TMATE_OUT_VIEWER_COUNT, int: ssh_rw, int: ssh_ro, int: web]
-[TMATE_OUT_SESSION_MODE, boolean: readonly, boolean: web_input_enabled]
+[TMATE_OUT_SESSION_MODE, boolean: readonly, boolean: web_input_enabled, int: viewer_id]
 [TMATE_OUT_INPUT_MODE, boolean: enabled, boolean: mirror]
 // enabled: start/stop sending USER_* events
 // mirror: if true, keys go to BOTH PTY and socket; if false, keys only go to socket

@@ -143,13 +143,29 @@ tmtv_input_on_user_join(int user_id, const char *name,
 	msgpack_sbuffer sbuf;
 	msgpack_packer pk;
 
-	/* Track the user */
+	/* Deduplicate: if user_id already exists, update in place.
+	 * This prevents duplicates from repeated INPUT_MODE enables
+	 * or SSE reconnects. */
+	TAILQ_FOREACH(u, &input_users, entry) {
+		if (u->id == user_id) {
+			free(u->name);
+			free(u->type);
+			u->name = xstrdup(name);
+			u->readonly = readonly;
+			u->type = xstrdup(type);
+			goto broadcast;
+		}
+	}
+
+	/* New user — track it */
 	u = xcalloc(1, sizeof(*u));
 	u->id = user_id;
 	u->name = xstrdup(name);
 	u->readonly = readonly;
 	u->type = xstrdup(type);
 	TAILQ_INSERT_TAIL(&input_users, u, entry);
+
+broadcast:
 
 	/* Broadcast to subscribed apps */
 	msgpack_sbuffer_init(&sbuf);
@@ -173,14 +189,14 @@ tmtv_input_on_user_leave(int user_id)
 	msgpack_sbuffer sbuf;
 	msgpack_packer pk;
 
-	/* Remove from tracking */
+	/* Remove all entries with this user_id (defensive against
+	 * duplicates that may exist from earlier bugs). */
 	TAILQ_FOREACH_SAFE(u, &input_users, entry, tmp) {
 		if (u->id == user_id) {
 			TAILQ_REMOVE(&input_users, u, entry);
 			free(u->name);
 			free(u->type);
 			free(u);
-			break;
 		}
 	}
 

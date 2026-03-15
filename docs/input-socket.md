@@ -45,7 +45,7 @@ Sent immediately after you subscribe. Contains all currently connected read-writ
 [0, user_id: int, name: string, readonly: bool, type: string]
 ```
 
-A read-write viewer connected to the session.
+A read-write viewer connected to the session. May also fire for an already-known `user_id` — treat this as an upsert (the viewer reconnected or its attributes changed). Your app should update its local state, not create a duplicate entry.
 
 ### USER_LEAVE (1)
 
