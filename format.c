@@ -493,34 +493,43 @@ format_printf(const char *fmt, ...)
 static void *
 format_cb_host(__unused struct format_tree *ft)
 {
-	char host[HOST_NAME_MAX + 1];
+	static char	*cached;
 
-	if (gethostname(host, sizeof host) != 0)
-		return (xstrdup(""));
-	return (xstrdup(host));
+	if (cached == NULL) {
+		char host[HOST_NAME_MAX + 1];
+		if (gethostname(host, sizeof host) != 0)
+			host[0] = '\0';
+		cached = xstrdup(host);
+	}
+	return (xstrdup(cached));
 }
 
 /* Callback for host_short. */
 static void *
 format_cb_host_short(__unused struct format_tree *ft)
 {
-	char host[HOST_NAME_MAX + 1], *cp;
+	static char	*cached;
 
-	if (gethostname(host, sizeof host) != 0)
-		return (xstrdup(""));
-	if ((cp = strchr(host, '.')) != NULL)
-		*cp = '\0';
-	return (xstrdup(host));
+	if (cached == NULL) {
+		char host[HOST_NAME_MAX + 1], *cp;
+		if (gethostname(host, sizeof host) != 0)
+			host[0] = '\0';
+		if ((cp = strchr(host, '.')) != NULL)
+			*cp = '\0';
+		cached = xstrdup(host);
+	}
+	return (xstrdup(cached));
 }
 
 /* Callback for pid. */
 static void *
 format_cb_pid(__unused struct format_tree *ft)
 {
-	char	*value;
+	static char	*cached;
 
-	xasprintf(&value, "%ld", (long)getpid());
-	return (value);
+	if (cached == NULL)
+		xasprintf(&cached, "%ld", (long)getpid());
+	return (xstrdup(cached));
 }
 
 /* Callback for session_attached_list. */
@@ -1585,13 +1594,29 @@ format_cb_client_uid(struct format_tree *ft)
 static void *
 format_cb_client_user(struct format_tree *ft)
 {
+	static uid_t	 cached_uid = (uid_t)-1;
+	static char	*cached_name;
+	static int	 cached;
 	uid_t		 uid;
 	struct passwd	*pw;
 
 	if (ft->c != NULL) {
 		uid = proc_get_peer_uid(ft->c->peer);
-		if (uid != (uid_t)-1 && (pw = getpwuid(uid)) != NULL)
-			return (xstrdup(pw->pw_name));
+		if (uid != (uid_t)-1) {
+			if (cached && uid == cached_uid) {
+				if (cached_name != NULL)
+					return (xstrdup(cached_name));
+				return (NULL);
+			}
+			cached = 1;
+			cached_uid = uid;
+			free(cached_name);
+			cached_name = NULL;
+			if ((pw = getpwuid(uid)) != NULL)
+				cached_name = xstrdup(pw->pw_name);
+			if (cached_name != NULL)
+				return (xstrdup(cached_name));
+		}
 	}
 	return (NULL);
 }
@@ -2982,10 +3007,17 @@ format_cb_uid(__unused struct format_tree *ft)
 static void *
 format_cb_user(__unused struct format_tree *ft)
 {
+	static char	*cached_user;
+	static int	 cached;
 	struct passwd	*pw;
 
-	if ((pw = getpwuid(getuid())) != NULL)
-		return (xstrdup(pw->pw_name));
+	if (!cached) {
+		cached = 1;
+		if ((pw = getpwuid(getuid())) != NULL)
+			cached_user = xstrdup(pw->pw_name);
+	}
+	if (cached_user != NULL)
+		return (xstrdup(cached_user));
 	return (NULL);
 }
 

@@ -2729,8 +2729,20 @@ server_client_loop(void)
 		    strcmp(w->name, w->tmate_last_sync_name) != 0)
 			tmate_should_sync_layout = 1;
 		if (tmate_should_sync_layout) {
-			w->tmate_last_layout_hash = layout_hash;
-			tmate_sync_layout(&tmate_session, NULL);
+			/* Debounce: only sync if it hasn't been sent
+			 * in the last 100ms to avoid hot loops when
+			 * multiple sessions trigger continuous changes.
+			 * Hash is updated only when sync fires so
+			 * suppressed changes are retried next iteration. */
+			static struct timeval last_sync;
+			struct timeval now, diff;
+			gettimeofday(&now, NULL);
+			timersub(&now, &last_sync, &diff);
+			if (diff.tv_sec > 0 || diff.tv_usec >= 100000) {
+				last_sync = now;
+				w->tmate_last_layout_hash = layout_hash;
+				tmate_sync_layout(&tmate_session, NULL);
+			}
 		}
 #endif
 	}

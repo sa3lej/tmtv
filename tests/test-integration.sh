@@ -4559,6 +4559,63 @@ else
 fi
 
 # -------------------------------------------------------
+# Session cycling CPU stress test
+# -------------------------------------------------------
+# Reproduces the bug where rapidly creating/destroying sessions
+# alongside a long-lived session caused 95% CPU spin from
+# unbounded tmate_sync_layout() calls.  Fixed by debouncing
+# sync_layout and caching format callbacks (host, pid, user).
+
+STRESS_CONF="/tmp/.tmtv-test-stress-$TESTID.conf"
+STRESS_SESSNAME="stress$TESTID"
+remote "cat > $STRESS_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$STRESS_SESSNAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+remote "TERM=xterm-256color \
+	nohup script -qc '$REMOTE_TMTV -f $STRESS_CONF new-session -d -s stressmain' \
+	/dev/null </dev/null >/dev/null 2>&1 &"
+sleep 3
+
+# Verify main session is up
+if remote "TERM=xterm-256color $REMOTE_TMTV has-session -t stressmain" 2>/dev/null; then
+	# Cycle 10 sessions alongside the main one
+	for _sc in $(seq 1 10); do
+		remote "TERM=xterm-256color $REMOTE_TMTV new-session -d -s stressshot" 2>/dev/null || true
+		sleep 0.5
+		remote "TERM=xterm-256color $REMOTE_TMTV send-keys -t stressshot 'echo cycle_$_sc' Enter" 2>/dev/null || true
+		sleep 0.3
+		remote "TERM=xterm-256color $REMOTE_TMTV capture-pane -t stressshot -p" > /dev/null 2>&1 || true
+		remote "TERM=xterm-256color $REMOTE_TMTV kill-session -t stressshot" 2>/dev/null || true
+		sleep 0.3
+	done
+
+	# Wait for things to settle
+	sleep 3
+
+	# Measure CPU of all tmtv processes
+	_stress_cpu=$(remote "ps aux | grep tmtv | grep -v grep | awk '{sum+=\$3} END {printf \"%.0f\", sum}'" 2>/dev/null || echo "0")
+
+	if [ "$_stress_cpu" -lt 30 ] 2>/dev/null; then
+		pass "no CPU spin after session cycling (${_stress_cpu}%)"
+	else
+		fail "CPU spin after session cycling" \
+			"total tmtv CPU ${_stress_cpu}% exceeds 30% threshold"
+	fi
+else
+	skip "session cycling stress test (could not create session)"
+fi
+
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server" 2>/dev/null || true
+remote "rm -f $STRESS_CONF" 2>/dev/null || true
+teardown_section "stress"
+
+# -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
 echo ""
