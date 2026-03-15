@@ -361,13 +361,13 @@
     var data = inputBatch;
     inputBatch = '';
     inputInFlight = true;
-    var url = buildSseUrl().replace(/\?.*$/, '') + '/input';
-    var pw = sessionPassword;
-    if (pw) url += '?password=' + encodeURIComponent(pw);
+    var url = sseUrl.replace(/\?.*$/, '') + '/input';
+    var hdrs = { 'Content-Type': 'text/plain', 'X-Tmtv-Input': '1' };
+    if (sessionPassword) hdrs['X-Tmtv-Password'] = sessionPassword;
     fetch(url, {
       method: 'POST',
       body: data,
-      headers: { 'Content-Type': 'text/plain', 'X-Tmtv-Input': '1' }
+      headers: hdrs
     }).then(function() {
       inputInFlight = false;
       flushInput();
@@ -655,7 +655,9 @@
      * SSE connection or spawning the virtual PTY on the server.
      * EventSource does not expose HTTP status codes, so we cannot
      * distinguish a 403 from a network error without this probe. */
-    fetch(buildSseUrl(), { method: 'HEAD' }).then(function(resp) {
+    var probeHeaders = {};
+    if (sessionPassword) probeHeaders['X-Tmtv-Password'] = sessionPassword;
+    fetch(buildSseUrl(), { method: 'HEAD', headers: probeHeaders }).then(function(resp) {
       if (resp.status === 403) {
         /* HEAD 403 has no body — check X-Tmtv-Reason header instead */
         var reason = resp.headers.get('X-Tmtv-Reason');
