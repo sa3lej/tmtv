@@ -44,7 +44,7 @@ loop:
 
 | Type | ID | Fields | Description |
 |------|-----|--------|-------------|
-| USER_JOIN | 0 | `[0, user_id:int, name:str, readonly:bool, type:str]` | Read-write viewer connected |
+| USER_JOIN | 0 | `[0, user_id:int, name:str, readonly:bool, type:str]` | Read-write viewer connected (or refreshed — treat as upsert) |
 | USER_LEAVE | 1 | `[1, user_id:int]` | Read-write viewer disconnected |
 | USER_INPUT | 2 | `[2, user_id:int, pane_id:int, keycode:uint64]` | Keystroke from viewer |
 | USER_LIST | 3 | `[3, [[id:int, name:str, readonly:bool, type:str], ...]]` | All current read-write viewers (response to SUBSCRIBE) |
@@ -321,7 +321,7 @@ Unknown command types (valid array, unrecognized integer at position 0) are sile
 
 - **Forgetting to SUBSCRIBE.** You won't receive any events until you send `[0]`.
 - **Not reading the full length-prefixed frame.** TCP/Unix sockets are streams — a single `read()` may return partial data. Always `read_exact`.
-- **Treating `user_id` as stable across reconnects.** If a viewer disconnects and reconnects, they get a new `user_id`.
+- **Treating `user_id` as stable across reconnects.** If a viewer disconnects and reconnects, they may get a new `user_id`. However, USER_JOIN is idempotent — if the same `user_id` fires again, treat it as an upsert and update your local state rather than creating a duplicate.
 - **Ignoring `mirror` mode.** If you want exclusive input (game, chat), set `mirror=false`. Otherwise viewers see their typing echoed in the terminal AND your app gets it — which is confusing for games.
 - **Hardcoding the socket path.** Always read `$TMTV_INPUT_SOCKET`. The path includes the PID and changes every session.
 - **Sending oversized messages.** Keep messages under 64 KiB. In practice, app-to-server messages (SUBSCRIBE, SET_MIRROR) are tiny — this limit only matters if you accidentally serialize large payloads.

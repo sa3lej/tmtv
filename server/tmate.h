@@ -374,6 +374,7 @@ extern void tmate_setup_ipc_receiver(struct tmate_session *session);
 
 extern void sse_spawn_virtual_client(struct tmate_session *session);
 extern void sse_kill_virtual_client(struct tmate_session *session);
+extern void sse_force_vpty_redraw(struct tmate_session *session);
 extern void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy);
 
 static inline bool tmate_has_websocket(void)

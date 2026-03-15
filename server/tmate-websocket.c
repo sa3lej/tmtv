@@ -467,6 +467,16 @@ void sse_kill_virtual_client(struct tmate_session *session)
 	tmate_info("Virtual PTY client killed");
 }
 
+void sse_force_vpty_redraw(struct tmate_session *session)
+{
+	if (!session->vpty_active || session->vpty_child_pid <= 0)
+		return;
+	/* SIGWINCH triggers a full redraw from tmux to the vpty,
+	 * even when the window is idle.  Works for nested
+	 * multiplexers, TUI apps, and games too. */
+	kill(session->vpty_child_pid, SIGWINCH);
+}
+
 static void sse_broadcast_sync_layout(struct tmate_session *session);
 
 /*
@@ -1065,7 +1075,8 @@ static char *sse_extract_password(const char *path, size_t path_len)
  * whether web input is enabled.
  */
 static void sse_send_session_mode(struct bufferevent *bev,
-				  bool readonly, bool web_input_enabled)
+				  bool readonly, bool web_input_enabled,
+				  int viewer_id)
 {
 	msgpack_sbuffer sbuf;
 	msgpack_packer pk;
@@ -1076,7 +1087,7 @@ static void sse_send_session_mode(struct bufferevent *bev,
 	msgpack_pack_array(&pk, 2);
 	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
 
-	msgpack_pack_array(&pk, 3);
+	msgpack_pack_array(&pk, 4);
 	msgpack_pack_int(&pk, TMATE_OUT_SESSION_MODE);
 	if (readonly)
 		msgpack_pack_true(&pk);
@@ -1086,6 +1097,7 @@ static void sse_send_session_mode(struct bufferevent *bev,
 		msgpack_pack_true(&pk);
 	else
 		msgpack_pack_false(&pk);
+	msgpack_pack_int(&pk, viewer_id);
 
 	sse_send_data(bev, (unsigned char *)sbuf.data, sbuf.size);
 	msgpack_sbuffer_destroy(&sbuf);
@@ -1175,7 +1187,7 @@ static int sse_do_handshake(struct ws_client *wc)
 			"HTTP/1.1 204 No Content\r\n"
 			"Access-Control-Allow-Origin: *\r\n"
 			"Access-Control-Allow-Methods: GET, HEAD, POST\r\n"
-			"Access-Control-Allow-Headers: Content-Type, X-Tmtv-Input\r\n"
+			"Access-Control-Allow-Headers: Content-Type, X-Tmtv-Input, X-Tmtv-Viewer-Id\r\n"
 			"Access-Control-Max-Age: 86400\r\n"
 			"Content-Length: 0\r\n"
 			"\r\n";
@@ -1287,8 +1299,11 @@ static int sse_do_handshake(struct ws_client *wc)
 		 * This forces a CORS preflight for cross-origin requests,
 		 * preventing malicious websites from injecting keystrokes.
 		 * Parse headers line-by-line to avoid matching the header
-		 * name inside cookie values or other header content. */
+		 * name inside cookie values or other header content.
+		 * Also extract X-Tmtv-Viewer-Id so POST input events
+		 * are attributed to the correct SSE viewer. */
 		int has_csrf = 0;
+		int post_viewer_id = 0;
 		{
 			const char *line = data;
 			while (line < header_end) {
@@ -1302,7 +1317,16 @@ static int sse_do_handshake(struct ws_client *wc)
 				if ((size_t)(eol - line) >= 13 &&
 				    strncasecmp(line, "x-tmtv-input:", 13) == 0) {
 					has_csrf = 1;
-					break;
+				}
+				if ((size_t)(eol - line) >= 17 &&
+				    strncasecmp(line, "x-tmtv-viewer-id:", 17) == 0) {
+					const char *val = line + 17;
+					while (val < eol && *val == ' ')
+						val++;
+					long v = strtol(val, NULL, 10);
+					if (v < 0 || v > INT_MAX)
+						v = 0;
+					post_viewer_id = (int)v;
 				}
 				line = eol + 1;
 			}
@@ -1320,6 +1344,7 @@ static int sse_do_handshake(struct ws_client *wc)
 			return -1;
 		}
 		wc->is_post = true;
+		wc->viewer_id = post_viewer_id;
 		/* POST /token/input — handled in on_ws_client_read
 		 * after we drain the headers here */
 		evbuffer_drain(input, (header_end - data) + 4);
@@ -2130,7 +2155,8 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 
 		/* Send session mode so browser knows RW/RO and input status */
 		sse_send_session_mode(wc->bev, wc->readonly,
-				      wc->session->web_input_enabled);
+				      wc->session->web_input_enabled,
+				      wc->viewer_id);
 
 		sse_send_sync_layout(wc->bev);
 

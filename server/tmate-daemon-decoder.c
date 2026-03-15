@@ -399,8 +399,12 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 		 * for new output, so without this, web viewers see a blank
 		 * screen after a window switch.
 		 * Skip when vpty is active — it sends full-screen output. */
-		if (old_wl != wl && !tmate_session->vpty_active)
-			sse_broadcast_screen_dump(tmate_session);
+		if (old_wl != wl) {
+			if (tmate_session->vpty_active)
+				sse_force_vpty_redraw(tmate_session);
+			else
+				sse_broadcast_screen_dump(tmate_session);
+		}
 	}
 }
 
@@ -906,13 +910,17 @@ static void tmate_input_mode(struct tmate_session *session,
 {
 	bool enabled = unpack_bool(uk);
 	bool mirror = unpack_bool(uk);
+	bool was_enabled = session->input_mode_enabled;
 
 	session->input_mode_enabled = enabled;
 	session->input_mirror = mirror;
 
 	tmate_info("Input mode: enabled=%d mirror=%d", enabled, mirror);
 
-	if (enabled) {
+	/* Only send viewer list on transition from disabled to enabled.
+	 * Repeated enable calls (e.g. from SET_MIRROR) must not
+	 * generate duplicate USER_JOIN events. */
+	if (enabled && !was_enabled) {
 		/* Send current viewer list to host */
 		struct client *c;
 		TAILQ_FOREACH(c, &clients, entry) {
