@@ -559,7 +559,14 @@ static void tmate_send_reconnection_data(struct tmate_session *session)
 	pack(string, session->reconnection_data);
 }
 
-#define RECONNECTION_MAX_HISTORY_LINE 300
+/*
+ * History lines to include in reconnection snapshot.  Keep this modest
+ * to avoid flooding the SSH channel immediately on reconnect — the
+ * visible screen content is the priority, scrollback is secondary.
+ * 100 lines is enough to reconstruct the visible state of most
+ * terminal layouts without causing a cascade under backpressure.
+ */
+#define RECONNECTION_MAX_HISTORY_LINE 100
 
 void tmate_send_reconnection_state(struct tmate_session *session)
 {

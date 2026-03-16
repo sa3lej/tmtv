@@ -898,6 +898,8 @@ input_free(struct input_ctx *ictx)
 	evbuffer_free(ictx->since_ground);
 	event_del(&ictx->ground_timer);
 
+	screen_write_stop_sync(ictx->wp);
+
 	free(ictx);
 }
 
@@ -1260,6 +1262,8 @@ input_input(struct input_ctx *ictx)
 	while (ictx->input_len + 1 >= available) {
 		available *= 2;
 		if (available > input_buffer_size) {
+			log_debug("input buffer limit reached (%zu bytes), "
+			    "discarding", input_buffer_size);
 			ictx->flags |= INPUT_DISCARD;
 			return (0);
 		}
@@ -1901,6 +1905,11 @@ input_csi_dispatch_rm_private(struct input_ctx *ictx)
 		case 2031:
 			screen_write_mode_clear(sctx, MODE_THEME_UPDATES);
 			break;
+		case 2026:	/* synchronized output */
+			screen_write_stop_sync(ictx->wp);
+			if (ictx->wp != NULL)
+				ictx->wp->flags |= PANE_REDRAW;
+			break;
 		default:
 			log_debug("%s: unknown '%c'", __func__, ictx->ch);
 			break;
@@ -1998,6 +2007,9 @@ input_csi_dispatch_sm_private(struct input_ctx *ictx)
 			break;
 		case 2031:
 			screen_write_mode_set(sctx, MODE_THEME_UPDATES);
+			break;
+		case 2026:	/* synchronized output */
+			screen_write_start_sync(ictx->wp);
 			break;
 		default:
 			log_debug("%s: unknown '%c'", __func__, ictx->ch);
@@ -2561,31 +2573,38 @@ input_dcs_dispatch(struct input_ctx *ictx)
 		si = sixel_parse(buf, len, p2, w->xpixel, w->ypixel);
 		if (si != NULL) {
 			struct image *im;
-			char *raw;
+			char *raw = NULL;
 			size_t rawlen;
 
 			/*
 			 * Build the raw DCS sequence for passthrough:
 			 * ESC P 0;P2 q <data> ESC backslash.
 			 * buf starts at 'q', so include the DCS header.
+			 *
+			 * Overflow check: len could be huge from
+			 * untrusted input.  Reject if the total
+			 * allocation would wrap size_t.
 			 */
-			rawlen = 5 + len + 2; /* \033P0;Nq....\033\\ */
-			raw = xmalloc(rawlen + 16);
-			rawlen = snprintf(raw, rawlen + 16,
-			    "\033P0;%u", p2);
-			memcpy(raw + rawlen, buf, len);
-			rawlen += len;
-			raw[rawlen++] = '\033';
-			raw[rawlen++] = '\\';
-			raw[rawlen] = '\0';
+			if (len <= SIZE_MAX - 32) {
+				rawlen = 5 + len + 2;
+				raw = xmalloc(rawlen + 16);
+				rawlen = snprintf(raw, rawlen + 16,
+				    "\033P0;%u", p2);
+				memcpy(raw + rawlen, buf, len);
+				rawlen += len;
+				raw[rawlen++] = '\033';
+				raw[rawlen++] = '\\';
+				raw[rawlen] = '\0';
+			}
 
 			im = screen_write_sixelimage(sctx, si,
 			    ictx->cell.cell.bg);
-			if (im != NULL) {
+			if (im != NULL && raw != NULL) {
 				im->raw_data = raw;
 				im->raw_len = rawlen;
-			} else
-				free(raw);
+				raw = NULL; /* ownership transferred */
+			}
+			free(raw);
 		}
 	}
 #endif

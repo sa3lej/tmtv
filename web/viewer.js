@@ -425,6 +425,7 @@
   var sessionReadonly = true;     /* assume RO until server says otherwise */
   var webInputEnabled = false;
   var myViewerId = 0;            /* assigned by server in SESSION_MODE */
+  var lastSeqId = 0;             /* SSE sequence number for drop detection */
   var inputInFlight = false;
   var inputBatch = '';
 
@@ -803,6 +804,18 @@
       reconnectAttempts = 0;
       lastDataTime = Date.now();
       if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+
+      /* Track SSE sequence numbers for frame drop detection.
+       * Gaps in lastEventId indicate the server skipped frames
+       * under backpressure — log for diagnostics. */
+      if (evt.lastEventId) {
+        var seq = parseInt(evt.lastEventId, 10);
+        if (lastSeqId > 0 && seq > lastSeqId + 1) {
+          console.warn('tmtv: ' + (seq - lastSeqId - 1) + ' SSE frames dropped');
+        }
+        lastSeqId = seq;
+      }
+
       if (evt.data === 'heartbeat') {
         lastDataTime = Date.now();
         return;

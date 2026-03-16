@@ -54,7 +54,7 @@
 #define SSE_WRITE_BUFFER_MAX (1024 * 1024)  /* 1 MB */
 #define SSE_WATERMARK_GRACE_SEC 5  /* seconds after connect before watermark applies */
 #define SSE_HEARTBEAT_INTERVAL_SEC 15  /* SSE keepalive comment interval */
-#define PTY_REPLAY_RECONNECT_MAX (64 * 1024) /* max replay bytes for reconnecting clients */
+#define PTY_REPLAY_RECONNECT_MAX (256 * 1024) /* max replay bytes for reconnecting clients */
 
 /*
  * Enable TCP keepalive on a socket so dead peers behind NAT are
@@ -97,8 +97,8 @@ static void pty_replay_send_limited(struct bufferevent *bev,
  * Using message-level granularity avoids splitting msgpack framing
  * when the buffer wraps — every replayed SSE event is well-formed.
  */
-#define PTY_REPLAY_MAX_MSGS  4096
-#define PTY_REPLAY_MAX_BYTES (256 * 1024)
+#define PTY_REPLAY_MAX_MSGS  8192
+#define PTY_REPLAY_MAX_BYTES (2 * 1024 * 1024)  /* 2 MB — room for SIXEL */
 
 static struct {
 	unsigned char *data;
@@ -209,6 +209,15 @@ static void pty_replay_send_limited(struct bufferevent *bev,
 
 extern int server_fd;
 
+/*
+ * Maximum bytes to accumulate per event-loop iteration from the vpty.
+ * Prevents a single child (e.g. `cat huge-file`) from building a
+ * 100MB+ msgpack message that overwhelms SSE clients.  The remaining
+ * data stays in the kernel pipe buffer and is delivered on the next
+ * event-loop cycle, keeping the server responsive.
+ */
+#define VPTY_READ_MAX (256 * 1024)
+
 static void on_vpty_read(evutil_socket_t fd, short what, void *arg)
 {
 	struct tmate_session *session = arg;
@@ -224,12 +233,15 @@ static void on_vpty_read(evutil_socket_t fd, short what, void *arg)
 	 */
 	msgpack_sbuffer accum;
 	int have_data = 0;
+	size_t total_read = 0;
 
 	(void)what;
 
 	msgpack_sbuffer_init(&accum);
 
 	for (;;) {
+		if (total_read >= VPTY_READ_MAX)
+			break;
 		len = read(fd, buf, sizeof(buf));
 		if (len < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -247,6 +259,7 @@ static void on_vpty_read(evutil_socket_t fd, short what, void *arg)
 		}
 
 		msgpack_sbuffer_write(&accum, (const char *)buf, len);
+		total_read += len;
 		have_data = 1;
 	}
 
@@ -551,15 +564,28 @@ void sse_vpty_resize(struct tmate_session *session, u_int sx, u_int sy)
 
 /* --- SSE data sending --- */
 
+/*
+ * Monotonic sequence counter for SSE events.  Clients can detect
+ * dropped frames by watching for gaps in the id: field.  The browser's
+ * EventSource API sends Last-Event-ID on reconnect, which we could
+ * use in the future for targeted replay.
+ */
+static uint64_t sse_seq_counter;
+
 static void sse_send_data(struct bufferevent *bev,
 			  const unsigned char *data, size_t len)
 {
 	struct evbuffer *out = bufferevent_get_output(bev);
 	int b64_len = 4 * ((len + 2) / 3);
 	unsigned char *b64 = xmalloc(b64_len + 1);
+	char id_buf[32];
+	int id_len;
 
 	EVP_EncodeBlock(b64, data, len);
 
+	id_len = snprintf(id_buf, sizeof(id_buf), "id: %lu\n",
+	    (unsigned long)++sse_seq_counter);
+	evbuffer_add(out, id_buf, id_len);
 	evbuffer_add(out, "data: ", 6);
 	evbuffer_add(out, b64, b64_len);
 	evbuffer_add(out, "\n\n", 2);
@@ -2420,12 +2446,15 @@ static void on_websocket_encoder_write(void *userdata, struct evbuffer *buffer)
 	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp) {
 		if (!wc->handshake_done || wc->is_post)
 			continue;
-		if (sse_client_over_watermark(wc)) {
-			tmate_info("SSE client over write buffer watermark, "
-				   "disconnecting");
+		if (sse_client_hopelessly_stuck(wc)) {
+			tmate_info("SSE client buffer at %zuKB, disconnecting",
+			    evbuffer_get_length(
+				bufferevent_get_output(wc->bev)) / 1024);
 			ws_client_free(wc);
 			continue;
 		}
+		if (sse_client_over_watermark(wc))
+			continue; /* skip frame, client catches up */
 		sse_send_data(wc->bev, data, len);
 	}
 
@@ -2699,12 +2728,15 @@ void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp) {
 		if (!wc->handshake_done || wc->is_post)
 			continue;
-		if (sse_client_over_watermark(wc)) {
-			tmate_info("SSE client over write buffer watermark, "
-				   "disconnecting");
+		if (sse_client_hopelessly_stuck(wc)) {
+			tmate_info("SSE client buffer at %zuKB, disconnecting",
+			    evbuffer_get_length(
+				bufferevent_get_output(wc->bev)) / 1024);
 			ws_client_free(wc);
 			continue;
 		}
+		if (sse_client_over_watermark(wc))
+			continue; /* skip frame, client catches up */
 		sse_send_data(wc->bev, (unsigned char *)sbuf.data, sbuf.size);
 	}
 
