@@ -2308,13 +2308,14 @@ screen_write_rawstring(struct screen_write_ctx *ctx, u_char *str, u_int len,
 
 #ifdef ENABLE_SIXEL
 /* Write a SIXEL image. */
-void
+struct image *
 screen_write_sixelimage(struct screen_write_ctx *ctx, struct sixel_image *si,
     u_int bg)
 {
 	struct screen		*s = ctx->s;
 	struct grid		*gd = s->grid;
 	struct tty_ctx		 ttyctx;
+	struct image		*im;
 	u_int			 x, y, sx, sy, cx = s->cx, cy = s->cy, i, lines;
 	struct sixel_image	*new;
 
@@ -2334,7 +2335,7 @@ screen_write_sixelimage(struct screen_write_ctx *ctx, struct sixel_image *si,
 
 		/* Bail out if the image cannot be scaled. */
 		if (si == NULL)
-			return;
+			return (NULL);
 		sixel_size_in_cells(si, &x, &y);
 	}
 
@@ -2357,11 +2358,13 @@ screen_write_sixelimage(struct screen_write_ctx *ctx, struct sixel_image *si,
 	screen_write_collect_flush(ctx, 0, __func__);
 
 	screen_write_initctx(ctx, &ttyctx, 0);
-	ttyctx.ptr = image_store(s, si);
+	im = image_store(s, si);
+	ttyctx.ptr = im;
 
 	tty_write(tty_cmd_sixelimage, &ttyctx);
 
 	screen_write_cursormove(ctx, 0, cy + y, 0);
+	return (im);
 }
 #endif
 

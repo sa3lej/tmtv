@@ -655,6 +655,139 @@ sixel_print(struct sixel_image *si, struct sixel_image *map, size_t *size)
 	return (buf);
 }
 
+/* Public accessors for tmtv-pic and other tools. */
+u_int
+sixel_get_width(struct sixel_image *si)
+{
+	return (si->x);
+}
+
+u_int
+sixel_get_height(struct sixel_image *si)
+{
+	return (si->y);
+}
+
+u_int
+sixel_get_num_colours(struct sixel_image *si)
+{
+	return (si->ncolours);
+}
+
+u_int
+sixel_get_colour(struct sixel_image *si, u_int idx)
+{
+	if (idx >= si->ncolours)
+		return (0);
+	return (si->colours[idx]);
+}
+
+u_int
+sixel_pixel_at(struct sixel_image *si, u_int x, u_int y)
+{
+	return (sixel_get_pixel(si, x, y));
+}
+
+/*
+ * Scan SIXEL data for dimensions without decoding pixels.
+ * Fast path: extract from raster attributes ("Pan;Pad;Ph;Pv).
+ * Fallback: scan the stream tracking cursor position.
+ * Returns 0 on success, -1 on failure.
+ */
+int
+sixel_scan_dimensions(const char *buf, size_t len, u_int *px_width,
+    u_int *px_height)
+{
+	const char	*cp = buf, *end = buf + len;
+	const char	*last;
+	char		*endptr;
+	char		 ch;
+	u_int		 dx = 0, max_x = 0, dy = 0;
+	u_int		 n;
+
+	if (len == 0 || len == 1 || *cp++ != 'q')
+		return (-1);
+
+	while (cp != end) {
+		ch = *cp++;
+		switch (ch) {
+		case '"':
+			/* Raster attributes: "Pan;Pad;Ph;Pv — fast path. */
+			last = cp;
+			while (last != end) {
+				if (*last != ';' && (*last < '0' || *last > '9'))
+					break;
+				last++;
+			}
+			/* Skip Pan */
+			strtoul(cp, &endptr, 10);
+			if (endptr == last || *endptr != ';')
+				break;
+			/* Skip Pad */
+			strtoul(endptr + 1, &endptr, 10);
+			if (endptr == last || *endptr != ';')
+				break;
+			/* Ph (width) */
+			*px_width = strtoul(endptr + 1, &endptr, 10);
+			if (endptr == last || *endptr != ';')
+				break;
+			/* Pv (height) */
+			*px_height = strtoul(endptr + 1, &endptr, 10);
+			if (*px_width > 0 && *px_height > 0) {
+				log_debug("%s: raster attributes %ux%u",
+				    __func__, *px_width, *px_height);
+				return (0);
+			}
+			break;
+		case '#':
+			/* Colour: skip parameters. */
+			while (cp != end && (*cp == ';' ||
+			    (*cp >= '0' && *cp <= '9')))
+				cp++;
+			break;
+		case '!':
+			/* Repeat: parse count, skip data char. */
+			n = 0;
+			while (cp != end && *cp >= '0' && *cp <= '9') {
+				n = n * 10 + (*cp - '0');
+				cp++;
+			}
+			if (cp != end && *cp >= 0x3f && *cp <= 0x7e) {
+				cp++;
+				dx += (n > 0) ? n : 1;
+			}
+			break;
+		case '-':
+			if (dx > max_x)
+				max_x = dx;
+			dx = 0;
+			dy += 6;
+			break;
+		case '$':
+			if (dx > max_x)
+				max_x = dx;
+			dx = 0;
+			break;
+		default:
+			if (ch >= 0x3f && ch <= 0x7e)
+				dx++;
+			break;
+		}
+	}
+
+	if (dx > max_x)
+		max_x = dx;
+
+	if (max_x == 0)
+		return (-1);
+
+	*px_width = max_x;
+	*px_height = dy + 6;
+	log_debug("%s: scanned dimensions %ux%u", __func__,
+	    *px_width, *px_height);
+	return (0);
+}
+
 struct screen *
 sixel_to_screen(struct sixel_image *si)
 {

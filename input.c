@@ -2559,8 +2559,34 @@ input_dcs_dispatch(struct input_ctx *ictx)
 		if (p2 == -1)
 			p2 = 0;
 		si = sixel_parse(buf, len, p2, w->xpixel, w->ypixel);
-		if (si != NULL)
-			screen_write_sixelimage(sctx, si, ictx->cell.cell.bg);
+		if (si != NULL) {
+			struct image *im;
+			char *raw;
+			size_t rawlen;
+
+			/*
+			 * Build the raw DCS sequence for passthrough:
+			 * ESC P 0;P2 q <data> ESC backslash.
+			 * buf starts at 'q', so include the DCS header.
+			 */
+			rawlen = 5 + len + 2; /* \033P0;Nq....\033\\ */
+			raw = xmalloc(rawlen + 16);
+			rawlen = snprintf(raw, rawlen + 16,
+			    "\033P0;%u", p2);
+			memcpy(raw + rawlen, buf, len);
+			rawlen += len;
+			raw[rawlen++] = '\033';
+			raw[rawlen++] = '\\';
+			raw[rawlen] = '\0';
+
+			im = screen_write_sixelimage(sctx, si,
+			    ictx->cell.cell.bg);
+			if (im != NULL) {
+				im->raw_data = raw;
+				im->raw_len = rawlen;
+			} else
+				free(raw);
+		}
 	}
 #endif
 

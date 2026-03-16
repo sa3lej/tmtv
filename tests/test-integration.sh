@@ -3354,11 +3354,32 @@ CONF"
 		# -------------------------------------------------------
 		# Test: SIXEL — image output doesn't crash pane
 		# -------------------------------------------------------
-		# Send a minimal 1x1 red SIXEL image to the session pane
-		# and verify the pane survives (no crash, pane still listed).
-		# The SIXEL DCS sequence: ESC P q " 1;1;1;1 # 0;2;100;0;0 !1~ - ESC backslash
-		remote_tmtv "send-keys -t main 'printf \"\\\\033Pq\\\\\"1;1;1;1#0;2;100;0;0!1~-\\\\033\\\\\\\\\\\\\\\\\"' Enter" 2>/dev/null
-		sleep 2
+		# Upload the real SIXEL fixture (Volvo 240 + Swedish flag,
+		# 5025 bytes, raster "1;1;480;288") to the test host.
+		SIXEL_FIXTURE="$(cd "$(dirname "$0")" && pwd)/sixel-volvo240.bin"
+		SIXEL_REMOTE="/tmp/sixel-volvo240.bin"
+		if [ -f "$SIXEL_FIXTURE" ]; then
+			if [ "$LOCAL" = "true" ]; then
+				cp -f "$SIXEL_FIXTURE" "$SIXEL_REMOTE" 2>/dev/null || true
+			else
+				scp -o StrictHostKeyChecking=no -P "$TEST_SSH_PORT" \
+					"$SIXEL_FIXTURE" "${TEST_SSH_USER}@${TEST_HOST}:${SIXEL_REMOTE}" \
+					>/dev/null 2>&1
+			fi
+		fi
+
+		# Verify fixture arrived
+		SIXEL_SIZE=$(remote "wc -c < $SIXEL_REMOTE 2>/dev/null" || echo "0")
+		SIXEL_SIZE=$(echo "$SIXEL_SIZE" | tr -d ' ')
+		if [ "$SIXEL_SIZE" -lt 4000 ] 2>/dev/null; then
+			fail "SIXEL: fixture upload" \
+				"sixel-volvo240.bin not on test host ($SIXEL_SIZE bytes)"
+			# Fall through — remaining SIXEL tests will fail meaningfully
+		fi
+
+		# Send the real fixture and verify the pane survives
+		remote_tmtv "send-keys -t main 'cat $SIXEL_REMOTE' Enter" 2>/dev/null
+		sleep 3
 
 		SIXEL_PANE_COUNT=$(remote_tmtv "list-panes -t main" 2>/dev/null | wc -l)
 		if [ "$SIXEL_PANE_COUNT" -ge 1 ]; then
@@ -3369,38 +3390,103 @@ CONF"
 		fi
 
 		# -------------------------------------------------------
-		# Test: SIXEL — image reaches SSH viewer
+		# Test: SIXEL — image reaches SSH viewer (live passthrough)
 		# -------------------------------------------------------
-		# Send another SIXEL image, then connect an SSH viewer and
-		# check if the DCS Pq sequence appears in the raw output.
+		# Connect SSH viewer FIRST, then send SIXEL — passthrough
+		# is live-only, it is not stored for late-join replay.
 		SIXEL_VIEWER_LOG="/tmp/sixel-viewer-$$"
-		remote_tmtv "send-keys -t main 'printf \"\\\\033Pq\\\\\"1;1;1;1#0;2;100;0;0!1~-\\\\033\\\\\\\\\\\\\\\\\"' Enter" 2>/dev/null
-		sleep 1
 
-		# Connect SSH viewer, capture raw output for a few seconds
-		remote "timeout 5 ssh -o StrictHostKeyChecking=no -tt -p $TMTV_PORT \
-			${ESC_RW_TOKEN}@127.0.0.1 2>/dev/null | cat -v > $SIXEL_VIEWER_LOG &"
+		# Start SSH viewer in background with a short timeout.
+		# The timeout command will kill it automatically.
+		remote "timeout 10 ssh -o StrictHostKeyChecking=no -tt -p $TMTV_PORT \
+			${ESC_RW_TOKEN}@127.0.0.1 2>/dev/null | cat -v > $SIXEL_VIEWER_LOG 2>/dev/null &"
+		sleep 2
+
+		# Now send SIXEL while viewer is connected
+		remote_tmtv "send-keys -t main 'cat $SIXEL_REMOTE' Enter" 2>/dev/null
+
+		# Wait for SIXEL data to flow through, then let timeout kill viewer
+		sleep 8
+
+		SIXEL_VIEWER_SIZE=$(remote "wc -c < $SIXEL_VIEWER_LOG 2>/dev/null" || echo "0")
+		SIXEL_VIEWER_SIZE=$(echo "$SIXEL_VIEWER_SIZE" | tr -d ' ')
+
+		# In cat -v output, ESC is rendered as ^[ (literal caret + bracket).
+		# The SIXEL DCS starts as: ^[P0;0q"1;1;480;288
+		# (^[P followed by optional params, then q, then raster attributes)
+		if remote "grep -q 'P0;0q' $SIXEL_VIEWER_LOG 2>/dev/null"; then
+			pass "SIXEL: image reaches SSH viewer (live passthrough)"
+		else
+			fail "SIXEL: image reaches SSH viewer (live passthrough)" \
+				"DCS ^[P0;0q not found in viewer output ($SIXEL_VIEWER_SIZE bytes)"
+		fi
+
+		# -------------------------------------------------------
+		# Test: SIXEL — raster attributes preserved in passthrough
+		# -------------------------------------------------------
+		# The fixture has raster attributes "1;1;480;288 (pixel dimensions).
+		# If present in viewer output, SIXEL is passed through byte-for-byte.
+		if remote "grep -q '1;1;480;288' $SIXEL_VIEWER_LOG 2>/dev/null"; then
+			pass "SIXEL: raster attributes preserved in passthrough"
+		else
+			fail "SIXEL: raster attributes preserved in passthrough" \
+				"raster '1;1;480;288' not found in viewer output"
+		fi
+
+		# -------------------------------------------------------
+		# Test: SIXEL — DCS terminator received
+		# -------------------------------------------------------
+		# The string terminator (ST) is ESC \ which cat -v renders
+		# as ^[\ (caret, bracket, backslash). Check the SIXEL data
+		# ends with a proper ST after the last sixel row.
+		if remote "grep -c 'P0;0q' $SIXEL_VIEWER_LOG 2>/dev/null" | grep -qE '^[1-9]'; then
+			# We confirmed DCS start exists; now check for ST.
+			# The SIXEL data ends with sixel row data then ST.
+			# Look for backslash-preceded-by-bracket pattern after sixel data.
+			SIXEL_ST_COUNT=$(remote "grep -c '^\[\\\\' $SIXEL_VIEWER_LOG 2>/dev/null" || echo "0")
+			SIXEL_ST_COUNT=$(echo "$SIXEL_ST_COUNT" | tr -d ' ')
+			if [ "$SIXEL_ST_COUNT" -gt 0 ] 2>/dev/null; then
+				pass "SIXEL: DCS terminator (ST) received"
+			else
+				# Alternative: check with python for the exact byte sequence
+				SIXEL_ST_PY=$(remote "python3 -c \"
+data = open('$SIXEL_VIEWER_LOG', 'rb').read()
+# ^[\\ in cat -v = bytes 0x5e 0x5b 0x5c
+count = data.count(b'\\x5e\\x5b\\x5c')
+print(count)
+\" 2>/dev/null" || echo "0")
+				SIXEL_ST_PY=$(echo "$SIXEL_ST_PY" | tr -d ' ')
+				if [ "$SIXEL_ST_PY" -gt 0 ] 2>/dev/null; then
+					pass "SIXEL: DCS terminator (ST) received"
+				else
+					fail "SIXEL: DCS terminator (ST) received" \
+						"ST (^[\\) not found in viewer output"
+				fi
+			fi
+		else
+			fail "SIXEL: DCS terminator (ST) received" \
+				"no DCS start found — cannot check terminator"
+		fi
+
+		# -------------------------------------------------------
+		# Test: SIXEL — cursor advances after image
+		# -------------------------------------------------------
+		# Send SIXEL followed by a unique marker. If the cursor
+		# moved past the image, the marker appears in the pane.
+		SIXEL_CURSOR_MARKER="CURSOR_SIXEL_$$"
+		remote_tmtv "send-keys -t main 'cat $SIXEL_REMOTE && echo $SIXEL_CURSOR_MARKER' Enter" 2>/dev/null
 		sleep 3
 
-		SIXEL_VIEWER=$(remote "cat $SIXEL_VIEWER_LOG 2>/dev/null" || echo "")
-		remote "rm -f $SIXEL_VIEWER_LOG" 2>/dev/null
-
-		# Look for SIXEL DCS markers in the viewer output (cat -v renders ESC as ^[)
-		# The sequence starts with ^[Pq or ^[P0;0;0q
-		if echo "$SIXEL_VIEWER" | grep -q "Pq"; then
-			pass "SIXEL: image reaches SSH viewer"
+		SIXEL_PANE_TEXT=$(remote_tmtv "capture-pane -t main -p" 2>/dev/null || echo "")
+		if echo "$SIXEL_PANE_TEXT" | grep -q "$SIXEL_CURSOR_MARKER"; then
+			pass "SIXEL: cursor advances after image"
 		else
-			# SIXEL data may be in the pane's image list but not re-rendered
-			# on late-join — still record whether the pane has content
-			SIXEL_CAPTURE=$(remote_tmtv "capture-pane -t main -p" 2>/dev/null || echo "")
-			if [ -n "$SIXEL_CAPTURE" ]; then
-				skip "SIXEL: image reaches SSH viewer" \
-					"DCS not in viewer output ($(echo "$SIXEL_VIEWER" | wc -c) bytes); pane alive"
-			else
-				fail "SIXEL: image reaches SSH viewer" \
-					"DCS not in viewer output and pane empty"
-			fi
+			fail "SIXEL: cursor advances after image" \
+				"marker '$SIXEL_CURSOR_MARKER' not in pane output"
 		fi
+
+		# Clean up viewer log
+		remote "rm -f $SIXEL_VIEWER_LOG" 2>/dev/null
 
 		# -------------------------------------------------------
 		# Test: SIXEL — allow-passthrough option works
@@ -3421,28 +3507,132 @@ CONF"
 		remote_tmtv "set -gu allow-passthrough" 2>/dev/null
 
 		# -------------------------------------------------------
-		# Test: SIXEL — SSE stream carries SIXEL data (web viewer)
+		# Test: SIXEL — SSE stream carries SIXEL DCS bytes
 		# -------------------------------------------------------
-		# Send a SIXEL image and verify the SSE stream for this
-		# session contains data (proving the pipeline to the web
-		# viewer is intact). We check that the SSE endpoint returns
-		# event data within a few seconds after SIXEL output.
+		# Send the real SIXEL fixture, capture SSE stream, decode
+		# base64 payloads, and verify the raw DCS sequence (\x1bP)
+		# and raster attributes appear in the decoded data.
 		if [ "$HAS_WEB" = "true" ] && [ -n "$ESC_TOKEN" ]; then
-			remote_tmtv "send-keys -t main 'printf \"\\\\033Pq\\\\\"1;1;1;1#0;2;100;0;0!1~-\\\\033\\\\\\\\\\\\\\\\\"' Enter" 2>/dev/null
-			sleep 2
+			remote_tmtv "send-keys -t main 'cat $SIXEL_REMOTE' Enter" 2>/dev/null
 
-			# The SSE endpoint streams msgpack-encoded PTY data
-			SSE_SIXEL=$(remote "timeout 4 curl -s -N $SSE_BASE/$ESC_TOKEN 2>/dev/null | head -c 4096" 2>/dev/null || echo "")
-			if [ -n "$SSE_SIXEL" ]; then
-				pass "SIXEL: SSE stream carries data after SIXEL output"
+			# Capture SSE for 8s — the SIXEL data is ~5KB which
+			# needs multiple SSE frames to arrive fully.
+			SIXEL_SSE_LOG="/tmp/sixel-sse-$$"
+			remote "timeout 8 curl -sN $SSE_BASE/$ESC_TOKEN > $SIXEL_SSE_LOG 2>/dev/null" || true
+
+			SIXEL_SSE_CHECK=$(remote "python3 -c \"
+import base64
+data = open('$SIXEL_SSE_LOG', 'rb').read().decode('utf-8', errors='replace')
+lines = [l for l in data.split('\\\\n') if l.startswith('data: ')]
+raw = b''
+for line in lines:
+    try:
+        raw += base64.b64decode(line[6:])
+    except Exception:
+        pass
+# Check for ESC P (DCS) in decoded data
+has_dcs = raw.find(b'\\x1bP') >= 0
+has_raster = raw.find(b'480;288') >= 0
+if has_dcs and has_raster:
+    print('OK')
+elif has_dcs:
+    print('DCS_ONLY')
+else:
+    print('NONE:%d:%d' % (len(lines), len(raw)))
+\" 2>/dev/null" || echo "ERROR")
+
+			if [ "$SIXEL_SSE_CHECK" = "OK" ]; then
+				pass "SIXEL: SSE stream carries SIXEL DCS bytes"
+			elif [ "$SIXEL_SSE_CHECK" = "DCS_ONLY" ]; then
+				pass "SIXEL: SSE stream carries SIXEL DCS bytes (DCS found, raster truncated)"
 			else
-				fail "SIXEL: SSE stream carries data after SIXEL output" \
-					"SSE returned empty for token $ESC_TOKEN"
+				fail "SIXEL: SSE stream carries SIXEL DCS bytes" \
+					"result=$SIXEL_SSE_CHECK"
 			fi
+
+			remote "rm -f $SIXEL_SSE_LOG" 2>/dev/null
 		else
-			skip "SIXEL: SSE stream carries data after SIXEL output" \
+			skip "SIXEL: SSE stream carries SIXEL DCS bytes" \
 				"web not available or no session token"
 		fi
+
+		# -------------------------------------------------------
+		# Test: SIXEL — web viewer renders image (Playwright)
+		# -------------------------------------------------------
+		# The xterm.js ImageAddon creates an xterm-image-layer
+		# canvas to render SIXEL images. Verify this canvas exists
+		# and contains non-transparent pixels after SIXEL output.
+		if [ "$HAS_PLAYWRIGHT" = "true" ] && [ "$HAS_WEB" = "true" ] && [ -n "$ESC_TOKEN" ]; then
+			# SIXEL data is already in the session from previous tests.
+			# Send one more to be sure.
+			remote_tmtv "send-keys -t main 'cat $SIXEL_REMOTE' Enter" 2>/dev/null
+			sleep 2
+
+			SIXEL_PW_RESULT=$(remote "NODE_PATH=$PW_NODE_PATH \
+				PLAYWRIGHT_BROWSERS_PATH=$PW_BROWSERS_PATH \
+				node -e \"
+const { chromium } = require('playwright');
+(async () => {
+    const browser = await chromium.launch();
+    const page = await browser.newPage();
+    try {
+        await page.goto('${WEB_PROTO}://${WEB_HOST}:${WEB_PORT}/s/esctest', {
+            waitUntil: 'domcontentloaded', timeout: 30000
+        });
+        const terminal = page.locator('.xterm-screen');
+        await terminal.first().waitFor({ state: 'visible', timeout: 30000 });
+        await page.waitForTimeout(5000);
+        await page.screenshot({ path: '/tmp/sixel-playwright-$$.png' });
+
+        const result = await page.evaluate(() => {
+            const canvas = document.querySelector('.xterm-image-layer');
+            if (!canvas) return { found: false };
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return { found: true, hasCtx: false };
+            const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            let nonZero = 0;
+            for (let i = 3; i < data.length; i += 4) {
+                if (data[i] > 0) nonZero++;
+            }
+            return { found: true, hasCtx: true, pixels: nonZero };
+        });
+
+        if (result.found && result.hasCtx && result.pixels > 0) {
+            console.log('OK:' + result.pixels);
+        } else if (result.found) {
+            console.log('EMPTY:' + JSON.stringify(result));
+        } else {
+            console.log('NO_CANVAS');
+        }
+    } catch (err) {
+        console.log('ERROR:' + err.message);
+    }
+    await browser.close();
+})();
+\" 2>/dev/null" || echo "CRASH")
+
+			if echo "$SIXEL_PW_RESULT" | grep -q "^OK:"; then
+				SIXEL_PX=$(echo "$SIXEL_PW_RESULT" | sed 's/^OK://')
+				pass "SIXEL: web viewer renders image ($SIXEL_PX pixels)"
+			elif echo "$SIXEL_PW_RESULT" | grep -q "^EMPTY"; then
+				fail "SIXEL: web viewer renders image" \
+					"image layer canvas exists but has no content: $SIXEL_PW_RESULT"
+			elif echo "$SIXEL_PW_RESULT" | grep -q "^NO_CANVAS"; then
+				fail "SIXEL: web viewer renders image" \
+					"xterm-image-layer canvas not found in DOM"
+			else
+				fail "SIXEL: web viewer renders image" \
+					"playwright error: $SIXEL_PW_RESULT"
+			fi
+
+			remote "rm -f /tmp/sixel-playwright-$$.png" 2>/dev/null
+		else
+			skip "SIXEL: web viewer renders image" \
+				"playwright not installed or web not available"
+		fi
+
+		# Clean up SIXEL fixture
+		remote "rm -f $SIXEL_REMOTE" 2>/dev/null
 
 		# -------------------------------------------------------
 		# Test: hyperlinks (OSC 8) — relayed to SSH viewer
