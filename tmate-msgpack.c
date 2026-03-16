@@ -21,11 +21,21 @@ static void on_encoder_retry_timer(__unused evutil_socket_t fd,
 }
 
 /*
- * Cap encoder buffer at 16 MB. When no SSH connection is draining the buffer
- * (ready_callback is NULL), PTY data accumulates here indefinitely and will
- * OOM the process. Drop oldest data when the cap is exceeded.
+ * Encoder buffer caps.  Two limits:
+ *
+ * DISCONNECTED_MAX (16 MB): When no SSH connection is draining the buffer
+ * (ready_callback is NULL), PTY data accumulates here and must be capped.
+ *
+ * CONNECTED_MAX (64 MB): When the SSH channel has backpressure (slow link,
+ * multiple Claude Code agents), the buffer grows while retrying.  This is a
+ * safety cap — we prefer backpressure over data loss, but 64 MB means
+ * something is seriously wrong.  Drain oldest data to survive.
+ *
+ * WATERMARK (32 MB): Log a warning so the user knows throughput is degraded.
  */
-#define ENCODER_BUFFER_MAX (16 * 1024 * 1024)
+#define ENCODER_BUFFER_MAX        (16 * 1024 * 1024)
+#define ENCODER_BUFFER_CONNECTED  (64 * 1024 * 1024)
+#define ENCODER_BUFFER_WATERMARK  (32 * 1024 * 1024)
 
 static int on_encoder_write(void *userdata, const char *buf, size_t len)
 {
@@ -34,12 +44,24 @@ static int on_encoder_write(void *userdata, const char *buf, size_t len)
 	if (evbuffer_add(encoder->buffer, buf, len) < 0)
 		tmate_fatal("Cannot buffer encoded data");
 
-	/* Prevent unbounded growth when nothing is draining the buffer */
+	size_t buflen = evbuffer_get_length(encoder->buffer);
+
 	if (!encoder->ready_callback) {
-		size_t buflen = evbuffer_get_length(encoder->buffer);
+		/* Nothing draining — hard cap */
 		if (buflen > ENCODER_BUFFER_MAX)
 			evbuffer_drain(encoder->buffer,
 			    buflen - ENCODER_BUFFER_MAX);
+	} else {
+		/* Connected but backpressured — softer cap */
+		if (buflen > ENCODER_BUFFER_CONNECTED) {
+			tmate_info("encoder buffer at %zuMB, draining excess",
+			    buflen / (1024 * 1024));
+			evbuffer_drain(encoder->buffer,
+			    buflen - ENCODER_BUFFER_CONNECTED);
+		} else if (buflen > ENCODER_BUFFER_WATERMARK) {
+			tmate_debug("encoder buffer at %zuMB (backpressure)",
+			    buflen / (1024 * 1024));
+		}
 	}
 
 	/*

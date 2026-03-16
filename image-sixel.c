@@ -449,6 +449,13 @@ sixel_scale(struct sixel_image *si, u_int xpixel, u_int ypixel, u_int ox,
 	tsx = sx * xpixel;
 	tsy = sy * ypixel;
 
+	/*
+	 * Cap total pixel count to prevent enormous allocations.
+	 * 10000 * 10000 = 100M pixels is already generous.
+	 */
+	if ((uint64_t)tsx * tsy > (uint64_t)SIXEL_WIDTH_LIMIT * SIXEL_HEIGHT_LIMIT)
+		return (NULL);
+
 	new = xcalloc (1, sizeof *si);
 	new->xpixel = xpixel;
 	new->ypixel = ypixel;

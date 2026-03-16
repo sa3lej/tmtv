@@ -59,6 +59,16 @@ static int on_ssh_channel_read(__unused ssh_session _session,
  */
 #define BACKPRESSURE_RETRY_MS 1
 
+/*
+ * SSH relay buffer watermark.  When the daemon_encoder buffer exceeds
+ * this, the SSH viewer can't keep up.  Unlike SSE, we don't drop SSH
+ * frames — data integrity matters.  Instead we log warnings and let
+ * the backpressure retry handle it.  If the buffer grows to 10x this
+ * limit, disconnect the slow viewer to protect the server.
+ */
+#define SSH_RELAY_BUFFER_WATERMARK (2 * 1024 * 1024)   /* 2 MB */
+#define SSH_RELAY_BUFFER_HOPELESS  (20 * 1024 * 1024)  /* 20 MB */
+
 static void on_backpressure_retry(__unused evutil_socket_t fd,
 				  __unused short what, void *arg)
 {
@@ -78,6 +88,20 @@ static void on_daemon_encoder_write(void *userdata, struct evbuffer *buffer)
 	struct tmate_session *session = userdata;
 	ssize_t len, written;
 	unsigned char *buf;
+
+	/* Safety check: if buffer is hopelessly large, the SSH viewer
+	 * is dead or impossibly slow — disconnect to protect server. */
+	len = evbuffer_get_length(buffer);
+	if (len > SSH_RELAY_BUFFER_HOPELESS) {
+		tmate_info("SSH relay buffer at %zdMB — viewer too slow, "
+			   "terminating session", len / (1024 * 1024));
+		request_server_termination();
+		return;
+	}
+	if (len > SSH_RELAY_BUFFER_WATERMARK) {
+		tmate_debug("SSH relay buffer at %zdKB (backpressure)",
+			    len / 1024);
+	}
 
 	for(;;) {
 		len = evbuffer_get_length(buffer);
