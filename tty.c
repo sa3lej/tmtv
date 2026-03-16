@@ -2344,19 +2344,44 @@ tty_cmd_sixelimage(struct tty *tty, const struct tty_ctx *ctx)
 	size_t			 size;
 	u_int			 cx = ctx->ocx, cy = ctx->ocy, sx, sy;
 	u_int			 i, j, x, y, rx, ry;
-	int			 fallback = 0;
-
-	if ((~tty->term->flags & TERM_SIXEL) &&
-            !tty_term_has(tty->term, TTYC_SXL))
-		fallback = 1;
-	if (tty->xpixel == 0 || tty->ypixel == 0)
-		fallback = 1;
+	int			 fallback = 0, needs_crop = 0;
 
 	sixel_size_in_cells(si, &sx, &sy);
 	log_debug("%s: image is %ux%u", __func__, sx, sy);
 	if (!tty_clamp_area(tty, ctx, cx, cy, sx, sy, &i, &j, &x, &y, &rx, &ry))
 		return;
 	log_debug("%s: clamping to %u,%u-%u,%u", __func__, i, j, rx, ry);
+
+	/* Check if the image needs cropping (overflows pane boundary). */
+	if (i != 0 || j != 0 || rx != sx || ry != sy)
+		needs_crop = 1;
+
+	/*
+	 * Passthrough: if we have raw DCS bytes and the image fits within
+	 * the pane (no cropping needed), send the original bytes directly.
+	 * This avoids lossy re-encoding and fragile terminal detection.
+	 */
+	if (im->raw_data != NULL && !needs_crop) {
+		log_debug("%s: passthrough %zu bytes", __func__, im->raw_len);
+		tty_region_off(tty);
+		tty_margin_off(tty);
+		tty_cursor(tty, x, y);
+
+		tty->flags |= TTY_NOBLOCK;
+		tty_add(tty, im->raw_data, im->raw_len);
+		tty_invalidate(tty);
+		return;
+	}
+
+	/*
+	 * Fallback: no raw data, or image needs cropping.
+	 * Use the old re-encode path.
+	 */
+	if ((~tty->term->flags & TERM_SIXEL) &&
+	    !tty_term_has(tty->term, TTYC_SXL))
+		fallback = 1;
+	if (tty->xpixel == 0 || tty->ypixel == 0)
+		fallback = 1;
 
 	if (fallback == 1) {
 		data = xstrdup(im->fallback);
@@ -2369,7 +2394,7 @@ tty_cmd_sixelimage(struct tty *tty, const struct tty_ctx *ctx)
 		data = sixel_print(new, si, &size);
 	}
 	if (data != NULL) {
-		log_debug("%s: %zu bytes: %s", __func__, size, data);
+		log_debug("%s: %zu bytes (re-encode)", __func__, size);
 		tty_region_off(tty);
 		tty_margin_off(tty);
 		tty_cursor(tty, x, y);

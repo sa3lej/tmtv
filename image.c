@@ -37,6 +37,7 @@ image_free(struct image *im)
 	TAILQ_REMOVE(&s->images, im, entry);
 	sixel_free(im->data);
 	free(im->fallback);
+	free(im->raw_data);
 	free(im);
 }
 

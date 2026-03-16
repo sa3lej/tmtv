@@ -931,6 +931,10 @@ struct image {
 	struct sixel_image	*data;
 	char			*fallback;
 
+	/* Raw SIXEL DCS bytes for passthrough (ESC P ... ESC \). */
+	char			*raw_data;
+	size_t			 raw_len;
+
 	u_int			 px;
 	u_int			 py;
 	u_int			 sx;
@@ -2997,7 +3001,7 @@ void	 recalculate_sizes(void);
 void	 recalculate_sizes_now(int);
 
 /* input.c */
-#define INPUT_BUF_DEFAULT_SIZE 1048576
+#define INPUT_BUF_DEFAULT_SIZE 8388608 /* 8MB — large SIXEL images */
 struct input_ctx *input_init(struct window_pane *, struct bufferevent *,
 	     struct colour_palette *);
 void	 input_free(struct input_ctx *);
@@ -3192,7 +3196,7 @@ void	 screen_write_setselection(struct screen_write_ctx *, const char *,
 void	 screen_write_rawstring(struct screen_write_ctx *, u_char *, u_int,
 	     int);
 #ifdef ENABLE_SIXEL
-void	 screen_write_sixelimage(struct screen_write_ctx *,
+struct image *screen_write_sixelimage(struct screen_write_ctx *,
 	     struct sixel_image *, u_int);
 #endif
 void	 screen_write_alternateon(struct screen_write_ctx *,
@@ -3673,6 +3677,12 @@ struct sixel_image *sixel_scale(struct sixel_image *, u_int, u_int, u_int,
 char		*sixel_print(struct sixel_image *, struct sixel_image *,
 		     size_t *);
 struct screen	*sixel_to_screen(struct sixel_image *);
+int		 sixel_scan_dimensions(const char *, size_t, u_int *, u_int *);
+u_int		 sixel_get_width(struct sixel_image *);
+u_int		 sixel_get_height(struct sixel_image *);
+u_int		 sixel_get_num_colours(struct sixel_image *);
+u_int		 sixel_get_colour(struct sixel_image *, u_int);
+u_int		 sixel_pixel_at(struct sixel_image *, u_int, u_int);
 #endif
 
 /* server-acl.c */
