@@ -203,6 +203,7 @@ struct tmate_session {
 	char *passphrase;
 
 	bool reconnected;
+	bool fin_sent;		/* FIN already sent; prevents double-send */
 	struct event *ev_connection_retry;
 	struct event *ev_status_timer;
 	char *last_server_ip;

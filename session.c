@@ -235,18 +235,13 @@ session_destroy(struct session *s, int notify, const char *from)
 	tmate_info("Session closed");
 
 	/*
-	 * Only send FIN to the server when the last tmux session is
-	 * destroyed.  Killing a secondary session (e.g. "kill-session
-	 * -t cool-session") must not tear down the SSH tunnel — other
-	 * sessions are still alive and viewers are still connected via
-	 * the current token.
-	 *
-	 * The session has already been removed from the global sessions
-	 * tree (RB_REMOVE above), so an empty tree means this was the
-	 * last one.
+	 * FIN is sent from the server exit path (server_send_exit /
+	 * server_start cleanup), not from session_destroy.  This
+	 * decouples individual session lifecycle from the SSH tunnel:
+	 * killing session 2 of 3 no longer risks sending a spurious
+	 * FIN.  When the last session is destroyed, exit-empty causes
+	 * the server to exit, which sends FIN via the shutdown path.
 	 */
-	if (RB_EMPTY(&sessions))
-		tmate_write_fin(&tmate_session);
 #endif
 }
 
