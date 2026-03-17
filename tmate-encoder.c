@@ -422,6 +422,10 @@ void tmate_write_copy_mode(struct tmate_session *session,
 
 void tmate_write_fin(struct tmate_session *session)
 {
+	if (session->fin_sent)
+		return;
+	session->fin_sent = true;
+
 	PACK(session);
 	pack(array, 1);
 	pack(int, TMATE_OUT_FIN);
@@ -524,8 +528,10 @@ static void tmate_send_session_snapshot(struct tmate_session *session,
 	 */
 	if (!s)
 		s = RB_MIN(sessions, &sessions);
-	if (!s)
-		tmate_fatal("no session?");
+	if (!s) {
+		tmate_debug("snapshot requested with no sessions, skipping");
+		return;
+	}
 
 	num_panes = 0;
 	RB_FOREACH(wl, winlinks, &s->windows) {

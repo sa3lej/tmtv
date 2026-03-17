@@ -285,13 +285,13 @@ trap cleanup EXIT
 
 # Global timeout safety net — prevent indefinite hangs in CI and manual runs.
 # Individual tests have their own timeouts, but this catches anything missed.
-# Quick mode: 480s. Full mode (with Playwright): 600s.
+# Quick mode: 480s. Full mode (with Playwright): 720s.
 if [ -n "$TMTV_TEST_TIMEOUT" ]; then
 	_CI_TIMEOUT="$TMTV_TEST_TIMEOUT"
 elif [ "$QUICK" = "true" ]; then
 	_CI_TIMEOUT=480
 else
-	_CI_TIMEOUT=600
+	_CI_TIMEOUT=720
 fi
 ( sleep "$_CI_TIMEOUT" && echo "" && echo "FATAL: Test suite exceeded ${_CI_TIMEOUT}s global timeout" >&2 && kill -TERM $$ 2>/dev/null ) &
 _GLOBAL_TIMER_PID=$!

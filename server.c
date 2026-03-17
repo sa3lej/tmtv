@@ -276,6 +276,11 @@ server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
 	job_kill_all();
 	status_prompt_save_history();
 
+#ifdef TMATE
+	/* Send FIN on the exit-empty / normal shutdown path too. */
+	tmate_write_fin(&tmate_session);
+#endif
+
 	exit(0);
 }
 
@@ -343,6 +348,10 @@ server_send_exit(void)
 		}
 		c->session = NULL;
 	}
+
+#ifdef TMATE
+	tmate_write_fin(&tmate_session);
+#endif
 
 	RB_FOREACH_SAFE(s, sessions, &sessions, s1)
 		session_destroy(s, 1, __func__);

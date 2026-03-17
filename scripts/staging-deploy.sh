@@ -374,11 +374,11 @@ else
         exit 5
     fi
 
-    # Upload latest test scripts (auto-discover all test-*.sh and test-*.js).
-    # The integration test script locates .js helpers via $(dirname "$0"), so
-    # all files must land in the same directory (/tmp/).
+    # Upload latest test scripts (auto-discover all test-*.sh, test-*.js,
+    # and test fixture files like *.bin).  The integration test script
+    # locates helpers via $(dirname "$0"), so all files land in /tmp/.
     UPLOAD_COUNT=0
-    for f in "$REPO_ROOT"/tests/test-*.sh "$REPO_ROOT"/tests/test-*.js; do
+    for f in "$REPO_ROOT"/tests/test-*.sh "$REPO_ROOT"/tests/test-*.js "$REPO_ROOT"/tests/*.bin; do
         [ -f "$f" ] || continue
         _basename="$(basename "$f")"
         scp $SCP_OPTS "$f" "${STAGING_TARGET}:/tmp/${_basename}" || {

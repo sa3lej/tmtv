@@ -89,11 +89,11 @@ else
     fail "tmux.c calls tmate_catch_sigsegv" "missing tmate_catch_sigsegv call"
 fi
 
-# Check session.c has tmate_write_fin on destroy
-if grep -q 'tmate_write_fin' "$SRCDIR/session.c" 2>/dev/null; then
-    pass "session.c calls tmate_write_fin"
+# Check server.c has tmate_write_fin for shutdown (moved from session.c)
+if grep -q 'tmate_write_fin' "$SRCDIR/server.c" 2>/dev/null; then
+    pass "server.c calls tmate_write_fin on shutdown"
 else
-    fail "session.c calls tmate_write_fin" "missing tmate_write_fin call"
+    fail "server.c calls tmate_write_fin on shutdown" "missing tmate_write_fin call"
 fi
 
 echo ""
