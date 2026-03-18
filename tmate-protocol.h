@@ -60,6 +60,7 @@ enum tmate_daemon_out_msg_types {
 	TMATE_OUT_VIEWER_COUNT,
 	TMATE_OUT_SESSION_MODE,
 	TMATE_OUT_INPUT_MODE,
+	TMATE_OUT_CLIPBOARD,
 };
 
 /*
@@ -86,6 +87,7 @@ enum tmate_daemon_out_msg_types {
 [TMATE_OUT_VIEWER_COUNT, int: ssh_rw, int: ssh_ro, int: web]
 [TMATE_OUT_SESSION_MODE, boolean: readonly, boolean: web_input_enabled]
 [TMATE_OUT_INPUT_MODE, boolean: enabled, boolean: mirror]
+[TMATE_OUT_CLIPBOARD, binary: data]
 */
 
 enum tmate_daemon_in_msg_types {
@@ -100,6 +102,7 @@ enum tmate_daemon_in_msg_types {
 	TMATE_IN_USER_JOIN,
 	TMATE_IN_USER_LEAVE,
 	TMATE_IN_USER_INPUT,
+	TMATE_IN_CLIPBOARD,
 };
 
 /*
@@ -114,6 +117,7 @@ enum tmate_daemon_in_msg_types {
 [TMATE_IN_USER_JOIN, int: user_id, string: username, boolean: readonly, string: type]
 [TMATE_IN_USER_LEAVE, int: user_id]
 [TMATE_IN_USER_INPUT, int: user_id, int: pane_id, uint64: keycode]
+[TMATE_IN_CLIPBOARD, binary: data]
 */
 
 #endif

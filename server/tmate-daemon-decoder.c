@@ -905,6 +905,57 @@ static void tmate_snapshot(__unused struct tmate_session *session,
 	 */
 }
 
+/*
+ * Handle clipboard data from the host.
+ * Phase 1: Deliver to RW SSH viewers via OSC 52 (direct tty write).
+ * Phase 3: Web RW viewers get a separate broadcast (see below).
+ *
+ * RO viewers (both SSH and web) are excluded — they never receive
+ * clipboard data. The vpty client is also excluded.
+ */
+static void tmate_clipboard(struct tmate_session *session,
+			     struct tmate_unpacker *uk)
+{
+	struct client *c;
+	const char *buf;
+	size_t len;
+	char *data_copy;
+
+	unpack_buffer(uk, &buf, &len);
+
+	if (len == 0 || len > 100 * 1024)
+		return;
+
+	tmate_debug("Clipboard from host: %zu bytes", len);
+
+	/* Update the server's paste buffer (suppresses re-broadcast) */
+	data_copy = xmalloc(len);
+	memcpy(data_copy, buf, len);
+	paste_add_from_remote(data_copy, len);
+
+	/*
+	 * Emit OSC 52 directly to each RW SSH viewer's tty.
+	 * Skip RO viewers and the virtual PTY client.
+	 */
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (c == NULL)
+			continue;
+		if (!(c->flags & CLIENT_IDENTIFIED))
+			continue;
+		if (c->flags & CLIENT_READONLY)
+			continue;
+		if (c->flags & CLIENT_TMATE_VPTY)
+			continue;
+		if (c->tty.term == NULL)
+			continue;
+		tty_set_selection(&c->tty, "", buf, len);
+	}
+
+	/* Broadcast to RW web viewers only */
+	if (tmate_has_websocket())
+		tmate_send_clipboard_to_rw_web(session, buf, len);
+}
+
 static void tmate_input_mode(struct tmate_session *session,
 			     struct tmate_unpacker *uk)
 {
@@ -975,6 +1026,7 @@ void tmate_dispatch_daemon_message(struct tmate_session *session,
 	dispatch(TMATE_OUT_EXEC_CMD,		tmate_exec_cmd);
 	dispatch(TMATE_OUT_UNAME,		tmate_uname);
 	dispatch(TMATE_OUT_INPUT_MODE,		tmate_input_mode);
+	dispatch(TMATE_OUT_CLIPBOARD,		tmate_clipboard);
 	default: tmate_fatal("Bad message type: %d", cmd);
 	}
 }
