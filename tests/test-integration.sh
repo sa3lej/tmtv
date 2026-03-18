@@ -819,6 +819,29 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: tmux coexistence — stock tmux works inside tmtv
+# -------------------------------------------------------
+# Regression test: tmtv used to set TMUX=<socket_path>,pid,idx which
+# caused stock tmux to connect to the tmtv socket and crash with
+# "server exited unexpectedly". Now TMUX=tmtv,pid,idx (no real path).
+if command -v tmux >/dev/null 2>&1; then
+	remote "tmux kill-server 2>/dev/null" || true
+	sleep 1
+	remote_tmtv "send-keys -t main 'tmux new-session -d -s tmux_coexist_$$' Enter"
+	sleep 3
+	TMUX_LS=$(remote "TERM=xterm-256color tmux ls 2>&1" || echo "")
+	if echo "$TMUX_LS" | grep -q "tmux_coexist_$$"; then
+		pass "tmux coexistence (stock tmux works inside tmtv)"
+	else
+		fail "tmux coexistence (stock tmux works inside tmtv)" \
+			"tmux ls: $TMUX_LS"
+	fi
+	remote "tmux kill-server 2>/dev/null" || true
+else
+	skip "tmux coexistence (tmux not installed)"
+fi
+
+# -------------------------------------------------------
 # Test: SSH RW — create pane via tmux split-window command
 # -------------------------------------------------------
 # Re-read RW token after stabilization in case client reconnected

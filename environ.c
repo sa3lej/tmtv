@@ -281,8 +281,19 @@ environ_for_session(struct session *s, int no_TERM)
 		idx = s->id;
 	else
 		idx = -1;
-	environ_set(env, "TMUX", 0, "%s,%ld,%d", socket_path, (long)getpid(),
+	/*
+	 * TMTV carries the real socket info (path,pid,idx).
+	 *
+	 * TMUX is set to a non-path value so tools that check $TMUX
+	 * (shell prompts, vim, powerline) still detect a multiplexer,
+	 * but stock tmux won't try to connect to our socket and crash.
+	 * The path is deliberately absent — tmux parses $TMUX as
+	 * "path,pid,idx" and connects to path, which would hit the
+	 * tmtv server and die with "server exited unexpectedly".
+	 */
+	environ_set(env, "TMTV", 0, "%s,%ld,%d", socket_path, (long)getpid(),
 	    idx);
+	environ_set(env, "TMUX", 0, "tmtv,%ld,%d", (long)getpid(), idx);
 	environ_set(env, "TMUX_PROGRAM", 0, "%s", "tmtv");
 
 	return (env);
