@@ -132,6 +132,9 @@ set -g tmtv-session-name demo
 # Password — required for all viewers (SSH and web)
 set -g tmtv-session-password secret
 
+# Shared clipboard (on by default) — RO viewers excluded
+set -g tmtv-shared-clipboard on
+
 # Record terminal to asciinema .cast file
 set -g tmtv-recording on
 
@@ -149,6 +152,7 @@ Options can also be toggled at runtime:
 ```sh
 tmtv set -g tmtv-web-sharing on    # enable web sharing mid-session
 tmtv set -g tmtv-web-input off     # disable web input mid-session
+tmtv set -g tmtv-shared-clipboard off  # disable clipboard sharing mid-session
 ```
 
 ## GitHub Action

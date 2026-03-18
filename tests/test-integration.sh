@@ -764,6 +764,61 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: SSH RW — paste (burst input) arrives at host
+# -------------------------------------------------------
+# This tests the bracket paste / assume-paste path where text is sent
+# all at once rather than character-by-character. Regression test for
+# window_pane_paste() silently dropping data on the server (wp->fd == -1).
+RW_TOKEN=$(read_rw_token_stable "$TESTID")
+TOKEN=$(read_token "$TESTID")
+if [ -n "$TOKEN" ]; then
+	if [ -n "$RW_TOKEN" ]; then
+		remote_tmtv "select-pane -t main.0"
+		sleep 0.5
+
+		PASTE_MARKER="PASTE$$"
+		remote "cat > /tmp/tmtv-paste-test.exp << 'EXPECT'
+set timeout 15
+spawn ssh -o StrictHostKeyChecking=no -p \$TMTV_PORT TOKEN@127.0.0.1
+expect {
+    timeout { puts stderr {SSH connect timeout}; exit 1 }
+    eof { puts stderr {SSH connect failed}; exit 1 }
+    -re {.+} {}
+}
+sleep 2
+# Send the entire string at once (burst) — no per-char delay.
+# This triggers bracket paste or assume-paste on the server.
+send -- \"echo MARKER\r\"
+sleep 3
+catch close
+catch wait
+EXPECT
+sed -i \"s/TOKEN/$RW_TOKEN/;s/MARKER/$PASTE_MARKER/;s/\\\$TMTV_PORT/$TMTV_PORT/\" /tmp/tmtv-paste-test.exp
+timeout 30 expect /tmp/tmtv-paste-test.exp >/dev/null 2>&1
+rm -f /tmp/tmtv-paste-test.exp"
+		sleep 1
+
+		PASTE_FOUND=false
+		for p in $(remote_tmtv "list-panes -t main -F '#{pane_id}'" 2>/dev/null); do
+			CAP=$(remote_tmtv "capture-pane -t $p -p" 2>/dev/null || echo "")
+			if echo "$CAP" | grep -q "$PASTE_MARKER"; then
+				PASTE_FOUND=true
+				break
+			fi
+		done
+		if [ "$PASTE_FOUND" = "true" ]; then
+			pass "SSH RW paste (burst input)"
+		else
+			fail "SSH RW paste (burst input)" "marker '$PASTE_MARKER' not in any pane"
+		fi
+	else
+		skip "SSH RW paste (burst input) (RW token not found)"
+	fi
+else
+	skip "SSH RW paste (burst input) (no token)"
+fi
+
+# -------------------------------------------------------
 # Test: SSH RW — create pane via tmux split-window command
 # -------------------------------------------------------
 # Re-read RW token after stabilization in case client reconnected
