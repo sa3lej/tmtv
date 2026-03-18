@@ -104,6 +104,8 @@ extern void tmate_sync_copy_mode(struct tmate_session *session,
 				 struct window_pane *wp);
 extern void tmate_write_copy_mode(struct tmate_session *session,
 				  struct window_pane *wp, const char *str);
+extern void tmate_clipboard_broadcast(struct tmate_session *session,
+				       const char *data, size_t len);
 extern void tmate_write_fin(struct tmate_session *session);
 extern void tmate_send_reconnection_state(struct tmate_session *session);
 extern void tmate_expand_status(void);

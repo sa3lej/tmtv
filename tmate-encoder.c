@@ -420,6 +420,27 @@ void tmate_write_copy_mode(struct tmate_session *session,
 	pack(string, str);
 }
 
+/*
+ * Broadcast clipboard data to the server for relay to RW viewers.
+ * Called from paste_add() when tmtv-shared-clipboard is on.
+ * Capped at 100KB to avoid flooding the SSH channel.
+ */
+#define TMATE_CLIPBOARD_MAX (100 * 1024)
+
+void tmate_clipboard_broadcast(struct tmate_session *session,
+			       const char *data, size_t len)
+{
+	PACK(session);
+
+	if (len == 0 || len > TMATE_CLIPBOARD_MAX)
+		return;
+
+	pack(array, 2);
+	pack(int, TMATE_OUT_CLIPBOARD);
+	pack(str, len);
+	pack(str_body, data, len);
+}
+
 void tmate_write_fin(struct tmate_session *session)
 {
 	if (session->fin_sent)

@@ -273,6 +273,23 @@ int tmate_intercept_input_key(int pid, key_code key)
 	return 0;
 }
 
+/*
+ * Phase 2: Send clipboard data from a viewer back to the host.
+ * Called from paste_add() on the server side when a viewer copies text.
+ */
+#define TMATE_CLIPBOARD_MAX (100 * 1024)
+
+void tmate_send_clipboard_to_host(const char *data, size_t len)
+{
+	if (len == 0 || len > TMATE_CLIPBOARD_MAX)
+		return;
+
+	pack(array, 2);
+	pack(int, TMATE_IN_CLIPBOARD);
+	pack(str, len);
+	pack(str_body, data, len);
+}
+
 void tmate_send_user_join(struct tmate_session *session,
 			  int user_id, const char *name,
 			  bool readonly, const char *type)

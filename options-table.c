@@ -497,6 +497,15 @@ const struct options_table_entry options_table[] = {
 		  "paste buffers with an escape sequence ('on' only)."
 	},
 
+	{ .name = "tmtv-shared-clipboard",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_num = 1,
+	  .text = "Whether to broadcast clipboard changes to connected "
+		  "viewers. When enabled, copy operations on the host are "
+		  "synced to RW SSH viewers and web viewers."
+	},
+
 	{ .name = "terminal-overrides",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,

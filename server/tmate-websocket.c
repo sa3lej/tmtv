@@ -899,6 +899,42 @@ void sse_broadcast_screen_dump(struct tmate_session *session)
 	}
 }
 
+/*
+ * Broadcast clipboard data to RW web viewers only.
+ * RO web viewers are excluded. Called from tmate_clipboard() in the decoder.
+ */
+void tmate_send_clipboard_to_rw_web(struct tmate_session *session,
+				     const char *data, size_t len)
+{
+	struct ws_client *wc, *tmp;
+	msgpack_sbuffer sbuf;
+	msgpack_packer pk;
+
+	if (!tmate_has_websocket())
+		return;
+
+	msgpack_sbuffer_init(&sbuf);
+	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_OUT_CLIPBOARD);
+	msgpack_pack_str(&pk, len);
+	msgpack_pack_str_body(&pk, data, len);
+
+	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp) {
+		if (!wc->handshake_done || wc->is_post)
+			continue;
+		if (wc->readonly)
+			continue;
+		sse_send_data(wc->bev,
+		    (unsigned char *)sbuf.data, sbuf.size);
+	}
+
+	msgpack_sbuffer_destroy(&sbuf);
+}
+
 static void sse_broadcast_sync_layout(struct tmate_session *session)
 {
 	struct ws_client *wc;
@@ -952,7 +988,8 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 
 	/* Check for "/input" suffix and strip it for token matching.
 	 * Note: is_post is set by the HTTP method check in sse_do_handshake,
-	 * not here — a GET to /token/input should not enter POST handling. */
+	 * not here — a GET to /token/input should not enter POST handling.
+	 * Clipboard POST also uses /input endpoint with X-Tmtv-Clipboard header. */
 	size_t input_suffix_len = 0;
 	{
 		const char *qmark = memchr(path, '?', path_len);
@@ -1321,7 +1358,8 @@ static int sse_do_handshake(struct ws_client *wc)
 	}
 
 	if (is_post_method) {
-		/* CSRF protection: require X-Tmtv-Input header.
+		/* CSRF protection: require X-Tmtv-Input header (for /input)
+		 * or X-Tmtv-Clipboard header (for /clipboard).
 		 * This forces a CORS preflight for cross-origin requests,
 		 * preventing malicious websites from injecting keystrokes.
 		 * Parse headers line-by-line to avoid matching the header
@@ -1343,6 +1381,11 @@ static int sse_do_handshake(struct ws_client *wc)
 				if ((size_t)(eol - line) >= 13 &&
 				    strncasecmp(line, "x-tmtv-input:", 13) == 0) {
 					has_csrf = 1;
+				}
+				if ((size_t)(eol - line) >= 17 &&
+				    strncasecmp(line, "x-tmtv-clipboard:", 17) == 0) {
+					has_csrf = 1;
+					wc->is_clipboard_post = true;
 				}
 				if ((size_t)(eol - line) >= 17 &&
 				    strncasecmp(line, "x-tmtv-viewer-id:", 17) == 0) {
@@ -2130,6 +2173,68 @@ static void handle_post_input(struct ws_client *wc)
 	ws_client_reset_for_keepalive(wc);
 }
 
+/*
+ * Handle POST /token/clipboard: read body as clipboard text and
+ * forward to the host via TMATE_IN_CLIPBOARD. Respond with 200.
+ */
+#define POST_CLIPBOARD_MAX_BODY (100 * 1024)
+
+static void handle_post_clipboard(struct ws_client *wc)
+{
+	struct tmate_session *session = wc->session;
+	struct evbuffer *input = bufferevent_get_input(wc->bev);
+	size_t len = evbuffer_get_length(input);
+	unsigned char *data;
+	char *data_copy;
+
+	static const char *ok_response =
+		"HTTP/1.1 200 OK\r\n"
+		"Content-Length: 0\r\n"
+		"Connection: close\r\n"
+		"\r\n";
+
+	static const char *forbidden =
+		"HTTP/1.1 403 Forbidden\r\n"
+		"Content-Length: 0\r\n"
+		"Connection: close\r\n"
+		"\r\n";
+
+	/* Reject if web input is not enabled or viewer is RO */
+	if (!session->web_input_enabled || wc->readonly) {
+		bufferevent_write(wc->bev, forbidden, strlen(forbidden));
+		ws_client_free_after_flush(wc);
+		return;
+	}
+
+	if (len == 0)
+		return; /* need more data */
+
+	if (len > POST_CLIPBOARD_MAX_BODY)
+		len = POST_CLIPBOARD_MAX_BODY;
+
+	data = evbuffer_pullup(input, len);
+	if (!data) {
+		bufferevent_write(wc->bev, ok_response, strlen(ok_response));
+		ws_client_free_after_flush(wc);
+		return;
+	}
+
+	tmate_debug("POST clipboard: %zu bytes from web viewer", len);
+
+	/* Update local paste buffer and send to host */
+	data_copy = xmalloc(len);
+	memcpy(data_copy, data, len);
+	paste_add_from_remote(data_copy, len);
+
+	/* Explicitly send to host (paste_add_from_remote suppresses
+	 * the automatic send via the re-broadcast guard) */
+	tmate_send_clipboard_to_host((const char *)data, len);
+
+	evbuffer_drain(input, len);
+	bufferevent_write(wc->bev, ok_response, strlen(ok_response));
+	ws_client_free_after_flush(wc);
+}
+
 static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 {
 	struct ws_client *wc = arg;
@@ -2145,14 +2250,20 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 			return; /* need more data */
 
 		if (ret == 2) {
-			/* POST input — handle the body */
+			/* POST input or clipboard — handle the body */
 			wc->handshake_done = true;
 			/* Keep a short timeout for POST body (prevent slowloris) */
 			struct timeval post_tv = { 5, 0 };
 			bufferevent_set_timeouts(wc->bev, &post_tv, NULL);
-			tmate_debug("POST input request from %s viewer",
-				    wc->readonly ? "RO" : "RW");
-			handle_post_input(wc);
+			if (wc->is_clipboard_post) {
+				tmate_debug("POST clipboard from %s viewer",
+					    wc->readonly ? "RO" : "RW");
+				handle_post_clipboard(wc);
+			} else {
+				tmate_debug("POST input from %s viewer",
+					    wc->readonly ? "RO" : "RW");
+				handle_post_input(wc);
+			}
 			return;
 		}
 
@@ -2210,7 +2321,10 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 
 	/* POST clients: handle remaining body data */
 	if (wc->is_post) {
-		handle_post_input(wc);
+		if (wc->is_clipboard_post)
+			handle_post_clipboard(wc);
+		else
+			handle_post_input(wc);
 		return;
 	}
 
@@ -2707,6 +2821,15 @@ void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 		    cmd == TMATE_OUT_SNAPSHOT)
 			return;
 	}
+
+	/*
+	 * Clipboard is handled separately by tmate_send_clipboard_to_rw_web()
+	 * which filters out RO viewers. Skip it from the generic broadcast.
+	 */
+	if (uk->argc > 0 &&
+	    uk->argv[0].type == MSGPACK_OBJECT_POSITIVE_INTEGER &&
+	    (int)uk->argv[0].via.u64 == TMATE_OUT_CLIPBOARD)
+		return;
 
 	/* Pack the message into a temporary buffer and send directly
 	 * to all SSE clients, bypassing the encoder event mechanism

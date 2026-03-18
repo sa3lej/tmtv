@@ -23,6 +23,7 @@
   var OUT_FIN           = 8;
   var OUT_VIEWER_COUNT  = 14;
   var OUT_SESSION_MODE  = 15;
+  var OUT_CLIPBOARD     = 17;
 
   var FONT = '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", monospace';
   /* macOS Terminal.app "Clear Dark" palette */
@@ -450,6 +451,21 @@
     });
   }
 
+  /* --- Shared clipboard: web viewer -> host --- */
+  function sendClipboardToHost(text) {
+    if (sessionReadonly || !webInputEnabled) return;
+    if (!text || text.length > 102400) return;
+    var url = sseUrl.replace(/\?.*$/, '') + '/input';
+    var hdrs = { 'Content-Type': 'text/plain', 'X-Tmtv-Clipboard': '1' };
+    if (myViewerId) hdrs['X-Tmtv-Viewer-Id'] = String(myViewerId);
+    if (sessionPassword) hdrs['X-Tmtv-Password'] = sessionPassword;
+    fetch(url, {
+      method: 'POST',
+      body: text,
+      headers: hdrs
+    }).catch(function() {});
+  }
+
   /* Filter out terminal query responses that xterm.js generates
    * automatically (DA, DSR, OSC 10/11, DECRPM, CPR, etc.).
    * These must never be sent back to the server as user input. */
@@ -682,6 +698,8 @@
       fallbackCopy(sel);
       showCopyToast();
     }
+    /* Phase 3: sync selection to host clipboard */
+    sendClipboardToHost(sel);
   }
 
   function fallbackCopy(text) {
@@ -920,6 +938,24 @@
             myViewerId = inner[3];
           updateSessionModeBadge();
           if (!sessionReadonly && webInputEnabled) enableTerminalInput();
+        }
+        break;
+      case OUT_CLIPBOARD:
+        if (inner.length >= 2 && inner[1]) {
+          var clipData = toStr(inner[1]);
+          if (clipData.length > 0 && clipData.length <= 102400) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(clipData).then(function() {
+                showClipboardToast(clipData);
+              }).catch(function() {
+                fallbackCopy(clipData);
+                showClipboardToast(clipData);
+              });
+            } else {
+              fallbackCopy(clipData);
+              showClipboardToast(clipData);
+            }
+          }
         }
         break;
       case OUT_FIN:

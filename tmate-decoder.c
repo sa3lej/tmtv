@@ -230,6 +230,29 @@ static void handle_user_input(__unused struct tmate_session *session,
 	tmtv_input_on_user_input(user_id, pane_id, key);
 }
 
+/*
+ * Phase 2: Receive clipboard data from a viewer via the server.
+ * Update the host's paste buffer without re-broadcasting.
+ */
+static void handle_clipboard(__unused struct tmate_session *session,
+			     struct tmate_unpacker *uk)
+{
+	const char *buf;
+	size_t len;
+	char *data;
+
+	unpack_buffer(uk, &buf, &len);
+
+	if (len == 0 || len > 100 * 1024)
+		return;
+
+	tmate_debug("Clipboard from viewer: %zu bytes", len);
+
+	data = xmalloc(len);
+	memcpy(data, buf, len);
+	paste_add_from_remote(data, len);
+}
+
 static void handle_ready(struct tmate_session *session,
 			 __unused struct tmate_unpacker *uk)
 {
@@ -269,6 +292,7 @@ void tmate_dispatch_slave_message(struct tmate_session *session,
 	dispatch(TMATE_IN_USER_JOIN,		handle_user_join);
 	dispatch(TMATE_IN_USER_LEAVE,		handle_user_leave);
 	dispatch(TMATE_IN_USER_INPUT,		handle_user_input);
+	dispatch(TMATE_IN_CLIPBOARD,		handle_clipboard);
 	default: tmate_info("Bad message type: %d", cmd);
 	}
 }

@@ -313,7 +313,7 @@ static int extract_token_from_http(const char *buf, size_t buflen,
 			tok_len = qmark - tok_start;
 	}
 
-	/* Strip "/input" suffix (POST input endpoint) */
+	/* Strip "/input" suffix (POST input and clipboard endpoints) */
 	if (tok_len > 6 && memcmp(tok_start + tok_len - 6, "/input", 6) == 0)
 		tok_len -= 6;
 
@@ -374,7 +374,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 			"HTTP/1.1 204 No Content\r\n"
 			"Access-Control-Allow-Origin: *\r\n"
 			"Access-Control-Allow-Methods: GET, HEAD, POST\r\n"
-			"Access-Control-Allow-Headers: Content-Type, X-Tmtv-Input, X-Tmtv-Viewer-Id\r\n"
+			"Access-Control-Allow-Headers: Content-Type, X-Tmtv-Input, X-Tmtv-Clipboard, X-Tmtv-Viewer-Id\r\n"
 			"Access-Control-Max-Age: 86400\r\n"
 			"Content-Length: 0\r\n"
 			"\r\n";
@@ -437,7 +437,6 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 
 	ipc_fd = sse_registry_lookup(reg, token);
 	if (ipc_fd < 0) {
-		tmate_debug("SSE mux: token %.4s... not found in registry", token);
 		static const char *not_found =
 			"HTTP/1.1 404 Not Found\r\n"
 			"Content-Length: 0\r\n"

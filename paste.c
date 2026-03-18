@@ -24,6 +24,18 @@
 
 #include "tmux.h"
 
+#ifdef TMATE_SERVER_BUILD
+#include "tmate.h"
+#else
+#include "tmate.h"
+#endif
+
+/*
+ * Clipboard broadcast guard — prevents re-broadcast loops when clipboard
+ * data arrives from the remote side and triggers paste_add() locally.
+ */
+static int clipboard_from_remote;
+
 /*
  * Set of paste buffers. Note that paste buffer data is not necessarily a C
  * string!
@@ -210,6 +222,34 @@ paste_add(const char *prefix, char *data, size_t size)
 	RB_INSERT(paste_time_tree, &paste_by_time, pb);
 
 	notify_paste_buffer(pb->name, 0);
+
+	/*
+	 * Shared clipboard: broadcast to remote side.
+	 * Host -> server (TMATE_OUT_CLIPBOARD)
+	 * Server -> host (TMATE_IN_CLIPBOARD)
+	 * Skip if this paste_add was triggered by incoming clipboard
+	 * from the remote side (prevents infinite loop).
+	 */
+	if (!clipboard_from_remote) {
+#ifndef TMATE_SERVER_BUILD
+		/* Host side: broadcast to server if option is on */
+		{
+			struct options_entry *o;
+			int enabled = 1; /* default on */
+			o = options_get(global_options,
+			    "tmtv-shared-clipboard");
+			if (o != NULL)
+				enabled = options_get_number(global_options,
+				    "tmtv-shared-clipboard");
+			if (enabled)
+				tmate_clipboard_broadcast(&tmate_session,
+				    pb->data, pb->size);
+		}
+#else
+		/* Server side: send to host */
+		tmate_send_clipboard_to_host(pb->data, pb->size);
+#endif
+	}
 }
 
 /* Rename a paste buffer. */
@@ -321,6 +361,18 @@ paste_replace(struct paste_buffer *pb, char *data, size_t size)
 	pb->size = size;
 
 	notify_paste_buffer(pb->name, 0);
+}
+
+/*
+ * Add a paste buffer from a remote clipboard message.
+ * Sets the re-broadcast guard to prevent sending it back.
+ */
+void
+paste_add_from_remote(char *data, size_t size)
+{
+	clipboard_from_remote = 1;
+	paste_add(NULL, data, size);
+	clipboard_from_remote = 0;
 }
 
 /* Convert start of buffer into a nice string. */

@@ -120,6 +120,9 @@ extern void tmate_format(struct format_tree *ft);
 extern void tmate_send_client_ready(void);
 extern void tmate_send_mc_obj(msgpack_object *obj);
 
+/* tmate-daemon-encoder.c — shared clipboard (Phase 2: viewer -> host) */
+extern void tmate_send_clipboard_to_host(const char *data, size_t len);
+
 /* tmate-daemon-encoder.c — input socket interception */
 extern int tmate_intercept_input_key(int pid, key_code key);
 
@@ -252,7 +255,8 @@ struct ws_client {
 	struct bufferevent *bev;
 	bool handshake_done;
 	bool readonly;        /* true if connected via RO token */
-	bool is_post;         /* true if this is a POST /input request */
+	bool is_post;         /* true if this is a POST /input or /clipboard request */
+	bool is_clipboard_post; /* true if POST /clipboard (vs /input) */
 	int viewer_id;        /* unique ID for input socket events */
 	time_t connect_time;  /* when handshake completed (for watermark grace) */
 	TAILQ_ENTRY(ws_client) entry;
@@ -362,6 +366,8 @@ extern void tmate_notify_client_join(struct tmate_session *s, struct client *c);
 extern void tmate_notify_client_left(struct tmate_session *s, struct client *c);
 extern void tmate_broadcast_viewer_count(struct tmate_session *session);
 extern void sse_broadcast_screen_dump(struct tmate_session *session);
+extern void tmate_send_clipboard_to_rw_web(struct tmate_session *session,
+					    const char *data, size_t len);
 
 extern void tmate_send_websocket_daemon_msg(struct tmate_session *session,
 					struct tmate_unpacker *uk);
