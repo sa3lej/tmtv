@@ -232,7 +232,13 @@ static void handle_user_input(__unused struct tmate_session *session,
 
 /*
  * Phase 2: Receive clipboard data from a viewer via the server.
- * Update the host's paste buffer without re-broadcasting.
+ * Update the host's paste buffer and system clipboard.
+ *
+ * paste_add_from_remote() sets the tmux paste buffer but does NOT
+ * emit OSC 52 to the terminal.  Without the OSC 52, the host's
+ * system clipboard stays stale and Shift+Insert / middle-click
+ * paste returns old or garbage data.  Write OSC 52 to every
+ * attached client's tty so the terminal updates its selection.
  */
 static void handle_clipboard(__unused struct tmate_session *session,
 			     struct tmate_unpacker *uk)
@@ -240,6 +246,7 @@ static void handle_clipboard(__unused struct tmate_session *session,
 	const char *buf;
 	size_t len;
 	char *data;
+	struct client *c;
 
 	unpack_buffer(uk, &buf, &len);
 
@@ -251,6 +258,12 @@ static void handle_clipboard(__unused struct tmate_session *session,
 	data = xmalloc(len);
 	memcpy(data, buf, len);
 	paste_add_from_remote(data, len);
+
+	/* Update the host's system clipboard via OSC 52 */
+	TAILQ_FOREACH(c, &clients, entry) {
+		if (c->flags & CLIENT_IDENTIFIED && c->tty.term != NULL)
+			tty_set_selection(&c->tty, "", buf, len);
+	}
 }
 
 static void handle_ready(struct tmate_session *session,

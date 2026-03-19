@@ -281,6 +281,10 @@ server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
 	tmate_write_fin(&tmate_session);
 #endif
 
+	/* Clean up the control socket so we don't leave stale files. */
+	if (socket_path != NULL)
+		unlink(socket_path);
+
 	exit(0);
 }
 
