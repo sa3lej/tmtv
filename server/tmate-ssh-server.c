@@ -803,19 +803,22 @@ static void parse_ipc_line(struct sse_registry *reg, char *line,
 	}
 }
 
-static void handle_ipc_registrations(struct sse_registry *reg,
-				     int ipc_fd, pid_t pid)
+/*
+ * Returns 0 on success, -1 on EOF/error (caller must remove ipc_children
+ * entry and close the fd — we must not close it here, because the caller
+ * needs to remove the entry from the poll set to avoid a POLLNVAL spin).
+ */
+static int handle_ipc_registrations(struct sse_registry *reg,
+				    int ipc_fd, pid_t pid)
 {
 	char buf[1024];
 	int n;
 
 	n = sse_ipc_read_msg(ipc_fd, buf, sizeof(buf));
 	if (n <= 0) {
-		/* Daemon closed the IPC fd — clean up */
-		tmate_debug("IPC fd=%d closed by child", ipc_fd);
-		sse_registry_remove_by_fd(reg, ipc_fd);
-		close(ipc_fd);
-		return;
+		tmate_debug("IPC fd=%d closed by child pid=%d", ipc_fd,
+			    (int)pid);
+		return -1;
 	}
 
 	/*
@@ -830,6 +833,7 @@ static void handle_ipc_registrations(struct sse_registry *reg,
 		parse_ipc_line(reg, line, ipc_fd, pid);
 		line = strtok_r(NULL, "\n", &saveptr);
 	}
+	return 0;
 }
 
 /*
@@ -972,20 +976,27 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 		 * so tokens are available before SSE connections arrive) */
 		for (int i = 0; i < num_ipc_children; i++) {
 			int pidx = ipc_poll_start + i;
-			if (pfds[pidx].revents & (POLLIN | POLLHUP | POLLERR)) {
-				if (pfds[pidx].revents & POLLIN) {
-					handle_ipc_registrations(&sse_reg,
-						ipc_children[i].ipc_fd,
-						ipc_children[i].pid);
-				} else {
-					/* HUP/ERR: child gone */
-					sse_registry_remove_by_fd(&sse_reg,
-						ipc_children[i].ipc_fd);
-					close(ipc_children[i].ipc_fd);
-					ipc_children[i] = ipc_children[num_ipc_children - 1];
-					num_ipc_children--;
-					i--; /* re-check swapped entry */
-				}
+			int need_remove = 0;
+
+			if (pfds[pidx].revents & POLLNVAL) {
+				/* Stale fd — already closed, just remove */
+				need_remove = 1;
+			} else if (pfds[pidx].revents & POLLIN) {
+				if (handle_ipc_registrations(&sse_reg,
+				    ipc_children[i].ipc_fd,
+				    ipc_children[i].pid) < 0)
+					need_remove = 1;
+			} else if (pfds[pidx].revents & (POLLHUP | POLLERR)) {
+				need_remove = 1;
+			}
+
+			if (need_remove) {
+				sse_registry_remove_by_fd(&sse_reg,
+					ipc_children[i].ipc_fd);
+				close(ipc_children[i].ipc_fd);
+				ipc_children[i] = ipc_children[num_ipc_children - 1];
+				num_ipc_children--;
+				i--; /* re-check swapped entry */
 			}
 		}
 

@@ -349,6 +349,90 @@ else
          "inode1=$INODE1 inode2=$INODE2 (should differ)"
 fi
 
+# --- IPC POLLNVAL spin protection (tmtv-server parent CPU fix) ---
+# When a child daemon exits, its IPC fd becomes stale. The parent's poll
+# loop must catch POLLNVAL and remove the entry to avoid a 100% CPU spin.
+
+if grep -q 'POLLNVAL' ../server/tmate-ssh-server.c; then
+    pass "ipc spin: POLLNVAL handled in poll loop"
+else
+    fail "ipc spin: POLLNVAL handled in poll loop" \
+         "POLLNVAL not found — stale IPC fds will cause CPU spin"
+fi
+
+# handle_ipc_registrations must return a status, not close the fd internally
+if grep -q 'static int handle_ipc_registrations' ../server/tmate-ssh-server.c; then
+    pass "ipc spin: handle_ipc_registrations returns status"
+else
+    fail "ipc spin: handle_ipc_registrations returns status" \
+         "function should return int, not void — caller must handle fd cleanup"
+fi
+
+# The caller must check the return value and remove the ipc_children entry
+if grep -A5 'handle_ipc_registrations' ../server/tmate-ssh-server.c | grep -q 'need_remove'; then
+    pass "ipc spin: caller removes entry on EOF"
+else
+    fail "ipc spin: caller removes entry on EOF" \
+         "caller must remove ipc_children entry when handler returns -1"
+fi
+
+# --- Client socket cleanup on exit ---
+# The tmtv client server should unlink its control socket on clean exit.
+
+TMTV="${TMTV:-../tmtv}"
+SOCK="/tmp/tmtv-test-cleanup-$$"
+
+# Start a detached session with an explicit socket path
+if "$TMTV" -S "$SOCK" new-session -d -s cleanup-test 2>/dev/null; then
+    # Socket must exist while server is running
+    if [ -S "$SOCK" ]; then
+        pass "socket cleanup: socket exists while server running"
+    else
+        fail "socket cleanup: socket exists while server running" \
+             "socket $SOCK not found"
+    fi
+
+    # Kill the server — socket should be removed
+    "$TMTV" -S "$SOCK" kill-server 2>/dev/null || true
+    sleep 0.3
+
+    if [ ! -e "$SOCK" ]; then
+        pass "socket cleanup: socket removed after kill-server"
+    else
+        fail "socket cleanup: socket removed after kill-server" \
+             "stale socket $SOCK still exists"
+        rm -f "$SOCK"
+    fi
+else
+    fail "socket cleanup: start detached session" "new-session failed"
+fi
+
+# Test SIGTERM cleanup too
+SOCK2="/tmp/tmtv-test-cleanup2-$$"
+if "$TMTV" -S "$SOCK2" new-session -d -s cleanup-term 2>/dev/null; then
+    # Get the server PID
+    SERVER_PID=$("$TMTV" -S "$SOCK2" display-message -p '#{pid}' 2>/dev/null)
+    if [ -n "$SERVER_PID" ] && [ -S "$SOCK2" ]; then
+        kill "$SERVER_PID" 2>/dev/null || true
+        sleep 0.3
+
+        if [ ! -e "$SOCK2" ]; then
+            pass "socket cleanup: socket removed after SIGTERM"
+        else
+            fail "socket cleanup: socket removed after SIGTERM" \
+                 "stale socket $SOCK2 still exists"
+            rm -f "$SOCK2"
+        fi
+    else
+        fail "socket cleanup: get server PID" \
+             "PID=$SERVER_PID, socket exists=$([ -S "$SOCK2" ] && echo yes || echo no)"
+        "$TMTV" -S "$SOCK2" kill-server 2>/dev/null || true
+        rm -f "$SOCK2"
+    fi
+else
+    fail "socket cleanup: start detached session (SIGTERM)" "new-session failed"
+fi
+
 echo ""
 echo "$((PASSED + FAILED)) tests: $PASSED passed, $FAILED failed"
 exit $FAILED

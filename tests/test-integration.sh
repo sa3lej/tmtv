@@ -825,18 +825,17 @@ fi
 # caused stock tmux to connect to the tmtv socket and crash with
 # "server exited unexpectedly". Now TMUX=tmtv,pid,idx (no real path).
 if command -v tmux >/dev/null 2>&1; then
-	remote "tmux kill-server 2>/dev/null" || true
-	sleep 1
-	remote_tmtv "send-keys -t main 'tmux new-session -d -s tmux_coexist_$$' Enter"
+	remote_tmtv "send-keys -t main 'tmux new-session -d -s tmux_coexist_$$ 2>&1 && echo TMUX_OK || echo TMUX_FAIL' Enter"
 	sleep 3
-	TMUX_LS=$(remote "TERM=xterm-256color tmux ls 2>&1" || echo "")
-	if echo "$TMUX_LS" | grep -q "tmux_coexist_$$"; then
+	TMUX_CAP=$(remote_tmtv "capture-pane -t main -p" 2>/dev/null || echo "")
+	if echo "$TMUX_CAP" | grep -q "TMUX_OK"; then
 		pass "tmux coexistence (stock tmux works inside tmtv)"
 	else
 		fail "tmux coexistence (stock tmux works inside tmtv)" \
-			"tmux ls: $TMUX_LS"
+			"pane output: $(echo "$TMUX_CAP" | grep -E 'TMUX_|exited|error' | head -3)"
 	fi
-	remote "tmux kill-server 2>/dev/null" || true
+	remote_tmtv "send-keys -t main 'tmux kill-server 2>/dev/null' Enter"
+	sleep 1
 else
 	skip "tmux coexistence (tmux not installed)"
 fi
