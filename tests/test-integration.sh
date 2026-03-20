@@ -289,7 +289,7 @@ trap cleanup EXIT
 if [ -n "$TMTV_TEST_TIMEOUT" ]; then
 	_CI_TIMEOUT="$TMTV_TEST_TIMEOUT"
 elif [ "$QUICK" = "true" ]; then
-	_CI_TIMEOUT=480
+	_CI_TIMEOUT=600
 else
 	_CI_TIMEOUT=720
 fi
@@ -1574,6 +1574,119 @@ remote "TERM=xterm-256color $REMOTE_TMTV -S $AUTONUM_SOCK1 kill-server" 2>/dev/n
 remote "TERM=xterm-256color $REMOTE_TMTV -S $AUTONUM_SOCK2 kill-server" 2>/dev/null || true
 remote "rm -f $AUTONUM_CONF1 $AUTONUM_CONF2 $AUTONUM_SOCK1 $AUTONUM_SOCK2" 2>/dev/null || true
 teardown_section "autonum"
+
+# -------------------------------------------------------
+# Test: concurrent named session race (TOCTOU via symlinkat)
+# -------------------------------------------------------
+# Start 5 sessions simultaneously with the same tmtv-session-name.
+# The server uses symlinkat() as the authoritative check — EEXIST
+# means try next suffix. This test proves no two sessions can claim
+# the same name even under parallel registration.
+RACE_NAME="race$TESTID"
+RACE_COUNT=5
+RACE_CONF="/tmp/.tmtv-test-race-$TESTID.conf"
+remote "cat > $RACE_CONF << CONF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
+set -g tmtv-session-name \"$RACE_NAME\"
+set -g tmtv-web-sharing on
+CONF"
+
+# Launch all 5 sessions in parallel (separate sockets, same config)
+_race_socks=""
+for _ri in $(seq 1 $RACE_COUNT); do
+	_rsock="/tmp/tmtv-race${_ri}-$$"
+	_race_socks="$_race_socks $_rsock"
+	remote "TERM=xterm-256color nohup script -qc '$REMOTE_TMTV -S $_rsock -f $RACE_CONF new-session -d -s race${_ri}' /dev/null </dev/null >/dev/null 2>&1 &"
+done
+
+# Wait for all sessions to register (up to 20s)
+_race_found=0
+for _rw in $(seq 1 20); do
+	sleep 1
+	_race_found=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" \
+		| grep -cE "^${RACE_NAME}(-[0-9]+)?$" || echo "0")
+	[ "$_race_found" -ge "$RACE_COUNT" ] && break
+done
+
+if [ "$_race_found" -ge "$RACE_COUNT" ]; then
+	pass "concurrent race: all $RACE_COUNT sessions registered"
+
+	# Verify all names are unique (no duplicates)
+	_race_names=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" \
+		| grep -E "^${RACE_NAME}(-[0-9]+)?$" | sort)
+	_race_unique=$(echo "$_race_names" | sort -u | wc -l)
+	_race_total=$(echo "$_race_names" | wc -l)
+	if [ "$_race_unique" -eq "$_race_total" ]; then
+		pass "concurrent race: all names unique (no collisions)"
+	else
+		fail "concurrent race: all names unique" \
+			"$_race_total names but only $_race_unique unique: $_race_names"
+	fi
+
+	# Verify all tokens are distinct
+	_race_tokens=""
+	_tok_dups=0
+	for _rn in $_race_names; do
+		_rt=$(remote "readlink $SESSIONS_DIR/$_rn 2>/dev/null" || echo "")
+		if echo "$_race_tokens" | grep -qF "$_rt"; then
+			_tok_dups=$((_tok_dups + 1))
+		fi
+		_race_tokens="$_race_tokens $_rt"
+	done
+	if [ "$_tok_dups" -eq 0 ]; then
+		pass "concurrent race: all tokens distinct"
+	else
+		fail "concurrent race: all tokens distinct" \
+			"$_tok_dups duplicate tokens found"
+	fi
+
+	# Verify expected naming pattern: race<id>, race<id>-1, ..., race<id>-4
+	_has_base=$(echo "$_race_names" | grep -cE "^${RACE_NAME}$" || echo "0")
+	_has_suffixed=$(echo "$_race_names" | grep -cE "^${RACE_NAME}-[0-9]+$" || echo "0")
+	if [ "$_has_base" -eq 1 ] && [ "$_has_suffixed" -eq $(($RACE_COUNT - 1)) ]; then
+		pass "concurrent race: naming pattern correct (base + suffixes)"
+	else
+		fail "concurrent race: naming pattern" \
+			"base=$_has_base suffixed=$_has_suffixed names: $_race_names"
+	fi
+
+	# Verify all sessions respond on SSE (are actually alive)
+	_race_alive=0
+	for _rn in $_race_names; do
+		_rt=$(remote "readlink $SESSIONS_DIR/$_rn 2>/dev/null" || echo "")
+		if [ -n "$_rt" ]; then
+			_rsse=$(curl -s -m 3 -o /dev/null -w "%{http_code}" \
+				"$SSE_BASE/$_rt" 2>/dev/null) || true
+			[ "$_rsse" = "200" ] && _race_alive=$((_race_alive + 1))
+		fi
+	done
+	if [ "$_race_alive" -eq "$RACE_COUNT" ]; then
+		pass "concurrent race: all $RACE_COUNT sessions alive on SSE"
+	else
+		fail "concurrent race: sessions alive on SSE" \
+			"only $_race_alive/$RACE_COUNT respond"
+	fi
+else
+	fail "concurrent race: all $RACE_COUNT sessions registered" \
+		"only $_race_found found after 20s"
+	skip "concurrent race: all names unique"
+	skip "concurrent race: all tokens distinct"
+	skip "concurrent race: naming pattern correct"
+	skip "concurrent race: all sessions alive on SSE"
+fi
+
+# Cleanup race sessions
+for _rsock in $_race_socks; do
+	remote "TERM=xterm-256color $REMOTE_TMTV -S $_rsock kill-server" 2>/dev/null || true
+done
+remote "rm -f $RACE_CONF" 2>/dev/null || true
+for _rsock in $_race_socks; do
+	remote "rm -f $_rsock" 2>/dev/null || true
+done
+teardown_section "race"
 
 # -------------------------------------------------------
 # Test: tmtv reattach after detach works
@@ -4627,7 +4740,7 @@ if [ -n "$CLIP_TOKEN" ]; then
 	# Test 3: Web POST /clipboard reaches host paste buffer (Phase 3)
 	# -------------------------------------------------------
 	if [ "$HAS_WEB" = "true" ]; then
-		_post_url="$SSE_BASE/$CLIP_TOKEN/clipboard"
+		_post_url="$SSE_BASE/$CLIP_TOKEN/input"
 		_post_resp=$(curl -sk -X POST \
 			-H "X-Tmtv-Clipboard: 1" \
 			-H "Content-Type: text/plain" \
@@ -4667,7 +4780,7 @@ if [ -n "$CLIP_TOKEN" ]; then
 				-H "Content-Type: text/plain" \
 				-d "ro-should-fail" \
 				-o /dev/null -w "%{http_code}" \
-				"$SSE_BASE/$CLIP_RO_TOKEN/clipboard" 2>/dev/null || echo "000")
+				"$SSE_BASE/$CLIP_RO_TOKEN/input" 2>/dev/null || echo "000")
 
 			if [ "$_post_ro_resp" = "403" ]; then
 				pass "Phase 3: RO POST /clipboard rejected (403)"
@@ -4690,7 +4803,7 @@ if [ -n "$CLIP_TOKEN" ]; then
 			-H "Content-Type: text/plain" \
 			-d "should-fail-no-csrf" \
 			-o /dev/null -w "%{http_code}" \
-			"$SSE_BASE/$CLIP_TOKEN/clipboard" 2>/dev/null || echo "000")
+			"$SSE_BASE/$CLIP_TOKEN/input" 2>/dev/null || echo "000")
 
 		if [ "$_no_csrf_resp" = "400" ]; then
 			pass "Phase 3: POST /clipboard without CSRF header rejected (400)"

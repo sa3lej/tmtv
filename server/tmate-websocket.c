@@ -1327,6 +1327,7 @@ static int sse_do_handshake(struct ws_client *wc)
 			}
 			if (!tmate_check_session_password(pw)) {
 				tmate_debug("SSE wrong password");
+				explicit_bzero(pw, strlen(pw));
 				free(pw);
 				evbuffer_drain(input,
 					(header_end - data) + 4);
@@ -1336,6 +1337,7 @@ static int sse_do_handshake(struct ws_client *wc)
 				return -1;
 			}
 			tmate_debug("SSE password accepted");
+			explicit_bzero(pw, strlen(pw));
 			free(pw);
 		}
 	}

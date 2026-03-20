@@ -261,6 +261,7 @@ bool tmate_check_session_password(const char *password)
 	/* Constant-time comparison to prevent timing attacks */
 	int result = CRYPTO_memcmp(stored + TMATE_PW_SALT_LEN,
 				   candidate_key, TMATE_PW_KEY_LEN);
+	explicit_bzero(candidate_key, TMATE_PW_KEY_LEN);
 	free(candidate_key);
 	return (result == 0);
 }
