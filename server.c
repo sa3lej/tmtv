@@ -248,6 +248,14 @@ server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
 		c = server_client_create(fd);
 	else
 		options_set_number(global_options, "exit-empty", 0);
+#ifdef TMATE
+	/*
+	 * In tmate mode, the server must persist even when the last session
+	 * is destroyed, so clients can reattach with a new session while
+	 * keeping the same SSH tunnel.
+	 */
+	options_set_number(global_options, "exit-empty", 0);
+#endif
 
 	if (lockfd >= 0) {
 		unlink(lockfile);

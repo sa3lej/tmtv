@@ -1932,8 +1932,12 @@ screen_write_collect_end(struct screen_write_ctx *ctx)
 	}
 
 #ifdef ENABLE_SIXEL
-	if (image_check_area(s, s->cx, s->cy, ci->used, 1) && ctx->wp != NULL)
-		ctx->wp->flags |= PANE_REDRAW;
+	/*
+	 * Don't delete SIXEL images when text is written to overlapping cells.
+	 * Per the SIXEL spec, images occupy a separate pixel layer that persists
+	 * independently of the text grid. tty_draw_images() re-emits surviving
+	 * images on every full pane redraw.
+	 */
 #endif
 
 	grid_view_set_cells(s->grid, s->cx, s->cy, &ci->gc, cl->data + ci->x,
@@ -2407,6 +2411,8 @@ screen_write_sixelimage(struct screen_write_ctx *ctx, struct sixel_image *si,
 	screen_write_collect_flush(ctx, 0, __func__);
 
 	screen_write_initctx(ctx, &ttyctx, 0);
+	if (image_check_area(s, s->cx, s->cy, x, y) && ctx->wp != NULL)
+		ctx->wp->flags |= PANE_REDRAW;
 	im = image_store(s, si);
 	ttyctx.ptr = im;
 

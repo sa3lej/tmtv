@@ -207,6 +207,7 @@ struct tmate_session {
 	bool reconnected;
 	bool fin_sent;		/* FIN already sent; prevents double-send */
 	struct event *ev_connection_retry;
+	int reconnect_attempts;		/* consecutive retry count */
 	struct event *ev_status_timer;
 	char *last_server_ip;
 	char *reconnection_data;

@@ -178,27 +178,55 @@ See [action-tmtv](https://github.com/sa3lej/action-tmtv) for full docs.
 
 ## How it works
 
+```mermaid
+flowchart LR
+    subgraph Host
+        A["tmtv client<br/>(terminal + tmux 3.6a)"]
+    end
+
+    subgraph Server["tmtv-server (relay)"]
+        B["SSH relay<br/>+ auth"]
+        C["SSE stream<br/>(port 4002)"]
+    end
+
+    subgraph Viewers
+        D["SSH viewer<br/>(read-write)"]
+        E["SSH viewer<br/>(read-only)"]
+        F["Browser<br/>(xterm.js)"]
+    end
+
+    A -- "SSH tunnel" --> B
+    B -- "SSH" --> D
+    B -- "SSH" --> E
+    C -- "HTTP/SSE" --> F
+
+    style A fill:#0c0c16,stroke:#6c9efc,color:#6c9efc
+    style B fill:#0c0c16,stroke:#6c9efc,color:#6c9efc
+    style C fill:#0c0c16,stroke:#c084fc,color:#c084fc
+    style D fill:#0c0c16,stroke:#3ddc84,color:#3ddc84
+    style E fill:#0c0c16,stroke:#3ddc84,color:#3ddc84
+    style F fill:#0c0c16,stroke:#c084fc,color:#c084fc
 ```
-  You (tmtv client)          tmtv-server            Viewers
- +-----------------+      +----------------+     +------------+
- | terminal + tmux |--SSH-->| relay + auth  |--SSH-->| read/write |
- |                 |      |                |     +------------+
- |                 |      |    SSE stream  |--HTTP->| browser    |
- +-----------------+      +----------------+     +------------+
-```
+
+The host runs `tmtv`, which opens an SSH tunnel to the relay server. The server authenticates viewers and forwards the terminal stream — read-write or read-only over SSH, view-only over SSE to browsers. Web viewers see exactly what SSH viewers see, rendered by xterm.js.
 
 ## Features
 
 - Full tmux 3.6a terminal multiplexer
 - Instant session sharing over SSH with read-write and read-only tokens
 - Password-protected sessions — viewers must authenticate before connecting
+- Shared clipboard — copy on host, paste on viewers (and vice versa)
 - Web viewer with xterm.js and WebGL rendering
 - Interactive web input — RW web viewers can type when enabled by the host
 - Late-join support — browser viewers see current terminal state
 - Server-Sent Events streaming — works through proxies and firewalls
 - Live viewer counts — `S:N W:N` in tmux status bar and web titlebar
 - Dynamic page titles — link previews show the session name (Slack, Discord, iMessage)
+- SIXEL graphics support — images display in terminal and stream to viewers
+- Session recording to asciinema `.cast` format
+- Per-user input API for multiplayer terminal apps
 - Read-only viewers can disconnect cleanly with Ctrl-Q
+- Automatic reconnection with exponential backoff on server disconnect
 - Zero config — just type `tmtv`
 
 ## Format variables
@@ -275,21 +303,43 @@ docker compose up -d
 
 That's it — SSH sharing on port 2222. Clients connect via `ssh TOKEN@your.host.com -p 2222`.
 
-For production with TLS and web viewing:
+For production with TLS and web viewing, add Caddy as a reverse proxy:
 
 ```sh
 TMTV_DOMAIN=share.example.com docker compose --profile tls up -d
 ```
 
-SSH host keys persist in a Docker volume. Configuration via environment variables:
+This starts both `tmtv-server` and a Caddy instance with automatic TLS. SSH host keys and TLS certificates persist in Docker volumes.
+
+#### Environment variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `TMTV_DOMAIN` | Hostname in connection strings | `localhost` |
-| `TMTV_SSH_PORT` | SSH listen port | `2222` |
+| `TMTV_DOMAIN` | Hostname in connection strings and TLS cert | `localhost` |
+| `TMTV_SSH_PORT` | SSH listen port (host-side) | `2222` |
 | `TMTV_IDLE_TIMEOUT` | Disconnect idle sessions (seconds) | `3600` |
 | `TMTV_MAX_LIFETIME` | Maximum session lifetime (seconds) | `86400` |
 | `TMTV_LOG_LEVEL` | Log verbosity (0=quiet, 1+=verbose) | `0` |
+
+#### Docker architecture
+
+```mermaid
+flowchart LR
+    subgraph Docker
+        S["tmtv-server<br/>:2222 SSH<br/>:4002 SSE"]
+        C["Caddy<br/>:80/:443"]
+    end
+
+    Client -- "SSH :2222" --> S
+    Browser -- "HTTPS :443" --> C
+    C -- "/ws/* (SSE proxy)" --> S
+    C -- "/healthz" --> S
+
+    style S fill:#0c0c16,stroke:#6c9efc,color:#6c9efc
+    style C fill:#0c0c16,stroke:#3ddc84,color:#3ddc84
+```
+
+The Caddy profile is optional — without it, only SSH sharing is available. The SSE port (4002) is internal only; Caddy proxies it at `/ws/*`.
 
 ### Building from source
 
@@ -317,6 +367,17 @@ sh autogen.sh
 ./configure --enable-utf8proc --enable-sixel
 make -j$(sysctl -n hw.ncpu)
 ```
+
+#### Static Linux binaries (Docker)
+
+Build fully static musl binaries for any architecture:
+
+```sh
+docker build --build-arg PLATFORM=amd64 --output type=local,dest=./out .
+# Produces: out/build/tmtv and out/build/tmtv-server (zero dependencies)
+```
+
+Supported platforms: `amd64`, `arm64`, `arm/v7`, `arm/v6`, `i386`.
 
 ### Server setup
 
@@ -366,7 +427,7 @@ That's it — SSH sharing works now. Clients connect via `ssh TOKEN@your.host.co
 
 #### 4. Web viewer (optional)
 
-Web sharing is off by default. If you want browser-based viewing, add `-z 4002` to the server flags to enable SSE streaming on a local port, then put Caddy in front for TLS and routing.
+Web sharing requires an SSE endpoint and a reverse proxy with TLS. Add `-z 4002` to the server flags to enable SSE streaming, then put [Caddy](https://caddyserver.com) in front for TLS and routing.
 
 A production-ready Caddyfile is provided in [`deploy/Caddyfile`](deploy/Caddyfile). It includes Caddy templates for dynamic page titles (link previews show the session name in Slack, Discord, iMessage). Replace `tmtv.se` with your hostname.
 
@@ -389,7 +450,7 @@ Open these ports:
 | 22 | TCP | tmtv SSH (clients and viewers) |
 | 443 | TCP | HTTPS (web viewer and landing page) |
 
-Port 4002 (SSE) should NOT be exposed — the reverse proxy handles it.
+Port 4002 (SSE) should NOT be exposed — Caddy handles it internally.
 
 #### Server flags
 
@@ -444,32 +505,23 @@ cd tests && make all
 
 #### Integration tests
 
-Run against a live tmtv-server to test SSH, SSE, web viewer, pane operations, viewer counts, web input, and more (77+ tests).
+Run against a live tmtv-server (180+ tests covering SSH, SSE, web viewer, pane operations, viewer counts, web input, SIXEL, clipboard, flood resilience, and more).
 
-**Build machine requirements** (where you run the tests):
-- `ssh`, `curl`
-- `npx` + Playwright for visual tests: `npm i -D playwright && npx playwright install chromium`
-
-**Test machine requirements** (the server):
-- `tmtv-server` running via systemd
-- `tmtv` client binary
-- Caddy (or any reverse proxy) on port 8080 with `/s/*` → viewer page and `/ws/*` → SSE proxy
-- `expect` for SSH RW/RO tests: `apt install expect`
-- SSH host keys in `/root/keys/`
+Tests run ON the test server in local mode:
 
 ```sh
-# Deploy and test
-make && \
-  scp tmtv-server root@<host>:/usr/local/bin/tmtv-server && \
-  scp tmtv root@<host>:/root/tmtv && \
-  ssh root@<host> systemctl restart tmtv-server && \
-  cd tests && TEST_HOST=<host> make integration
+# Quick mode (skips slow tests)
+TEST_HOST=localhost WEB_HOST=staging.tmtv.se sh test-integration.sh --quick
+
+# Full suite
+TEST_HOST=localhost WEB_HOST=staging.tmtv.se sh test-integration.sh
 ```
 
-Quick mode skips slow tests (Playwright, web sharing toggle):
+Or use the deploy script:
 
 ```sh
-TEST_HOST=<host> sh test-integration.sh --quick
+scripts/staging-deploy.sh --test-only          # quick mode
+scripts/staging-deploy.sh --test-only --full-tests  # full suite
 ```
 
 ## License

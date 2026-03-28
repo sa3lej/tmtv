@@ -18,6 +18,7 @@
 
 #define TMATE_DNS_RETRY_TIMEOUT 2
 #define TMATE_RECONNECT_RETRY_TIMEOUT 2
+#define TMATE_RECONNECT_MAX_TIMEOUT 30
 
 struct tmate_session tmate_session;
 int tmate_foreground;
@@ -138,6 +139,7 @@ static void __tmate_session_init(struct tmate_session *session,
 
 	session->min_sx = -1;
 	session->min_sy = -1;
+	session->reconnect_attempts = 0;
 
 	TAILQ_INIT(&session->clients);
 	TAILQ_INIT(&session->env);
@@ -297,29 +299,41 @@ static void on_reconnect_retry(__unused evutil_socket_t fd, __unused short what,
 
 void tmate_reconnect_session(struct tmate_session *session, const char *message)
 {
-	/*
-	 * We no longer have an SSH connection. Time to reconnect.
-	 * We'll reuse some of the session information if we can,
-	 * and we'll try to reconnect to the same server if possible,
-	 * to avoid an SSH connection string change.
-	 */
-	struct timeval tv = { .tv_sec = TMATE_RECONNECT_RETRY_TIMEOUT, .tv_usec = 0 };
+	int delay, i;
+	struct timeval tv;
 
 	if (session->ev_connection_retry)
 		return;
 
-	session->ev_connection_retry = evtimer_new(session->ev_base, on_reconnect_retry, session);
+	session->reconnect_attempts++;
+
+	/*
+	 * Exponential backoff: 2, 4, 8, 16, 30, 30, 30, ...
+	 */
+	delay = TMATE_RECONNECT_RETRY_TIMEOUT;
+	for (i = 1; i < session->reconnect_attempts; i++) {
+		delay *= 2;
+		if (delay >= TMATE_RECONNECT_MAX_TIMEOUT) {
+			delay = TMATE_RECONNECT_MAX_TIMEOUT;
+			break;
+		}
+	}
+
+	tv.tv_sec = delay;
+	tv.tv_usec = 0;
+
+	session->ev_connection_retry = evtimer_new(session->ev_base,
+	    on_reconnect_retry, session);
 	if (!session->ev_connection_retry)
 		tmate_fatal("out of memory");
 	evtimer_add(session->ev_connection_retry, &tv);
 
 	if (message && !tmate_foreground)
-		tmate_status_message("Reconnecting... (%s)", message);
+		tmate_status_message("Reconnecting in %ds... (%s)", delay,
+		    message);
 	else
-		tmate_status_message("Reconnecting...");
+		tmate_status_message("Reconnecting in %ds... (attempt %d)",
+		    delay, session->reconnect_attempts);
 
-	/*
-	 * This says that we'll need to send a snapshot of the current state.
-	 */
 	session->reconnected = true;
 }

@@ -779,14 +779,14 @@ const struct options_table_entry options_table[] = {
 	{ .name = "set-titles",
 	  .type = OPTIONS_TABLE_FLAG,
 	  .scope = OPTIONS_TABLE_SESSION,
-	  .default_num = 0,
+	  .default_num = 1,
 	  .text = "Whether to set the terminal title, if supported."
 	},
 
 	{ .name = "set-titles-string",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SESSION,
-	  .default_str = "#S:#I:#W - \"#T\" #{session_alerts}",
+	  .default_str = "🌐 #S:#I:#W - \"#T\" #{session_alerts}",
 	  .text = "Format of the terminal title to set."
 	},
 
