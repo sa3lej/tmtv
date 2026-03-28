@@ -525,6 +525,7 @@ SSH_NEW_CHANNEL:
 			ssh_set_blocking(session, 1);
 
 			client->state = SSH_READY;
+			client->tmate_session->reconnect_attempts = 0;
 
 			if (client->tmate_session->reconnected)
 				tmate_send_reconnection_state(client->tmate_session);

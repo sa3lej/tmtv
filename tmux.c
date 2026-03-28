@@ -698,14 +698,16 @@ main(int argc, char **argv)
 			flags |= CLIENT_DEFAULTSOCKET;
 			if (argc == 0) {
 				/*
-				 * Bare `tmtv` with a live detached session:
-				 * reattach instead of creating a new session.
-				 * Synthesize "attach" as the command so the
-				 * server runs attach-session, not new-session.
+				 * Bare `tmtv` with a live server: use
+				 * new-session -A to attach if a session exists,
+				 * or create one if the server persisted with
+				 * zero sessions (exit-empty off).
 				 */
-				static char *attach_argv[] = { "attach", NULL };
-				argc = 1;
-				argv = attach_argv;
+				static char *reattach_argv[] = {
+				    "new-session", "-A", NULL
+				};
+				argc = 2;
+				argv = reattach_argv;
 			}
 		} else if (argc == 0) {
 			/* Bare `tmtv`, no live server: new PID-based socket */
