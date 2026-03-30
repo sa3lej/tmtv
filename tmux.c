@@ -699,9 +699,8 @@ main(int argc, char **argv)
 			if (argc == 0) {
 				/*
 				 * Bare `tmtv` with a live server: use
-				 * new-session -A to attach if a session exists,
-				 * or create one if the server persisted with
-				 * zero sessions (exit-empty off).
+				 * new-session -A to attach if a session exists
+				 * or create a new one.
 				 */
 				static char *reattach_argv[] = {
 				    "new-session", "-A", NULL

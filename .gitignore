@@ -42,3 +42,9 @@ STAGING.md
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+# Agent and orchestration files — managed locally, not committed
+CLAUDE.md
+AGENTS.md
+AGENT_INSTRUCTIONS.md
+.beads/
+.sejd/

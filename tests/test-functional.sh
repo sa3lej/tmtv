@@ -94,9 +94,8 @@ fi
 # Test 8: Can kill session
 "$TMTV" -S "$SOCKET" kill-session -t test 2>/dev/null
 OUTPUT=$("$TMTV" -S "$SOCKET" list-sessions 2>/dev/null || echo "no sessions")
-# With exit-empty=0 (server persistence), the server stays alive after
-# killing the last session. The session "test" must be gone — either
-# "no sessions", "no server", or server alive without "test" listed.
+# With exit-empty on, the server exits after the last session is killed.
+# The session "test" must be gone — either "no sessions" or "no server".
 if echo "$OUTPUT" | grep -q "no sessions\|no server"; then
     pass "kill session"
 elif ! echo "$OUTPUT" | grep -q "test"; then

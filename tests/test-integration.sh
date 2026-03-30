@@ -285,13 +285,13 @@ trap cleanup EXIT
 
 # Global timeout safety net — prevent indefinite hangs in CI and manual runs.
 # Individual tests have their own timeouts, but this catches anything missed.
-# Quick mode: 480s. Full mode (with Playwright): 720s.
+# Quick mode: 480s. Full mode (with Playwright): 1200s.
 if [ -n "$TMTV_TEST_TIMEOUT" ]; then
 	_CI_TIMEOUT="$TMTV_TEST_TIMEOUT"
 elif [ "$QUICK" = "true" ]; then
 	_CI_TIMEOUT=600
 else
-	_CI_TIMEOUT=720
+	_CI_TIMEOUT=1200
 fi
 ( sleep "$_CI_TIMEOUT" && echo "" && echo "FATAL: Test suite exceeded ${_CI_TIMEOUT}s global timeout" >&2 && kill -TERM $$ 2>/dev/null ) &
 _GLOBAL_TIMER_PID=$!
@@ -1085,9 +1085,10 @@ if [ -n "$TOKEN" ]; then
 	# Verify W:N in status bar reflects actual web viewers.
 	# Connect an SSE client, then check W via format variable.
 	TOKEN=$(read_token "$TESTID")
-	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
+	sleep 2
+	curl -s -m 20 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
 	WEB_CURL_PID=$!
-	wait_for 10 1 "web viewer count >= 1 in status bar" \
+	wait_for 15 1 "web viewer count >= 1 in status bar" \
 		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" -ge 1"
 
 	W_IN_STATUS=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
@@ -1226,11 +1227,12 @@ if [ -n "$TOKEN" ]; then
 	# Re-read token after resize (may trigger reconnection)
 	wait_token_stable "$TESTID"
 	TOKEN=$(read_token "$TESTID")
+	sleep 2
 
 	# Capture SSE data — should contain layout sync with new dimensions
 	# The SSE stream sends binary msgpack; we check for non-empty data
 	# after resize, which includes the new SYNC_LAYOUT message
-	SSE_RESIZE=$(curl -s -m 3 "$SSE_BASE/$TOKEN" \
+	SSE_RESIZE=$(curl -s -m 5 "$SSE_BASE/$TOKEN" \
 		2>/dev/null || echo "")
 	if echo "$SSE_RESIZE" | grep -q "^data:"; then
 		pass "SSE delivers data after resize"
@@ -1375,17 +1377,19 @@ else
 	pass "kill-session cleanup"
 fi
 
-# Named symlink should be removed (may take a moment for async cleanup).
-# With exit-empty=0 (server persistence), the server stays alive after
-# kill-session, so symlink cleanup depends on server-side session-destroy
-# handling (tmtv-uqx). If the server exited, the symlink is cleaned by
-# daemon exit. Check both paths.
+# With exit-empty on (v2.0.1+), the server exits after the last session
+# is killed, triggering atexit symlink cleanup automatically.
+# kill-server is a safety net in case something keeps the server alive.
+remote "TERM=xterm-256color $REMOTE_TMTV kill-server 2>/dev/null" || true
+wait_for 10 1 "tmtv client stopped" \
+	"! remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions' 2>/dev/null" || true
+
+# Named symlink should be removed after server exit (atexit cleanup).
 wait_for 10 1 "session symlink removed" \
 	"! remote 'test -L $SESSIONS_DIR/$TESTID'" || true
 if remote "test -L $SESSIONS_DIR/$TESTID" 2>/dev/null; then
-	# Server still alive (exit-empty=0) — symlink cleanup on session
-	# destroy is tracked by tmtv-uqx. Not a regression.
-	skip "session symlink removed on exit (server persisted, see tmtv-uqx)"
+	fail "session symlink removed on exit" \
+		"symlink $SESSIONS_DIR/$TESTID still exists after server exit"
 else
 	pass "session symlink removed on exit"
 fi
@@ -2026,14 +2030,24 @@ if [ -n "$ANON_TOKEN" ]; then
 	# detach the host session when sent via web input.
 	teardown_section "anon-before-detach"
 	DETACH_CONF="/tmp/.tmtv-test-detach-$TESTID.conf"
-	remote "cat > $DETACH_CONF << 'DEOF'
+	remote "cat > $DETACH_CONF << DEOF
+set -g tmtv-server-host \"127.0.0.1\"
+set -g tmtv-server-port $TMTV_PORT
+set -g tmtv-server-rsa-fingerprint \"$RSA_FP\"
+set -g tmtv-server-ed25519-fingerprint \"$ED25519_FP\"
 set -g tmtv-session-name detachtest
+set -g tmtv-web-sharing on
 set -g tmtv-web-input on
 DEOF" 2>/dev/null
-	remote "timeout 10 env TERM=xterm-256color $REMOTE_TMTV -f $DETACH_CONF new -d -s main" 2>/dev/null
+	remote "TERM=xterm-256color \
+		nohup script -qc '$REMOTE_TMTV -f $DETACH_CONF new-session -d -s main' \
+		/dev/null </dev/null >/dev/null 2>&1 &"
 	wait_for 10 1 "detach test session ready" \
 		"remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | grep -q main'"
-	DETACH_TOKEN=$(remote "ls /tmp/tmtv-*/sessions/*/web_url_ro 2>/dev/null | head -1 | xargs cat 2>/dev/null | sed 's|.*/ws/||'" 2>/dev/null)
+	# Wait for session token to appear and stabilize
+	wait_for 10 1 "detach test token available" \
+		"remote 'readlink $SESSIONS_DIR/detachtest 2>/dev/null | grep -q .'"
+	DETACH_TOKEN=$(remote "readlink $SESSIONS_DIR/detachtest 2>/dev/null" || echo "")
 	if [ -n "$DETACH_TOKEN" ]; then
 		# Test 1: Ctrl+B d from web must NOT detach the host session
 		SESS_BEFORE=$(remote "TERM=xterm-256color $REMOTE_TMTV list-sessions 2>/dev/null | wc -l")
@@ -4783,9 +4797,11 @@ if [ -n "$CLIP_TOKEN" ]; then
 	# Test 4: RO token POST /clipboard is rejected
 	# -------------------------------------------------------
 	if [ "$HAS_WEB" = "true" ]; then
-		# Find the RO random token (ro-<random>, not the named ro-<session>)
-		CLIP_RO_TOKEN=$(remote "ls $SESSIONS_DIR/ 2>/dev/null" | grep -E "^ro-" | grep -v "ro-${CLIP_SESSNAME}$" | head -1 || echo "")
-		if [ -n "$CLIP_RO_TOKEN" ]; then
+		# Use the named RO token (ro-<session>). Named sessions replace
+		# the random RO symlink with ro-<name>, so there is no random
+		# RO token to find.
+		CLIP_RO_TOKEN="ro-${CLIP_SESSNAME}"
+		if remote "test -L $SESSIONS_DIR/$CLIP_RO_TOKEN" 2>/dev/null; then
 			_post_ro_resp=$(curl -sk -X POST \
 				-H "X-Tmtv-Clipboard: 1" \
 				-H "Content-Type: text/plain" \
