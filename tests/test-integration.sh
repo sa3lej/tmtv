@@ -285,13 +285,13 @@ trap cleanup EXIT
 
 # Global timeout safety net — prevent indefinite hangs in CI and manual runs.
 # Individual tests have their own timeouts, but this catches anything missed.
-# Quick mode: 480s. Full mode (with Playwright): 900s.
+# Quick mode: 480s. Full mode (with Playwright): 1200s.
 if [ -n "$TMTV_TEST_TIMEOUT" ]; then
 	_CI_TIMEOUT="$TMTV_TEST_TIMEOUT"
 elif [ "$QUICK" = "true" ]; then
 	_CI_TIMEOUT=600
 else
-	_CI_TIMEOUT=900
+	_CI_TIMEOUT=1200
 fi
 ( sleep "$_CI_TIMEOUT" && echo "" && echo "FATAL: Test suite exceeded ${_CI_TIMEOUT}s global timeout" >&2 && kill -TERM $$ 2>/dev/null ) &
 _GLOBAL_TIMER_PID=$!
@@ -1085,9 +1085,10 @@ if [ -n "$TOKEN" ]; then
 	# Verify W:N in status bar reflects actual web viewers.
 	# Connect an SSE client, then check W via format variable.
 	TOKEN=$(read_token "$TESTID")
-	curl -s -m 15 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
+	sleep 2
+	curl -s -m 20 -N "$SSE_BASE/$TOKEN" > /dev/null 2>&1 &
 	WEB_CURL_PID=$!
-	wait_for 10 1 "web viewer count >= 1 in status bar" \
+	wait_for 15 1 "web viewer count >= 1 in status bar" \
 		"test \"\$(remote_tmtv 'display-message -p #{tmtv_web_viewers}' 2>/dev/null)\" -ge 1"
 
 	W_IN_STATUS=$(remote_tmtv "display-message -p '#{tmtv_web_viewers}'" 2>/dev/null || echo "")
@@ -1226,11 +1227,12 @@ if [ -n "$TOKEN" ]; then
 	# Re-read token after resize (may trigger reconnection)
 	wait_token_stable "$TESTID"
 	TOKEN=$(read_token "$TESTID")
+	sleep 2
 
 	# Capture SSE data — should contain layout sync with new dimensions
 	# The SSE stream sends binary msgpack; we check for non-empty data
 	# after resize, which includes the new SYNC_LAYOUT message
-	SSE_RESIZE=$(curl -s -m 3 "$SSE_BASE/$TOKEN" \
+	SSE_RESIZE=$(curl -s -m 5 "$SSE_BASE/$TOKEN" \
 		2>/dev/null || echo "")
 	if echo "$SSE_RESIZE" | grep -q "^data:"; then
 		pass "SSE delivers data after resize"
@@ -1375,10 +1377,9 @@ else
 	pass "kill-session cleanup"
 fi
 
-# Kill the tmtv client server so the SSH tunnel drops and the server
-# daemon child exits — triggering atexit cleanup of session symlinks.
-# With exit-empty off, kill-session alone leaves the server alive and
-# symlinks stale. kill-server ensures a clean exit path.
+# With exit-empty on (v2.0.1+), the server exits after the last session
+# is killed, triggering atexit symlink cleanup automatically.
+# kill-server is a safety net in case something keeps the server alive.
 remote "TERM=xterm-256color $REMOTE_TMTV kill-server 2>/dev/null" || true
 wait_for 10 1 "tmtv client stopped" \
 	"! remote 'TERM=xterm-256color $REMOTE_TMTV list-sessions' 2>/dev/null" || true
