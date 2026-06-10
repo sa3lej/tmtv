@@ -144,37 +144,44 @@ import socket, os, sys, stat
 sessdir = '$SESSDIR2'
 removed = 0
 
-for name in os.listdir(sessdir):
-    path = os.path.join(sessdir, name)
-    st = os.lstat(path)
+# The real gc_stale_sessions() runs periodically. A symlink whose target
+# is a dead-but-still-present socket is only removed once that socket has
+# been reaped, which can be a later pass (readdir order is arbitrary, so
+# the symlink may be visited before its dead target socket is unlinked).
+# Run the sweep twice so the simulation converges regardless of order,
+# matching the product's eventual-consistency guarantee.
+for _pass in range(2):
+    for name in os.listdir(sessdir):
+        path = os.path.join(sessdir, name)
+        st = os.lstat(path)
 
-    if stat.S_ISLNK(st.st_mode):
-        # Symlink — check if target exists
-        if not os.path.exists(path):
-            os.unlink(path)
-            removed += 1
-        continue
+        if stat.S_ISLNK(st.st_mode):
+            # Symlink — check if target exists
+            if not os.path.exists(path):
+                os.unlink(path)
+                removed += 1
+            continue
 
-    if stat.S_ISSOCK(st.st_mode):
-        # Socket — try non-blocking connect
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.setblocking(False)
-        try:
-            s.connect(path)
-            s.close()
-            # Connected = alive
-        except BlockingIOError:
-            s.close()
-            # EINPROGRESS = alive (connection in progress)
-        except (ConnectionRefusedError, FileNotFoundError, OSError):
-            s.close()
-            os.unlink(path)
-            removed += 1
-        continue
+        if stat.S_ISSOCK(st.st_mode):
+            # Socket — try non-blocking connect
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.setblocking(False)
+            try:
+                s.connect(path)
+                s.close()
+                # Connected = alive
+            except BlockingIOError:
+                s.close()
+                # EINPROGRESS = alive (connection in progress)
+            except (ConnectionRefusedError, FileNotFoundError, OSError):
+                s.close()
+                os.unlink(path)
+                removed += 1
+            continue
 
-    # Unknown
-    os.unlink(path)
-    removed += 1
+        # Unknown
+        os.unlink(path)
+        removed += 1
 
 print(f'removed {removed}')
 "
