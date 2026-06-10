@@ -144,6 +144,12 @@ extern void tmate_translate_legacy_key(int pane_id, key_code key);
 #define TMATE_HLIMIT 2000
 #define TMATE_PANE_ACTIVE 1
 #define TMATE_MAX_MESSAGE_SIZE (2*1024*1024)
+/*
+ * Hard ceiling on a single in-flight (not-yet-complete) msgpack message.
+ * Above this the daemon aborts the session rather than buffer unboundedly.
+ * Set far above TMATE_MAX_MESSAGE_SIZE so it never trips on real traffic.
+ */
+#define TMATE_MAX_INFLIGHT_MESSAGE_SIZE (8*1024*1024)
 #define TMATE_MAX_PANES 1000
 
 extern char *tmate_left_status, *tmate_right_status;
@@ -435,8 +441,12 @@ extern int  sse_ipc_send_msg(int ipc_fd, const char *msg);
 extern int  sse_ipc_read_msg(int ipc_fd, char *buf, size_t len);
 
 /* Main process SSE listener */
+#define SSE_PROCESS_DONE   0   /* fd consumed (routed or closed) */
+#define SSE_PROCESS_AGAIN  1   /* request line incomplete; retry when readable */
+
 extern int  sse_bind_listener(int port);
-extern void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg);
+extern int  sse_accept_nonblock(int sse_listen_fd);
+extern int  sse_process_fd(int client_fd, struct sse_registry *reg);
 
 /* tmate-debug.c */
 

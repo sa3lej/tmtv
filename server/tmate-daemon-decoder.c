@@ -623,6 +623,15 @@ static void tmate_exec_cmd(__unused struct tmate_session *session,
 	size_t len;
 
 	argc = uk->argc;
+	/*
+	 * An empty command array has nothing to run. Skip it instead of
+	 * calling xmalloc(0) (which aborts) — a malformed/empty EXEC_CMD from
+	 * the client must not be able to crash the session daemon.
+	 */
+	if (argc == 0) {
+		tmate_debug("Ignoring empty exec_cmd");
+		return;
+	}
 	argv = xmalloc(sizeof(char *) * argc);
 	for (i = 0; i < argc; i++)
 		argv[i] = unpack_string(uk);
@@ -815,86 +824,6 @@ static void tmate_reconnect(__unused struct tmate_session *session,
 		tmate_fatal("Cannot do reconnections without the websocket server");
 }
 
-static void restore_snapshot_grid(struct grid *grid, struct tmate_unpacker *uk)
-{
-	struct grid_cell gc;
-	char *line_str;
-	struct utf8_data *utf8_data;
-	unsigned int i, line_i;
-	unsigned int packed_flags;
-
-	struct tmate_unpacker lines_uk, line_uk, line_flags_uk;
-
-	memset(&gc, 0, sizeof gc);
-
-	unpack_array(uk, &lines_uk);
-	for (line_i = 0; lines_uk.argc > 0; line_i++) {
-		while (line_i >= grid->hsize + grid->sy)
-			grid_scroll_history(grid, 8);
-
-		unpack_array(&lines_uk, &line_uk);
-		line_str = unpack_string(&line_uk);
-		utf8_data = utf8_fromcstr(line_str);
-		free(line_str);
-
-		unpack_array(&line_uk, &line_flags_uk);
-		for (i = 0; line_flags_uk.argc > 0; i++) {
-			utf8_copy(&gc.data, &utf8_data[i]);
-			packed_flags = unpack_int(&line_flags_uk);
-			gc.flags = (packed_flags >> 24) & 0xFF;
-			gc.attr  = (packed_flags >> 16) & 0xFFFF;
-			/*
-			 * tmux 3.6a: fg/bg are int, not u_char.
-			 * Old protocol packs them as single bytes.
-			 */
-			gc.bg    = (packed_flags >> 8)  & 0xFF;
-			gc.fg    =  packed_flags        & 0xFF;
-			grid_set_cell(grid, i, line_i, &gc);
-		}
-	}
-}
-
-static void restore_snapshot_pane(struct tmate_unpacker *uk)
-{
-	int id;
-	struct window_pane *wp;
-	struct tmate_unpacker grid_uk;
-	struct screen *screen;
-
-	id = unpack_int(uk);
-	wp = window_pane_find_by_id(id);
-	if (!wp) {
-		tmate_info("snapshot restore for unknown pane id=%d, "
-			   "discarding", id);
-		return;
-	}
-	screen = &wp->base;
-	screen_reinit(screen);
-	wp->flags |= PANE_REDRAW;
-
-	screen->mode = unpack_int(uk);
-
-	unpack_array(uk, &grid_uk);
-	screen->cx = unpack_int(&grid_uk);
-	screen->cy = unpack_int(&grid_uk);
-	grid_clear_history(screen->grid);
-	restore_snapshot_grid(screen->grid, &grid_uk);
-
-	if (screen->saved_grid != NULL) {
-		grid_destroy(screen->saved_grid);
-		screen->saved_grid = NULL;
-	}
-
-	if (unpack_peek_type(uk) == MSGPACK_OBJECT_NIL)
-		return;
-
-	unpack_array(uk, &grid_uk);
-	screen->saved_cx = unpack_int(&grid_uk);
-	screen->saved_cy = unpack_int(&grid_uk);
-	screen->saved_grid = grid_create(screen->grid->sx, screen->grid->sy, 0);
-	restore_snapshot_grid(screen->saved_grid, &grid_uk);
-}
-
 static void tmate_snapshot(__unused struct tmate_session *session,
 			   __unused struct tmate_unpacker *uk)
 {
@@ -902,6 +831,11 @@ static void tmate_snapshot(__unused struct tmate_session *session,
 	 * Snapshot restore is not needed — the server builds its own
 	 * grid from PTY data, and SSE clients get screen dumps directly.
 	 * Skip to avoid format mismatches between client/server.
+	 *
+	 * The former restore_snapshot_pane()/restore_snapshot_grid() helpers
+	 * were removed: they were unreachable (this handler never called them)
+	 * and indexed utf8_data[] by an attacker-controlled flag count, an
+	 * out-of-bounds read waiting to be re-wired.
 	 */
 }
 

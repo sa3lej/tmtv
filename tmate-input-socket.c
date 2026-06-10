@@ -509,14 +509,23 @@ tmtv_input_socket_create(void)
 	sa.sun_family = AF_UNIX;
 	strlcpy(sa.sun_path, input_socket_path, sizeof(sa.sun_path));
 
-	if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+	/*
+	 * Create the socket node owner-only from the start. bind() applies
+	 * (0777 & ~umask), so a tight umask closes the window between bind()
+	 * and chmod() during which another local user could connect.
+	 */
+	mode_t old_umask = umask(0077);
+	int bind_ret = bind(fd, (struct sockaddr *)&sa, sizeof(sa));
+	umask(old_umask);
+
+	if (bind_ret < 0) {
 		tmate_info("input socket: bind() failed: %s",
 			   strerror(errno));
 		close(fd);
 		return;
 	}
 
-	/* Only owner can connect */
+	/* Belt and suspenders: only owner can connect */
 	chmod(input_socket_path, 0700);
 
 	if (listen(fd, 5) < 0) {

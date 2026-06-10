@@ -142,6 +142,15 @@ static void handle_exec_cmd(__unused struct tmate_session *session,
 	int client_id = unpack_int(uk);
 
 	argc = uk->argc;
+	/*
+	 * A command with no arguments has nothing to run. Skip it instead of
+	 * calling xmalloc(0) (which aborts) — a malformed/empty EXEC_CMD from
+	 * the server must not be able to crash the client.
+	 */
+	if (argc == 0) {
+		tmate_debug("Ignoring empty exec_cmd");
+		return;
+	}
 	argv = xmalloc(sizeof(char *) * argc);
 	for (i = 0; i < argc; i++)
 		argv[i] = unpack_string(uk);

@@ -384,6 +384,48 @@ else
 fi
 
 # -------------------------------------------------------
+# Test: silent SSE connections must not block the main loop
+# (regression guard for the blocking recv() that stalled SSH accepts).
+#
+# Open several TCP connections to the SSE port that complete the handshake
+# but send NO HTTP request, then confirm /healthz still answers promptly.
+# With the old blocking recv(MSG_PEEK) each silent connection stalled the
+# shared accept loop for up to 1s; with the event-driven fix they are parked
+# and the loop stays responsive.
+#
+# Only meaningful in local mode (the SSE port is internal-only on staging).
+# -------------------------------------------------------
+if [ "$LOCAL" = "true" ] && command -v nc >/dev/null 2>&1; then
+	SLOW_PIDS=""
+	_i=0
+	while [ "$_i" -lt 10 ]; do
+		# sleep holds stdin open so nc stays connected but sends nothing
+		sleep 15 | nc 127.0.0.1 "$SSE_PORT" >/dev/null 2>&1 &
+		SLOW_PIDS="$SLOW_PIDS $!"
+		_i=$((_i + 1))
+	done
+	sleep 1   # let the silent connections establish
+
+	_t0=$(date +%s)
+	SLOW_HEALTH=$(curl -s -m 5 "$SSE_BASE/healthz" 2>/dev/null || echo "")
+	_t1=$(date +%s)
+	_elapsed=$((_t1 - _t0))
+
+	# Tear down the silent connections
+	for _p in $SLOW_PIDS; do kill "$_p" 2>/dev/null || true; done
+	pkill -f "nc 127.0.0.1 $SSE_PORT" 2>/dev/null || true
+
+	if echo "$SLOW_HEALTH" | grep -q '"status":"ok"' && [ "$_elapsed" -lt 4 ]; then
+		pass "healthz responsive with 10 silent SSE clients (${_elapsed}s)"
+	else
+		fail "healthz responsive with 10 silent SSE clients" \
+			"elapsed=${_elapsed}s resp=$SLOW_HEALTH"
+	fi
+else
+	skip "silent SSE clients do not block main loop (needs local nc)"
+fi
+
+# -------------------------------------------------------
 # Test: Start a tmtv session with web sharing + named session
 # -------------------------------------------------------
 # Derive key fingerprints from the server's keys directory
