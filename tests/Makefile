@@ -17,7 +17,7 @@ MSGPACK_LIBS := $(shell pkg-config --libs msgpack-c 2>/dev/null || pkg-config --
 LIBSSH_CFLAGS := $(shell pkg-config --cflags libssh 2>/dev/null)
 LIBEVENT_CFLAGS := $(shell pkg-config --cflags libevent 2>/dev/null)
 
-UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session test-input-socket
+UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session test-input-socket test-hardening
 SERVER_TESTS = test-server-header test-session-tmate-ptr test-sse-mux test-server-format test-pty-pending
 TMTV ?= ../tmtv
 
@@ -36,6 +36,9 @@ server-unit: $(SERVER_TESTS)
 	@for t in $(SERVER_TESTS); do ./$$t || exit 1; done
 
 test-msgpack: test-msgpack.c test-harness.h
+	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) -o $@ $< $(LDFLAGS) $(MSGPACK_LIBS)
+
+test-hardening: test-hardening.c test-harness.h
 	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) -o $@ $< $(LDFLAGS) $(MSGPACK_LIBS)
 
 test-version-compare: test-version-compare.c test-harness.h

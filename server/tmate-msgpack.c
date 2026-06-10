@@ -316,14 +316,28 @@ void tmate_decoder_get_buffer(struct tmate_decoder *decoder,
 			      char **buf, size_t *len)
 {
 	/*
-	 * Log large partial messages but do NOT reset the unpacker — that
-	 * would corrupt the msgpack stream and cause connection resets.
-	 * The 2MB limit is generous enough for any real workload.  If we
-	 * ever hit it, let the message complete and process it normally.
+	 * Warn on large partial messages but do NOT reset the unpacker — a
+	 * mid-stream reset destroys byte alignment of any *other* messages
+	 * already buffered, desyncing the stream (the v1.4.3 -> v1.4.4
+	 * regression).  The legitimate client chunks output at 16KB per
+	 * message, so the 2MB warning threshold is never reached in normal
+	 * operation.
 	 */
-	if (msgpack_unpacker_message_size(&decoder->unpacker) > TMATE_MAX_MESSAGE_SIZE) {
-		tmate_info("Large message in progress (%zu bytes)",
-			   msgpack_unpacker_message_size(&decoder->unpacker));
+	size_t inflight = msgpack_unpacker_message_size(&decoder->unpacker);
+	if (inflight > TMATE_MAX_MESSAGE_SIZE)
+		tmate_info("Large message in progress (%zu bytes)", inflight);
+
+	/*
+	 * Hard ceiling: a single in-flight message this large cannot be
+	 * legitimate (256x the largest real message) and means a malformed
+	 * or malicious peer is streaming an unterminated message to exhaust
+	 * memory.  Unlike a reset, terminating the connection is safe — there
+	 * is no surviving stream to desync.  Each session is its own process,
+	 * so only the abusing session dies.
+	 */
+	if (inflight > TMATE_MAX_INFLIGHT_MESSAGE_SIZE) {
+		tmate_fatal("Aborting: in-flight message too large (%zu bytes)",
+			    inflight);
 	}
 
 	if (!msgpack_unpacker_reserve_buffer(&decoder->unpacker, UNPACKER_RESERVE_SIZE))

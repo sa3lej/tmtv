@@ -325,47 +325,86 @@ static int extract_token_from_http(const char *buf, size_t buflen,
 	return 0;
 }
 
-void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
+/*
+ * Accept one SSE connection from the listener and put it in non-blocking
+ * mode. Returns the new fd, or -1 if there was nothing to accept.
+ *
+ * The socket is deliberately left non-blocking: sse_process_fd() must never
+ * block the main loop (which also accepts SSH sessions). The daemon side
+ * makes the fd non-blocking again after it is passed, so this does not
+ * change any downstream assumptions.
+ */
+int sse_accept_nonblock(int sse_listen_fd)
 {
 	struct sockaddr_storage sa;
 	socklen_t sa_len = sizeof(sa);
 	int client_fd;
-	char buf[1024];
-	ssize_t n;
-	char token[SSE_TOKEN_MAX];
-	int ipc_fd;
 
 	client_fd = accept(sse_listen_fd, (struct sockaddr *)&sa, &sa_len);
 	if (client_fd < 0) {
 		if (errno != EINTR && errno != EAGAIN)
 			tmate_info("SSE accept failed: %s", strerror(errno));
-		return;
+		return -1;
 	}
 
-	/* Set a short read timeout for the HTTP request line */
-	{
-		struct timeval tv = { 1, 0 }; /* 1 second */
-		setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	int flags = fcntl(client_fd, F_GETFL, 0);
+	if (flags < 0 || fcntl(client_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+		tmate_info("SSE: cannot set non-blocking: %s", strerror(errno));
+		close(client_fd);
+		return -1;
 	}
+
+	return client_fd;
+}
+
+/*
+ * Try to process an accepted (non-blocking) SSE connection: peek the HTTP
+ * request line, handle OPTIONS/healthz inline, or route the fd to the owning
+ * daemon. Never blocks.
+ *
+ * Returns:
+ *   SSE_PROCESS_DONE  (0) - fd was consumed (routed to a daemon or closed).
+ *                           The caller must not touch it again.
+ *   SSE_PROCESS_AGAIN (1) - the request line has not fully arrived yet. The
+ *                           caller retains ownership of the fd and should
+ *                           retry when it becomes readable (or time it out).
+ */
+int sse_process_fd(int client_fd, struct sse_registry *reg)
+{
+	char buf[1024];
+	ssize_t n;
+	char token[SSE_TOKEN_MAX];
+	int ipc_fd;
 
 	/*
-	 * Read just enough to get the GET line. We use MSG_PEEK so the
-	 * daemon receives the full HTTP request including the GET line
-	 * and can do its own handshake validation.
+	 * Peek just enough to get the GET line. We use MSG_PEEK so the daemon
+	 * receives the full HTTP request including the GET line and can do its
+	 * own handshake validation. Non-blocking: if the bytes are not here
+	 * yet, ask the caller to wait rather than stalling the main loop.
 	 */
-	n = recv(client_fd, buf, sizeof(buf) - 1, MSG_PEEK);
+	n = recv(client_fd, buf, sizeof(buf) - 1, MSG_PEEK | MSG_DONTWAIT);
+	if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+		return SSE_PROCESS_AGAIN;
 	if (n <= 0) {
 		close(client_fd);
-		return;
+		return SSE_PROCESS_DONE;
 	}
 	buf[n] = '\0';
 
-	/* Need at least the first HTTP line (ends with \r\n) */
+	/*
+	 * Have some bytes but not a complete request line yet — wait for more
+	 * rather than rejecting a legitimate (slow/fragmented) client.
+	 */
 	if (!memchr(buf, '\n', n)) {
-		close(client_fd);
-		return;
+		if ((size_t)n >= sizeof(buf) - 1) {
+			/* First line larger than our buffer: malformed. */
+			close(client_fd);
+			return SSE_PROCESS_DONE;
+		}
+		return SSE_PROCESS_AGAIN;
 	}
 
+	/* Need at least the first HTTP line (ends with \r\n) */
 	/* Handle CORS preflight (OPTIONS) directly — no daemon needed */
 	if (n >= 8 && strncmp(buf, "OPTIONS ", 8) == 0) {
 		/* Consume the peeked data */
@@ -380,7 +419,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 			"\r\n";
 		sse_write_response(client_fd, cors, strlen(cors));
 		close(client_fd);
-		return;
+		return SSE_PROCESS_DONE;
 	}
 
 	/* Handle health check endpoint directly — no daemon needed */
@@ -418,7 +457,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 
 			sse_write_response(client_fd, resp, resp_len);
 			close(client_fd);
-			return;
+			return SSE_PROCESS_DONE;
 		}
 	}
 
@@ -432,7 +471,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 			"\r\n";
 		sse_write_response(client_fd, not_found, strlen(not_found));
 		close(client_fd);
-		return;
+		return SSE_PROCESS_DONE;
 	}
 
 	ipc_fd = sse_registry_lookup(reg, token);
@@ -444,13 +483,7 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 			"\r\n";
 		sse_write_response(client_fd, not_found, strlen(not_found));
 		close(client_fd);
-		return;
-	}
-
-	/* Clear the receive timeout before passing fd */
-	{
-		struct timeval tv = { 0, 0 };
-		setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+		return SSE_PROCESS_DONE;
 	}
 
 	tmate_debug("SSE mux: routing token %.4s... to ipc_fd=%d", token, ipc_fd);
@@ -467,4 +500,5 @@ void sse_handle_connection(int sse_listen_fd, struct sse_registry *reg)
 
 	/* Main process closes its copy; daemon has the fd now */
 	close(client_fd);
+	return SSE_PROCESS_DONE;
 }

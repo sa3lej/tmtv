@@ -31,6 +31,14 @@ static int max_children;
 #define RATE_MAX_PER_IP    100
 #define CONN_HISTORY_SIZE  512
 
+/*
+ * SSE connections accepted but not yet routed (request line still in
+ * flight). Bounded so a flood of silent connections cannot grow the poll
+ * set without limit; excess connections are dropped immediately.
+ */
+#define MAX_PENDING_SSE         64
+#define SSE_PENDING_TIMEOUT_SEC 5
+
 struct conn_record {
 	char ip[64];
 	time_t ts;
@@ -480,18 +488,27 @@ static int read_single_line(int fd, char *dst, size_t len)
 	 * This reads exactly one line from fd.
 	 * We cannot read bytes after the new line.
 	 * We could use recv() with MSG_PEEK to do this more efficiently.
+	 *
+	 * Track the write position separately from the read loop: stripping a
+	 * CR must never decrement an index below zero (a leading '\r' used to
+	 * underflow the unsigned index and read out of bounds).
 	 */
-	for (size_t i = 0; i < len; i++) {
-		if (read(fd, &dst[i], 1) <= 0)
+	size_t pos = 0;
+	char c;
+
+	while (pos < len) {
+		if (read(fd, &c, 1) <= 0)
 			break;
 
-		if (dst[i] == '\r')
-			i--;
+		if (c == '\r')
+			continue; /* ignore CR, wait for LF */
 
-		if (dst[i] == '\n') {
-			dst[i] = '\0';
-			return i;
+		if (c == '\n') {
+			dst[pos] = '\0';
+			return pos;
 		}
+
+		dst[pos++] = c;
 	}
 
 	return -1;
@@ -857,6 +874,17 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 	struct ipc_child *ipc_children;
 	int num_ipc_children = 0;
 
+	/*
+	 * SSE connections whose HTTP request line has not fully arrived yet.
+	 * We never block the main loop waiting for them (that would stall SSH
+	 * accepts); instead we park the fd here and poll it alongside
+	 * everything else, expiring it if the client stays silent.
+	 */
+	struct pending_sse { int fd; time_t accepted_at; };
+	struct pending_sse *pending_sse = xcalloc(MAX_PENDING_SSE,
+						  sizeof(struct pending_sse));
+	int num_pending_sse = 0;
+
 	tmate_catch_sigsegv();
 
 	max_children = tmate_settings->max_sessions;
@@ -865,7 +893,8 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 	 * the SIGCHLD handler that writes to dead_pids. */
 	dead_pids = xcalloc(max_children, sizeof(pid_t));
 	ipc_children = xcalloc(max_children, sizeof(struct ipc_child));
-	struct pollfd *pfds = xcalloc(2 + max_children, sizeof(struct pollfd));
+	struct pollfd *pfds = xcalloc(2 + max_children + MAX_PENDING_SSE,
+				      sizeof(struct pollfd));
 
 	server_start_time = time(NULL);
 
@@ -959,12 +988,55 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 			nfds++;
 		}
 
-		int ret = poll(pfds, nfds, 60000);
+		/* Park half-open SSE connections in the poll set so we can
+		 * route them when their request line arrives, without ever
+		 * blocking on a single slow/silent client. */
+		int pending_poll_start = nfds;
+		for (int i = 0; i < num_pending_sse; i++) {
+			pfds[nfds].fd = pending_sse[i].fd;
+			pfds[nfds].events = POLLIN;
+			nfds++;
+		}
+
+		/* When connections are parked, wake often enough to expire
+		 * silent ones; otherwise idle for a full minute. */
+		int poll_timeout = num_pending_sse > 0 ? 1000 : 60000;
+
+		int ret = poll(pfds, nfds, poll_timeout);
 		if (ret < 0) {
 			if (errno == EINTR)
 				continue;
 			tmate_fatal("Error in poll: %s", strerror(errno));
 		}
+
+		/* Service parked SSE connections (route the ready ones, expire
+		 * the silent ones). Runs on every wakeup, including timeouts. */
+		{
+			time_t now = time(NULL);
+			for (int i = 0; i < num_pending_sse; i++) {
+				int pidx = pending_poll_start + i;
+				int done = 0;
+
+				if (pfds[pidx].revents &
+				    (POLLIN | POLLHUP | POLLERR | POLLNVAL)) {
+					if (sse_process_fd(pending_sse[i].fd,
+					    &sse_reg) == SSE_PROCESS_DONE)
+						done = 1;
+				}
+				if (!done && now - pending_sse[i].accepted_at
+				    >= SSE_PENDING_TIMEOUT_SEC) {
+					close(pending_sse[i].fd);
+					done = 1;
+				}
+				if (done) {
+					pending_sse[i] =
+						pending_sse[num_pending_sse - 1];
+					num_pending_sse--;
+					i--; /* re-check swapped entry */
+				}
+			}
+		}
+
 		if (ret == 0) {
 			/* Periodic GC on timeout — catches stale entries
 			 * even when no children die (e.g. unclean exit). */
@@ -1003,7 +1075,26 @@ void tmate_ssh_server_main(struct tmate_session *session, const char *keys_dir,
 		/* Check SSE listener for incoming browser connections */
 		if (sse_poll_idx >= 0 &&
 		    (pfds[sse_poll_idx].revents & POLLIN)) {
-			sse_handle_connection(sse_listen_fd, &sse_reg);
+			int cfd = sse_accept_nonblock(sse_listen_fd);
+			if (cfd >= 0) {
+				/* Try to route immediately; the request line is
+				 * almost always already buffered. If not, park
+				 * the fd instead of blocking the loop. */
+				if (sse_process_fd(cfd, &sse_reg) ==
+				    SSE_PROCESS_AGAIN) {
+					if (num_pending_sse < MAX_PENDING_SSE) {
+						pending_sse[num_pending_sse].fd =
+							cfd;
+						pending_sse[num_pending_sse]
+							.accepted_at =
+							time(NULL);
+						num_pending_sse++;
+					} else {
+						/* Overloaded: drop silently. */
+						close(cfd);
+					}
+				}
+			}
 		}
 
 		/* Check SSH listener for incoming SSH connections */
