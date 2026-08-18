@@ -4,8 +4,6 @@
 #include "tmate.h"
 #include "tmate-protocol.h"
 
-extern void tmate_send_fin_to_ws_clients(struct tmate_session *session);
-
 char *tmate_left_status, *tmate_right_status;
 
 /*

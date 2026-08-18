@@ -8,8 +8,6 @@
 
 struct tmate_session _tmate_session, *tmate_session = &_tmate_session;
 
-extern void tmate_send_fin_to_ws_clients(struct tmate_session *session);
-
 static void on_daemon_decoder_read(void *userdata, struct tmate_unpacker *uk)
 {
 	struct tmate_session *session = userdata;

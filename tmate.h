@@ -276,6 +276,8 @@ extern bool tmate_has_session_password(void);
 extern void tmate_client_pane_key(int pane_id, key_code key);
 extern void tmate_client_cmd(int client_id, struct cmd *cmd);
 extern int tmate_should_exec_cmd_locally(const struct cmd_entry *cmd);
+/* tmate-daemon-encoder.c: shared clipboard (viewer -> host) */
+extern void tmate_send_clipboard_to_host(const char *data, size_t len);
 #endif
 
 #endif

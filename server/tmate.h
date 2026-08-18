@@ -156,6 +156,8 @@ extern char *tmate_left_status, *tmate_right_status;
 extern void tmate_dispatch_daemon_message(struct tmate_session *session,
 					  struct tmate_unpacker *uk);
 extern int tmtv_version_compare(const char *a, const char *b);
+extern void pty_pending_replay(int pane_id);
+extern void pty_pending_flush_stale(void);
 
 /* tmate-ssh-daemon.c */
 
@@ -374,6 +376,7 @@ extern void tmate_broadcast_viewer_count(struct tmate_session *session);
 extern void sse_broadcast_screen_dump(struct tmate_session *session);
 extern void tmate_send_clipboard_to_rw_web(struct tmate_session *session,
 					    const char *data, size_t len);
+extern void tmate_send_fin_to_ws_clients(struct tmate_session *session);
 
 extern void tmate_send_websocket_daemon_msg(struct tmate_session *session,
 					struct tmate_unpacker *uk);
