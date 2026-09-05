@@ -383,6 +383,23 @@ else
          "caller must remove ipc_children entry when handler returns -1"
 fi
 
+# A stale/spurious POLLIN must never block the parent's single-threaded
+# accept loop. The IPC read is therefore explicitly non-blocking, and a
+# would-block result keeps the child registered instead of removing it.
+if grep -A25 '^int sse_ipc_read_msg' ../server/tmate-sse-mux.c | grep -q 'MSG_DONTWAIT'; then
+    pass "ipc stall: registration read is non-blocking"
+else
+    fail "ipc stall: registration read is non-blocking" \
+         "blocking IPC reads can stall SSH and SSE/health accepts"
+fi
+
+if grep -A12 'n = sse_ipc_read_msg' ../server/tmate-ssh-server.c | grep -q 'n == -2'; then
+    pass "ipc stall: would-block keeps child registered"
+else
+    fail "ipc stall: would-block keeps child registered" \
+         "a transient empty read must not discard a live IPC child"
+fi
+
 # --- Client socket cleanup on exit ---
 # The tmtv client server should unlink its control socket on clean exit.
 

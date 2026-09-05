@@ -832,6 +832,9 @@ static int handle_ipc_registrations(struct sse_registry *reg,
 	int n;
 
 	n = sse_ipc_read_msg(ipc_fd, buf, sizeof(buf));
+	/* Readiness can disappear before recv(); keep the live child. */
+	if (n == -2)
+		return 0;
 	if (n <= 0) {
 		tmate_debug("IPC fd=%d closed by child pid=%d", ipc_fd,
 			    (int)pid);

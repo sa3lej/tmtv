@@ -219,7 +219,20 @@ int sse_ipc_send_msg(int ipc_fd, const char *msg)
 
 int sse_ipc_read_msg(int ipc_fd, char *buf, size_t len)
 {
-	ssize_t n = read(ipc_fd, buf, len - 1);
+	ssize_t n;
+
+	/*
+	 * The parent calls this after poll() reports the IPC socket readable,
+	 * but readiness is only a snapshot.  Never let a stale/spurious POLLIN
+	 * block the single-threaded accept loop: that would stop both SSH and
+	 * SSE/health accepts and eventually fill their listen backlogs.
+	 */
+	do {
+		n = recv(ipc_fd, buf, len - 1, MSG_DONTWAIT);
+	} while (n < 0 && errno == EINTR);
+
+	if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+		return -2;
 	if (n <= 0)
 		return -1;
 	buf[n] = '\0';
