@@ -200,6 +200,25 @@ static void handle_set_env(struct tmate_session *session,
 	char *name = unpack_string(uk);
 	char *value = unpack_string(uk);
 
+	if (!strcmp(name, "tmtv_reconnect_capability") && !strcmp(value, "1")) {
+		tmate_write_session_identity(session);
+		free(name);
+		free(value);
+		return;
+	}
+	if (!strcmp(name, "tmtv_session_name")) {
+		free(session->reconnect_name);
+		session->reconnect_name = xstrdup(value);
+	}
+	if (session->reconnected && !strcmp(name, "tmtv_ssh")) {
+		struct tmate_env *te;
+		TAILQ_FOREACH(te, &session->env, entry) {
+			if (!strcmp(te->name, name) && strcmp(te->value, value)) {
+				tmate_status_message("Access link changed on reconnect: %s", value);
+				break;
+			}
+		}
+	}
 	tmate_set_env(session, name, value);
 	maybe_save_reconnection_data(session, name, value);
 

@@ -19,6 +19,7 @@
 
 #include <time.h>
 #include "tmate.h"
+#include <sys/file.h>
 
 /*
  * Connection limits (CVE-2021-44512 DoS mitigation)
@@ -684,6 +685,11 @@ static void gc_stale_sessions(void)
 	dir = opendir(TMATE_WORKDIR "/sessions");
 	if (!dir)
 		return;
+	/* Never race an authenticated alias handover, nor block the accept loop. */
+	if (flock(dirfd(dir), LOCK_EX | LOCK_NB) < 0) {
+		closedir(dir);
+		return;
+	}
 
 	while ((ent = readdir(dir)) != NULL) {
 		if (ent->d_name[0] == '.')
@@ -739,6 +745,7 @@ static void gc_stale_sessions(void)
 		removed++;
 	}
 
+	flock(dirfd(dir), LOCK_UN);
 	closedir(dir);
 
 	if (removed)

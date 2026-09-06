@@ -14,7 +14,7 @@ import Base from '../layouts/Base.astro';
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Linux, macOS",
     "license": "https://opensource.org/licenses/ISC",
-    "softwareVersion": "2.0.3",
+    "softwareVersion": "2.0.4",
     "author": {
       "@type": "Person",
       "name": "Lars-Erik Jonsson",
@@ -56,7 +56,7 @@ import Base from '../layouts/Base.astro';
     <div class="flex flex-wrap items-center justify-center gap-2 mb-11">
       <span class="inline-flex items-center gap-1.5 font-mono text-[11px] font-medium text-tmtv-green bg-tmtv-green/10 border border-tmtv-green/20 px-2.5 py-1 rounded-full">
         <span class="w-1.5 h-1.5 rounded-full bg-tmtv-green motion-safe:animate-blink" aria-hidden="true"></span>
-        v2.0.3
+        v2.0.4
       </span>
       <span class="font-mono text-[11px] font-medium text-tmtv-blue bg-tmtv-blue/10 border border-tmtv-blue/20 px-2.5 py-1 rounded-full">built on tmux 3.6a</span>
       <span class="font-mono text-[11px] font-medium text-gray-300 bg-white/[0.04] border border-white/[0.08] px-2.5 py-1 rounded-full">ISC licensed</span>
@@ -325,18 +325,27 @@ import Base from '../layouts/Base.astro';
         <!-- Vertical timeline line -->
         <div class="absolute left-[7px] top-3 bottom-3 w-px bg-gradient-to-b from-tmtv-green via-tmtv-blue/60 to-tmtv-blue/20" aria-hidden="true"></div>
 
-        <!-- v2.0.3 — Latest release, featured -->
+        <!-- v2.0.4 — Latest release, featured -->
         <div class="relative pl-8 pb-8 group" role="listitem">
           <div class="absolute left-0 top-1.5 w-[15px] h-[15px] rounded-full border-2 border-tmtv-green bg-tmtv-bg motion-safe:group-hover:shadow-[0_0_8px_rgba(61,220,132,0.5)] motion-safe:transition-shadow" aria-hidden="true">
             <div class="absolute inset-[3px] rounded-full bg-tmtv-green"></div>
           </div>
           <div class="bg-white/[0.03] border border-tmtv-green/20 rounded-xl p-5 motion-safe:group-hover:border-tmtv-green/40 motion-safe:transition-colors">
             <div class="flex flex-wrap items-center gap-2.5 mb-2">
-              <span class="inline-flex items-center font-mono text-xs font-bold bg-tmtv-green/15 text-tmtv-green px-2.5 py-1 rounded-md tracking-wide">v2.0.3</span>
+              <span class="inline-flex items-center font-mono text-xs font-bold bg-tmtv-green/15 text-tmtv-green px-2.5 py-1 rounded-md tracking-wide">v2.0.4</span>
               <span class="text-[11px] font-medium text-tmtv-green/70 uppercase tracking-wider">Latest</span>
             </div>
-            <p class="text-[15px] text-gray-200 font-medium leading-snug">The relay keeps moving.</p>
-            <p class="text-xs text-gray-400/80 mt-1.5 leading-relaxed">A defensive IPC fix prevents one session from blocking the server's accept loop, keeping new SSH sessions, web viewers, and health checks responsive. The release also refreshes the homepage and tightens compiler compatibility.</p>
+            <p class="text-[15px] text-gray-200 font-medium leading-snug">Same session. Same links.</p>
+            <p class="text-xs text-gray-400/80 mt-1.5 leading-relaxed">Automatic reconnects now preserve your SSH and web links, backed by a private in-memory host identity. Named sessions keep their assigned names, RW links get stronger tokens, and an old connection can no longer erase its replacement's aliases. Upgrade the hosting client for continuity; a fresh start still creates fresh credentials.</p>
+          </div>
+        </div>
+
+        <!-- v2.0.3 -->
+        <div class="relative pl-8 pb-5 group" role="listitem">
+          <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-blue/60" aria-hidden="true"></div>
+          <div class="flex flex-wrap items-baseline gap-3 py-1">
+            <span class="font-mono text-xs font-semibold text-tmtv-blue/80 shrink-0">v2.0.3</span>
+            <span class="text-sm text-gray-400/80 leading-snug">The relay keeps moving.</span>
           </div>
         </div>
 

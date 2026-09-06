@@ -221,6 +221,9 @@ void tmate_session_start(void)
 		cfg_add_cause("%s", "---------------------------------------------------------------------");
 	}
 
+	/* Negotiate before sending any host secret. Old relays safely ignore this. */
+	tmate_set_val(&tmate_session, "session_identity", "request-v1");
+
 	/* Send named session request if configured */
 	{
 		const char *sname = options_get_string(global_options,

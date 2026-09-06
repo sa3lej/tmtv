@@ -155,6 +155,12 @@ static void tmate_set(char *key, char *value)
 			return;
 		}
 		tmate_info("Session password set");
+	} else if (!strcmp(key, "session_identity") && !strcmp(value, "request-v1")) {
+		if (!tmate_session->urls_sent && !tmate_session->session_token_stable &&
+		    !tmate_session->awaiting_identity) {
+			tmate_session->awaiting_identity = true;
+			tmate_set_env("tmtv_reconnect_capability", "1");
+		}
 	} else if (!strcmp(key, "session_name")) {
 		tmate_register_session_name(tmate_session, value);
 	} else if (!strcmp(key, "web_sharing")) {

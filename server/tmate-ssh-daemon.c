@@ -1,12 +1,15 @@
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/file.h>
 #include "tmate.h"
+#include "tmate-resume.h"
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 
 struct tmate_session _tmate_session, *tmate_session = &_tmate_session;
+static volatile sig_atomic_t crash_cleanup;
 
 static void on_daemon_decoder_read(void *userdata, struct tmate_unpacker *uk)
 {
@@ -176,12 +179,17 @@ static void cleanup_session_files(void)
 
 	if (s->session_token)
 		unlinkat(dirfd, s->session_token, 0);
-	if (s->session_token_ro)
-		unlinkat(dirfd, s->session_token_ro, 0);
-	if (s->session_token_named)
-		unlinkat(dirfd, s->session_token_named, 0);
-	if (s->session_token_rw_named)
-		unlinkat(dirfd, s->session_token_rw_named, 0);
+	/* A replacement daemon may already own these aliases. Crash cleanup
+	 * leaves stale aliases for reclamation rather than taking a lock in a
+	 * signal handler (which could interrupt our own critical section). */
+	if (!crash_cleanup && flock(dirfd, LOCK_EX) == 0) {
+		tmtv_alias_remove_owned(dirfd, s->session_token_ro, s->session_token);
+		tmtv_alias_remove_owned(dirfd, s->session_token_named, s->session_token);
+		tmtv_alias_remove_owned(dirfd, s->session_token_rw_named, s->session_token);
+		tmtv_alias_remove_owned(dirfd, s->session_token_stable, s->session_token);
+		tmtv_alias_remove_owned(dirfd, s->session_token_stable_ro, s->session_token);
+		flock(dirfd, LOCK_UN);
+	}
 
 	/* Clean up the per-session jail socket hard-link.
 	 * The path is relative to the jail root, but we can unlink via
@@ -200,10 +208,11 @@ static void cleanup_session_files(void)
 
 /*
  * Crash handler for child (session) processes.
- * cleanup_session_files() only calls unlinkat() which is async-signal-safe.
+ * Do not acquire alias locks from a signal handler.
  */
 static void handle_crash_cleanup(int sig)
 {
+	crash_cleanup = 1;
 	cleanup_session_files();
 
 	/* Re-raise with default handler to get proper exit status */
@@ -632,12 +641,12 @@ static bool is_valid_session_name(const char *name)
 
 extern void tmate_send_web_url(struct tmate_session *session);
 
-void tmate_register_session_name(struct tmate_session *session,
+static void register_session_name_locked(struct tmate_session *session,
 				 const char *name)
 {
 	struct stat st;
 	char *rw_named, *ro_named;
-	char prefix[6];
+	char prefix[33];
 	char *ssh_conn_str;
 	char *old_ro;
 	char *actual_name;
@@ -680,6 +689,20 @@ void tmate_register_session_name(struct tmate_session *session,
 				free(actual_name);
 				return;
 			}
+		}
+
+		/* Only a holder of the private identity may take over a live name. */
+		if (session->session_token_stable &&
+		    (tmtv_alias_points_to(session->sessions_dir_fd, actual_name,
+			 session->resume_previous_token) ||
+		     tmtv_alias_points_to(session->sessions_dir_fd, actual_name,
+			 session->session_token))) {
+			if (tmtv_alias_replace(session->sessions_dir_fd, actual_name,
+			    session->session_token) < 0) {
+				free(actual_name);
+				tmate_fatal("Cannot reclaim owned session name");
+			}
+			break;
 		}
 
 		/* Check if existing symlink is stale (dead socket) */
@@ -733,14 +756,18 @@ void tmate_register_session_name(struct tmate_session *session,
 	name = actual_name;
 	xasprintf(&ro_named, "ro-%s", name);
 
-	/* Generate RW token: <5 random digits>-<name> */
-	snprintf(prefix, sizeof(prefix), "%05d",
-		 (int)(labs(tmate_get_random_long()) % 100000));
+	/* Modern hosts use a stable 128-bit capability, not a guessable PIN. */
+	if (session->session_token_stable)
+		snprintf(prefix, sizeof(prefix), "%s", session->session_token_stable);
+	else
+		snprintf(prefix, sizeof(prefix), "%05d",
+		    (int)(labs(tmate_get_random_long()) % 100000));
 	xasprintf(&rw_named, "%s-%s", prefix, name);
 
 	/* Create RW symlink: <digits>-<name> -> <session_token> */
-	if (symlinkat(session->session_token, session->sessions_dir_fd,
-		      rw_named) < 0) {
+	if ((session->session_token_stable ?
+	    tmtv_alias_replace(session->sessions_dir_fd, rw_named, session->session_token) :
+	    symlinkat(session->session_token, session->sessions_dir_fd, rw_named)) < 0) {
 		tmate_info("RW named symlink failed: %s", strerror(errno));
 		unlinkat(session->sessions_dir_fd, name, 0);
 		tmate_notify("Named session unavailable (%s)",
@@ -752,14 +779,15 @@ void tmate_register_session_name(struct tmate_session *session,
 	}
 
 	/* Create RO symlink: ro-<name> -> <session_token> */
-	if (symlinkat(session->session_token, session->sessions_dir_fd,
-		      ro_named) < 0)
+	if (tmtv_alias_replace(session->sessions_dir_fd, ro_named,
+	    session->session_token) < 0)
 		tmate_info("RO named symlink failed: %s", strerror(errno));
 
 	/* Remove old random RO symlink */
 	old_ro = (char *)session->session_token_ro;
-	if (old_ro)
-		unlinkat(session->sessions_dir_fd, old_ro, 0);
+	if (old_ro && (!session->session_token_stable_ro ||
+	    strcmp(old_ro, session->session_token_stable_ro)))
+		tmtv_alias_remove_owned(session->sessions_dir_fd, old_ro, session->session_token);
 
 	/* Update session state */
 	session->session_token_named = xstrdup(name);
@@ -801,6 +829,61 @@ void tmate_register_session_name(struct tmate_session *session,
 	}
 
 	free(actual_name);
+}
+
+void tmate_register_session_name(struct tmate_session *session, const char *name)
+{
+	if (session->awaiting_identity) {
+		free(session->identity_pending_name);
+		session->identity_pending_name = xstrdup(name);
+		return;
+	}
+	if (session->sessions_dir_fd < 0 ||
+	    flock(session->sessions_dir_fd, LOCK_EX) < 0) {
+		tmate_notify("Named sessions unavailable (cannot lock sessions directory)");
+		return;
+	}
+	register_session_name_locked(session, name);
+	flock(session->sessions_dir_fd, LOCK_UN);
+}
+
+void tmate_register_session_identity(struct tmate_session *session, const char *secret)
+{
+	char rw[33], ro[36], msg[128];
+	int dirfd = session->sessions_dir_fd;
+	ssize_t n;
+
+	if (!session->awaiting_identity || session->session_token_stable ||
+	    session->urls_sent || tmtv_resume_tokens(secret, rw, ro) < 0)
+		tmate_fatal("Invalid session identity handshake");
+	if (dirfd < 0 || flock(dirfd, LOCK_EX) < 0)
+		tmate_fatal("Cannot lock session identity directory");
+	n = readlinkat(dirfd, rw, session->resume_previous_token,
+	    sizeof(session->resume_previous_token));
+	if (n == TMATE_TOKEN_LEN)
+		session->resume_previous_token[n] = '\0';
+	else
+		session->resume_previous_token[0] = '\0';
+	session->session_token_stable = xstrdup(rw);
+	session->session_token_stable_ro = xstrdup(ro);
+	if (tmtv_alias_replace(dirfd, rw, session->session_token) < 0 ||
+	    tmtv_alias_replace(dirfd, ro, session->session_token) < 0)
+		tmate_fatal("Cannot install session identity aliases");
+	tmtv_alias_remove_owned(dirfd, session->session_token_ro, session->session_token);
+	free((char *)session->session_token_ro);
+	session->session_token_ro = xstrdup(ro);
+	session->awaiting_identity = false;
+	/* Keep identity and named handover in one critical section. */
+	if (session->identity_pending_name) {
+		register_session_name_locked(session, session->identity_pending_name);
+		free(session->identity_pending_name);
+		session->identity_pending_name = NULL;
+	}
+	flock(dirfd, LOCK_UN);
+	if (session->ipc_fd >= 0) {
+		snprintf(msg, sizeof(msg), "%s %s %s", SSE_IPC_MSG_REGISTER, rw, ro);
+		sse_ipc_send_msg(session->ipc_fd, msg);
+	}
 }
 
 static void handle_session_name_options(const char *name,

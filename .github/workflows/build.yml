@@ -410,7 +410,7 @@ jobs:
             note_args=(--generate-notes)
           fi
           gh release create "$GITHUB_REF_NAME" artifacts/* \
-            --draft --verify-tag --title "$GITHUB_REF_NAME — The relay keeps moving." \
+            --draft --verify-tag --title "$GITHUB_REF_NAME" \
             "${note_args[@]}"
           # Failed or partial uploads must remain unpublished.
           diff <(find artifacts -maxdepth 1 -type f -printf '%f\n' | sort) \

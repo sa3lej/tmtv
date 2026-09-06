@@ -18,7 +18,7 @@ LIBSSH_CFLAGS := $(shell pkg-config --cflags libssh 2>/dev/null)
 LIBEVENT_CFLAGS := $(shell pkg-config --cflags libevent 2>/dev/null)
 
 UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session test-input-socket test-hardening
-SERVER_TESTS = test-server-header test-session-tmate-ptr test-sse-mux test-server-format test-pty-pending
+SERVER_TESTS = test-server-header test-session-tmate-ptr test-sse-mux test-server-format test-pty-pending test-resume
 TMTV ?= ../tmtv
 
 .PHONY: all unit server-unit functional hooks session-cleanup integration clean
@@ -56,6 +56,7 @@ test-input-socket: test-input-socket.c test-harness.h
 # Extract DEFS and CPPFLAGS from parent Makefile (configure-generated flags)
 PARENT_DEFS := $(shell $(MAKE) -C .. -n -p 2>/dev/null | grep '^DEFS = ' | head -1 | sed 's/^DEFS = //')
 PARENT_CPPFLAGS := $(shell $(MAKE) -C .. -n -p 2>/dev/null | grep '^CPPFLAGS = ' | head -1 | sed 's/^CPPFLAGS = //')
+PARENT_LDFLAGS := $(shell $(MAKE) -C .. -n -p 2>/dev/null | grep '^LDFLAGS = ' | head -1 | sed 's/^LDFLAGS = //')
 UTF8PROC_CFLAGS := $(shell pkg-config --cflags libutf8proc 2>/dev/null)
 
 test-server-header: test-server-header.c test-harness.h ../server/tmate.h ../server/tmate-protocol.h
@@ -74,6 +75,9 @@ test-server-format: test-server-format.c test-harness.h
 
 test-pty-pending: test-pty-pending.c test-harness.h
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+
+test-resume: test-resume.c test-harness.h ../server/tmate-resume.c ../server/tmate-resume.h
+	$(CC) $(CFLAGS) $(PARENT_CPPFLAGS) $(shell pkg-config --cflags libcrypto) -o $@ test-resume.c ../server/tmate-resume.c $(PARENT_LDFLAGS) $(LDFLAGS) $(shell pkg-config --libs libcrypto)
 
 functional:
 	@echo ""

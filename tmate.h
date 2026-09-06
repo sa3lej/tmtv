@@ -86,6 +86,7 @@ struct tmate_session;
 extern void tmate_write_header(struct tmate_session *session);
 extern void tmate_write_uname(struct tmate_session *session);
 extern void tmate_write_ready(struct tmate_session *session);
+extern void tmate_write_session_identity(struct tmate_session *session);
 extern void tmate_sync_layout(struct tmate_session *session,
 			      struct session *s);
 extern void tmate_pty_data(struct tmate_session *session,
@@ -205,6 +206,8 @@ struct tmate_session {
 	char *passphrase;
 
 	bool reconnected;
+	char reconnect_secret[65]; /* host-only, never persisted or put in options */
+	char *reconnect_name;      /* actual assigned name, including a suffix */
 	bool fin_sent;		/* FIN already sent; prevents double-send */
 	struct event *ev_connection_retry;
 	int reconnect_attempts;		/* consecutive retry count */

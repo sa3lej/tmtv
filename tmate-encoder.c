@@ -1,4 +1,6 @@
 #include <sys/utsname.h>
+#include <openssl/rand.h>
+#include <openssl/crypto.h>
 #include "tmate.h"
 #include "tmate-protocol.h"
 
@@ -20,6 +22,22 @@ void tmate_write_header(struct tmate_session *session)
 	pack(int, TMATE_OUT_HEADER);
 	pack(int, TMATE_PROTOCOL_VERSION);
 	pack(string, TMTV_VERSION);
+}
+
+void tmate_write_session_identity(struct tmate_session *session)
+{
+	PACK(session);
+	if (!session->reconnect_secret[0]) {
+		unsigned char secret[32];
+		if (RAND_bytes(secret, sizeof(secret)) != 1)
+			tmate_fatal("Cannot generate session identity");
+		for (unsigned i = 0; i < sizeof(secret); i++)
+			snprintf(session->reconnect_secret + 2*i, 3, "%02x", secret[i]);
+		OPENSSL_cleanse(secret, sizeof(secret));
+	}
+	pack(array, 2);
+	pack(int, TMATE_OUT_SESSION_IDENTITY);
+	pack(string, session->reconnect_secret);
 }
 
 void tmate_write_uname(struct tmate_session *session)
@@ -227,9 +245,19 @@ static void append_saved_cmd(struct tmate_session *session,
 static void replay_saved_cmd(struct tmate_session *session)
 {
 	unsigned int i;
-	for (i = 0; i < sc->tail; i++)
-		__tmate_exec_cmd_args(session, sc->cmds[i].argc,
-				      (const char **)sc->cmds[i].argv);
+	for (i = 0; i < sc->tail; i++) {
+		const char **argv = (const char **)sc->cmds[i].argv;
+		if (session->reconnect_name && sc->cmds[i].argc == 3 &&
+		    !strcmp(argv[0], "set-option") && !strcmp(argv[1], "tmtv-set") &&
+		    !strncmp(argv[2], "session_name=", 13)) {
+			char *value;
+			xasprintf(&value, "session_name=%s", session->reconnect_name);
+			__tmate_exec_cmd_args(session, 3,
+			    (const char *[]){argv[0], argv[1], value});
+			free(value);
+		} else
+			__tmate_exec_cmd_args(session, sc->cmds[i].argc, argv);
+	}
 }
 #undef sc
 

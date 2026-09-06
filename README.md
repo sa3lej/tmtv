@@ -55,12 +55,32 @@ Pick a memorable name instead of a random token:
 set -g tmtv-session-name demo
 ```
 
-Your session is now at:
-- `ssh 12345-demo@tmtv.se` (SSH read-write, random prefix)
+Your session is now at (example prefix):
+
+- `ssh 0123456789abcdef0123456789abcdef-demo@tmtv.se` (SSH read-write)
 - `ssh ro-demo@tmtv.se` (SSH read-only)
 - `https://tmtv.se/s/demo` (web)
 
 Names must be 3-32 characters, alphanumeric and hyphens only.
+
+### Reconnects and restarts
+
+With a **v2.0.4 or newer host client and relay**, automatic reconnects preserve
+the SSH read-write, SSH read-only and web links. This works for unnamed sessions
+too. The host keeps a private random identity in memory; viewer tokens cannot
+be used to claim that identity. Named RW links now have a 32-character
+cryptographic prefix instead of a five-digit number.
+
+Detaching and reattaching to the same running host preserves its identity.
+Ending that host process and starting a new one deliberately creates fresh
+credentials, even with the same name. Nothing is saved to disk for resumption.
+Names remain availability-based, not permanently reserved: an unrelated host
+can occupy a name while yours is offline. The client remembers any assigned
+suffix and warns if a reconnect changes its RW link.
+
+Older clients and relays remain compatible, but keep their previous reconnect
+behavior. Upgrade both ends to get continuity; existing running hosts need to
+be restarted once with the new client.
 
 ### Password-protected sessions
 
@@ -143,7 +163,7 @@ set -g tmtv-link-ttl 3600
 ```
 
 All options can be combined freely. A named session with password and web input gives you:
-- `ssh 12345-demo@tmtv.se` — SSH read-write (password required)
+- `ssh <32-character-prefix>-demo@tmtv.se` — SSH read-write (password required)
 - `ssh ro-demo@tmtv.se` — SSH read-only (password required)
 - `https://tmtv.se/j/demo` — web viewer with typing enabled (password prompt shown)
 

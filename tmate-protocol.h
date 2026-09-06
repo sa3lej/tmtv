@@ -61,6 +61,7 @@ enum tmate_daemon_out_msg_types {
 	TMATE_OUT_SESSION_MODE,
 	TMATE_OUT_INPUT_MODE,
 	TMATE_OUT_CLIPBOARD,
+	TMATE_OUT_SESSION_IDENTITY, /* private; sent only after capability negotiation */
 };
 
 /*

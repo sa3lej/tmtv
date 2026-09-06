@@ -280,6 +280,12 @@ struct tmate_session {
 	unsigned char *session_password_hash; /* SHA-256 hash, NULL if unset */
 
 	const char *session_token;
+	const char *session_token_stable;
+	const char *session_token_stable_ro;
+	char resume_previous_token[17];
+	bool awaiting_identity;
+	bool identity_ready_pending;
+	char *identity_pending_name;
 	const char *session_token_ro;
 	const char *session_token_named;    /* user-chosen name, e.g. "fish" */
 	const char *session_token_rw_named; /* RW symlink: "<digits>-<name>" */
@@ -415,7 +421,7 @@ extern time_t tmate_server_get_start_time(void);
  * Main process uses this to route incoming SSE connections.
  */
 #define SSE_REGISTRY_MAX 100
-#define SSE_TOKEN_MAX    64
+#define SSE_TOKEN_MAX    96
 
 struct sse_registry_entry {
 	char token[SSE_TOKEN_MAX];
@@ -424,7 +430,7 @@ struct sse_registry_entry {
 };
 
 struct sse_registry {
-	struct sse_registry_entry entries[SSE_REGISTRY_MAX * 4]; /* up to 4 tokens per session */
+	struct sse_registry_entry entries[SSE_REGISTRY_MAX * 8];
 	int count;
 };
 

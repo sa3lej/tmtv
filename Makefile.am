@@ -372,6 +372,8 @@ dist_tmtv_server_SOURCES = \
 	server/tmate-main.c \
 	server/tmate-msgpack.c \
 	server/tmate-rand.c \
+	server/tmate-resume.c \
+	server/tmate-resume.h \
 	server/tmate-ssh-client-pty.c \
 	server/tmate-ssh-daemon.c \
 	server/tmate-ssh-exec.c \

@@ -36,7 +36,8 @@ void tmate_send_web_url(struct tmate_session *session)
 
 	const char *url_token = session->session_token_named ?
 				session->session_token_named :
-				session->session_token;
+				(session->session_token_stable ?
+				 session->session_token_stable : session->session_token);
 	const char *path = session->link_ttl > 0 ? "j" : "s";
 	char *url;
 	xasprintf(&url, "https://%s/%s/%s",
@@ -62,7 +63,8 @@ static void tmate_send_session_urls(struct tmate_session *session)
 	 */
 	rw_token = session->session_token_rw_named ?
 		   session->session_token_rw_named :
-		   session->session_token;
+		   (session->session_token_stable ?
+		    session->session_token_stable : session->session_token);
 	ro_token = session->session_token_ro;
 
 	tmate_notify("Note: clear your terminal before sharing readonly access");
@@ -95,6 +97,10 @@ static void tmate_ready(struct tmate_session *session,
 			__unused struct tmate_unpacker *uk)
 {
 	/* This message is also used by the websocket server */
+	if (session->awaiting_identity) {
+		session->identity_ready_pending = true;
+		return;
+	}
 
 	/*
 	 * We only start accepting connections once the host is ready, this
@@ -642,7 +648,8 @@ static void tmate_exec_cmd(__unused struct tmate_session *session,
 	if (argc == 3 &&
 	    !strcmp(argv[0], "set-option") &&
 	    !strcmp(argv[1], "tmtv-set")) {
-		tmate_debug("Sync tmtv-set: %s", argv[2]);
+		/* Private options can contain credentials. Never log their values. */
+		tmate_debug("Sync tmtv-set");
 		tmate_hook_set_option_auth("tmtv-set", argv[2]);
 		cmd_free_argv(argc, argv);
 		return;
@@ -933,6 +940,21 @@ static void tmate_input_mode(struct tmate_session *session,
 	}
 }
 
+extern void tmate_register_session_identity(struct tmate_session *, const char *);
+
+static void tmate_session_identity(struct tmate_session *session,
+				  struct tmate_unpacker *uk)
+{
+	char *secret = unpack_string(uk);
+	tmate_register_session_identity(session, secret);
+	/* This value is neither stored in tmux options nor forwarded to viewers. */
+	freezero(secret, strlen(secret));
+	if (session->identity_ready_pending) {
+		session->identity_ready_pending = false;
+		tmate_ready(session, uk);
+	}
+}
+
 void tmate_dispatch_daemon_message(struct tmate_session *session,
 				   struct tmate_unpacker *uk)
 {
@@ -959,6 +981,7 @@ void tmate_dispatch_daemon_message(struct tmate_session *session,
 	dispatch(TMATE_OUT_UNAME,		tmate_uname);
 	dispatch(TMATE_OUT_INPUT_MODE,		tmate_input_mode);
 	dispatch(TMATE_OUT_CLIPBOARD,		tmate_clipboard);
+	dispatch(TMATE_OUT_SESSION_IDENTITY,	tmate_session_identity);
 	default: tmate_fatal("Bad message type: %d", cmd);
 	}
 }

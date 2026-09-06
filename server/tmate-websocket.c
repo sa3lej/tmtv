@@ -1009,6 +1009,16 @@ static int sse_validate_token(struct ws_client *wc, const char *path,
 	wc->readonly = false;
 
 	/* Check against all session tokens */
+	token = s->session_token_stable;
+	if (token && strlen(token) == token_only_len &&
+	    memcmp(path, token, token_only_len) == 0)
+		return 0;
+	token = s->session_token_stable_ro;
+	if (token && strlen(token) == token_only_len &&
+	    memcmp(path, token, token_only_len) == 0) {
+		wc->readonly = true;
+		return 0;
+	}
 	token = s->session_token;
 	if (token) {
 		tlen = strlen(token);
@@ -2801,6 +2811,15 @@ void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 	msgpack_sbuffer sbuf;
 	msgpack_packer pk;
 	int i;
+
+	/* Host configuration and identity are private, including in replay.
+	 * Browsers render state, not host-side tmux commands. */
+	if (uk->argc > 0 && uk->argv[0].type == MSGPACK_OBJECT_POSITIVE_INTEGER) {
+		int cmd = (int)uk->argv[0].via.u64;
+		if (cmd == TMATE_OUT_SESSION_IDENTITY ||
+		    cmd == TMATE_OUT_EXEC_CMD || cmd == TMATE_OUT_EXEC_CMD_STR)
+			return;
+	}
 
 	if (!tmate_has_websocket())
 		return;

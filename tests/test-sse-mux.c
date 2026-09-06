@@ -21,7 +21,7 @@
 /* We only need the SSE registry types from the server header.
  * Define the types directly to avoid pulling in all dependencies. */
 #define SSE_IPC_MSG_REGISTER   "REG"
-#define SSE_TOKEN_MAX    64
+#define SSE_TOKEN_MAX    96
 
 struct sse_registry_entry {
 	char token[SSE_TOKEN_MAX];
