@@ -13,6 +13,6 @@ for binary in "${expected[@]}"; do
   fi
 done
 diff <(printf '%s\n' "${expected[@]}" | sort) \
-  <(find . -mindepth 1 -maxdepth 1 ! -name SHA256SUMS -printf '%f\n' | sort)
-sha256sum "${expected[@]}" > SHA256SUMS
-sha256sum --check SHA256SUMS
+  <(find . -mindepth 1 -maxdepth 1 ! -name checksums.txt -printf '%f\n' | sort)
+sha256sum "${expected[@]}" > checksums.txt
+sha256sum --check checksums.txt
