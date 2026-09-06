@@ -170,16 +170,21 @@ jobs:
   build-macos-amd64:
     name: Build macOS amd64
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: macos-15
+    # macos-15 is ARM64; use a native Intel runner and its existing Homebrew.
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install x86_64 Homebrew and dependencies
+      - name: Install native Intel dependencies
+        timeout-minutes: 10
         run: |
-          arch -x86_64 /bin/bash -c '
-            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          '
-          arch -x86_64 /usr/local/bin/brew install \
+          test "$(uname -m)" = x86_64
+          test "$(brew --prefix)" = /usr/local
+          brew install \
             autoconf automake pkg-config libevent libssh msgpack-c openssl@3 bison
 
       - name: Build utf8proc static library
@@ -233,9 +238,10 @@ jobs:
       - name: Verify binary
         run: |
           file tmtv
+          test "$(lipo -archs tmtv)" = x86_64
           arch -x86_64 ./tmtv -V
           otool -L tmtv
-          if otool -L tmtv | grep -q '/usr/local/Cellar'; then
+          if otool -L tmtv | grep -q '/opt/homebrew\|/usr/local/'; then
             echo "ERROR: Binary links to Homebrew shared libraries"
             exit 1
           fi
@@ -378,21 +384,38 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-linux, build-linux-cross, build-macos-arm64, build-macos-amd64]
+    needs: [build-linux, build-linux-cross, build-macos-arm64, build-macos-amd64, deploy-server, deploy-web]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
-          files: artifacts/*
+      - name: Verify complete release and generate checksums
+        run: bash .github/scripts/verify-release-assets.sh artifacts
+
+      - name: Upload draft and publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if test -f "$notes"; then
+            note_args=(--notes-file "$notes")
+          else
+            note_args=(--generate-notes)
+          fi
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --draft --verify-tag --title "$GITHUB_REF_NAME — The relay keeps moving." \
+            "${note_args[@]}"
+          # Failed or partial uploads must remain unpublished.
+          diff <(find artifacts -maxdepth 1 -type f -printf '%f\n' | sort) \
+            <(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | sort)
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
 
       - name: Update Homebrew tap
         continue-on-error: true
