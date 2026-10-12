@@ -1,0 +1,92 @@
+name: Develop validation
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  linux:
+    name: Linux host, relay and local tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential autoconf automake pkg-config bison \
+            libevent-dev libncurses-dev libssh-dev libmsgpack-dev \
+            libbsd-dev libssl-dev libutf8proc-dev python3
+
+      - name: Build host and relay with sixel
+        run: |
+          sh autogen.sh
+          ./configure --enable-sixel --enable-utf8proc
+          grep -q '^DEFS = .* -DENABLE_SIXEL=1' Makefile
+          make -j"$(nproc)"
+          ./tmtv -V
+          ./tmtv-server -V
+
+      - name: Run local tests
+        # These targets need no relay credentials or deployed test host.
+        # The separate integration target requires TEST_HOST and is excluded.
+        # The wiring target has stale baseline source assertions; migration
+        # must update those before they can become a validation gate.
+        run: |
+          TEST_ROOT="${RUNNER_TEMP}/develop-validation"
+          export XDG_CONFIG_HOME="$TEST_ROOT/config"
+          mkdir -p "$XDG_CONFIG_HOME/tmtv"
+          printf "set -s tmtv-server-host ''\n" > "$XDG_CONFIG_HOME/tmtv/tmtv.conf"
+          export TMTV="${GITHUB_WORKSPACE}/tmtv"
+          make -C tests all TMTV="$TMTV"
+
+  macos:
+    name: macOS host build
+    # The relay is Linux-only in Makefile.am.
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          brew install autoconf automake pkg-config bison \
+            libevent libssh msgpack-c openssl@3 utf8proc
+
+      - name: Build host with sixel
+        # Dynamic linkage is enough for validation; release packaging remains
+        # in build.yml. Use Homebrew bison rather than the system's older yacc.
+        run: |
+          export PATH="$(brew --prefix bison)/bin:$PATH"
+          BREW_PREFIX="$(brew --prefix)"
+          OPENSSL_PREFIX="$(brew --prefix openssl@3)"
+          export PKG_CONFIG_PATH="${OPENSSL_PREFIX}/lib/pkgconfig:${BREW_PREFIX}/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+          sh autogen.sh
+          ./configure --enable-sixel --enable-utf8proc \
+            CPPFLAGS="-I${BREW_PREFIX}/include -I${OPENSSL_PREFIX}/include" \
+            LDFLAGS="-L${BREW_PREFIX}/lib -L${OPENSSL_PREFIX}/lib"
+          grep -q '^DEFS = .* -DENABLE_SIXEL=1' Makefile
+          make -j"$(sysctl -n hw.ncpu)"
+          ./tmtv -V
