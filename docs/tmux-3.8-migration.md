@@ -115,3 +115,34 @@ tests through actual encoders, decoders, authenticated viewers and composed
 rendering, including overlap, hidden/modal panes, zoom, resize, reconnect,
 read-only rejection, clipboard, recording, SIXEL and synchronized output.
 Cross-platform acceptance also requires macOS builds, including Intel.
+
+## Portable compatibility stage
+
+The first implementation stage imports `compat/base64.c`, `compat/getline.c`,
+`compat/getopt_long.c`, `compat/getpeereid.c` and `compat/imsg-buffer.c` verbatim
+from the pinned 3.8 commit. `compat.h` adopts the matching unsigned input
+prototype for `b64_ntop`. This brings in the line-buffer growth overflow guard,
+correct socket credential length type and upstream declaration cleanups.
+It does not change the reported core version or pane/protocol behavior.
+
+`tests/test-compat.c` compiles the actual production base64, line-reader and
+peer-credential fallback sources under private symbol names, even when libc
+provides native alternatives. Tests cover binary round trips and padding,
+invalid base64 and undersized destinations with a guard byte, growth across
+multiple buffer reallocations, final lines without newline, and credentials
+from a real Unix socket pair. Platforms with credential APIs additionally
+check invalid-descriptor rejection without overwriting the output identity.
+
+Linux host and relay builds with `--enable-sixel` passed after this import.
+All 162 standard tests passed (the previous 158 plus four fallback tests).
+The four fallback tests also passed AddressSanitizer and UndefinedBehaviorSanitizer
+with leak detection enabled. These checks validate this limited stage, not
+3.8 floating panes or full migrated host/relay compatibility. Source wiring
+assertions were not rerun; their supplied stale baseline failures remain
+unresolved. macOS and other platform validation is still outstanding.
+
+`compat/fgetln.c` and its declaration remain until the core callers and build
+selection migrate together. `compat/systemd.c` remains unchanged in this
+stage: the upstream cgroup dependency behavior requires separate validation,
+and this host has no `libsystemd` development package. The fuzz-only macros
+in the upstream `compat.h` change also remain for the later fuzz/core stage.

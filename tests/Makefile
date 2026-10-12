@@ -17,7 +17,7 @@ MSGPACK_LIBS := $(shell pkg-config --libs msgpack-c 2>/dev/null || pkg-config --
 LIBSSH_CFLAGS := $(shell pkg-config --cflags libssh 2>/dev/null)
 LIBEVENT_CFLAGS := $(shell pkg-config --cflags libevent 2>/dev/null)
 
-UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session test-input-socket test-hardening
+UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session test-input-socket test-hardening test-compat
 SERVER_TESTS = test-server-header test-session-tmate-ptr test-sse-mux test-server-format test-pty-pending test-resume
 TMTV ?= ../tmtv
 
@@ -34,6 +34,10 @@ server-unit: $(SERVER_TESTS)
 	@echo ""
 	@echo "Running server unit tests..."
 	@for t in $(SERVER_TESTS); do ./$$t || exit 1; done
+
+# Compile the production fallbacks even on platforms with native functions.
+test-compat: test-compat.c test-harness.h ../compat/base64.c ../compat/getline.c ../compat/getpeereid.c ../compat.h ../tmux.h
+	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
 
 test-msgpack: test-msgpack.c test-harness.h
 	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) -o $@ $< $(LDFLAGS) $(MSGPACK_LIBS)
