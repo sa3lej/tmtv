@@ -240,3 +240,32 @@ implementation; authenticated relay child execution is not covered here.
 macOS, complete 3.8 core/header integration, floating layouts/protocol and
 viewer validation remain outstanding. Runtime version remains 3.6a. This
 stage is committed locally, with no push, release, tag or deployment.
+
+## IPC peer stage
+
+`proc.c` now matches the pinned official 3.8 blob exactly, and `tmux.h`
+exposes `proc_get_peer_gid`. Peers retain both Unix credentials, setting both
+identities to their invalid sentinel if credential lookup fails. Message
+extraction uses `imsgbuf_get`, matching the production compatibility library's
+current API. Fork authentication message IDs and IPC version 8 remain in
+`tmux-protocol.h`. The upstream optional jemalloc diagnostic is included;
+this build does not enable or validate jemalloc.
+
+`tests/test-proc.c` compiles the production peer implementation and links the
+actual imsg, allocation, logging and credential sources. Four cases use real
+Unix sockets and the libevent dispatcher: current uid/gid plus authentication
+public-key message and descriptor transfer, rejection of a mismatched IPC
+version before authentication dispatch with a version reply, disconnect
+notification, and invalid uid/gid on a non-socket descriptor. Bounded polling
+prevents a missing event from hanging the suite. Unused process startup and
+daemonization functions are discarded by the linker; this is IPC transport
+validation, not end-to-end authentication or daemon lifecycle validation.
+
+Both Linux host and relay SIXEL builds pass and contain the new group accessor.
+All 178 standard tests pass (174 existing plus four IPC cases); the four new
+cases also pass AddressSanitizer and UndefinedBehaviorSanitizer with leak
+detection. Existing relay unchecked-write warnings remain. Full 3.8 header,
+event/pane lifetime and floating protocol integration, authenticated viewer
+validation, macOS and stale wiring-baseline reconciliation are outstanding.
+Runtime still reports the 3.6a core. This stage is local only, with no push,
+tag, release or deployment.

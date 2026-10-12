@@ -17,9 +17,10 @@ MSGPACK_LIBS := $(shell pkg-config --libs msgpack-c 2>/dev/null || pkg-config --
 LIBSSH_CFLAGS := $(shell pkg-config --cflags libssh 2>/dev/null)
 LIBEVENT_CFLAGS := $(shell pkg-config --cflags libevent 2>/dev/null)
 
-UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session test-input-socket test-hardening test-compat test-json
+UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session test-input-socket test-hardening test-compat test-json test-proc
 SERVER_TESTS = test-server-header test-session-tmate-ptr test-sse-mux test-server-format test-pty-pending test-resume
 TMTV ?= ../tmtv
+GC_SECTIONS := $(shell if [ "$$(uname -s)" = Darwin ]; then echo -Wl,-dead_strip; else echo -Wl,--gc-sections; fi)
 
 .PHONY: all unit server-unit functional hooks session-cleanup prompt-history child-environment integration clean
 
@@ -42,6 +43,10 @@ test-compat: test-compat.c test-harness.h ../compat/base64.c ../compat/getline.c
 # Link the same parser and allocation implementations used by host and relay.
 test-json: test-json.c test-harness.h ../json.c ../xmalloc.c ../xmalloc.h ../compat/recallocarray.c ../tmux.h
 	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) -I.. -o $@ test-json.c ../json.c ../xmalloc.c ../compat/recallocarray.c $(LDFLAGS) $(shell pkg-config --libs libevent) $(LIBBSD)
+
+# Compile actual peer/libevent/imsg paths; discard unused process startup code.
+test-proc: test-proc.c test-harness.h ../proc.c ../tmux.h ../compat/imsg.c ../compat/imsg-buffer.c ../compat/getpeereid.c ../xmalloc.c ../log.c
+	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -ffunction-sections -fdata-sections -o $@ test-proc.c ../compat/imsg.c ../compat/imsg-buffer.c ../compat/getpeereid.c ../compat/recallocarray.c ../xmalloc.c ../log.c $(LDFLAGS) $(GC_SECTIONS) $(shell pkg-config --libs libevent) $(LIBBSD)
 
 test-msgpack: test-msgpack.c test-harness.h
 	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) -o $@ $< $(LDFLAGS) $(MSGPACK_LIBS)
