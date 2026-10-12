@@ -269,3 +269,31 @@ event/pane lifetime and floating protocol integration, authenticated viewer
 validation, macOS and stale wiring-baseline reconciliation are outstanding.
 Runtime still reports the 3.6a core. This stage is local only, with no push,
 tag, release or deployment.
+
+## Deferred pane lifetime prerequisite
+
+Pane allocation now starts with one owner reference, and the reference API
+matches pinned 3.8. Destruction removes the pane from the lookup tree, marks
+it destroyed, tears down modes, closes PTY/pipe descriptors and input contexts,
+and cancels resize/sync timers immediately. Screen, options and metadata
+freeing waits for the last reference. This prepares retained event payloads;
+current notification callers have not migrated. A retained destroyed pane's
+window pointer is not a usable target without a separate window reference.
+The fork recording callback and synchronized rendering cleanup are preserved.
+
+`tests/test-window-lifetime.c` links all host production objects, with only
+`tmux.c`'s entrypoint renamed. There are no lifecycle or cleanup stubs. Three
+cases cover two payload-style references, lookup/list removal, real descriptor
+closure, input cleanup, queued resize cleanup, cancellation of a production
+sync timer and a resize sentinel timer, pane retention across whole-window
+destruction, and ordinary unretained multi-pane destruction. The resize timer
+sentinel checks cancellation; it does not exercise resize scheduling.
+
+Both Linux SIXEL binaries build and all 181 standard tests pass. The three
+lifetime cases also pass ASan/UBSan with leak detection, instrumenting the
+production `window.c`, test entrypoint and renamed `tmux.c`; other linked host
+objects retain their normal build. Normal host/relay objects and binaries were
+restored afterwards. These checks do not establish authenticated relay,
+recording, floating protocol or macOS compatibility. Full event payload and
+notification migration, header/core reconciliation and end-to-end validation
+remain outstanding. Runtime remains 3.6a; this stage is local only.

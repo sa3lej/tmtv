@@ -437,3 +437,16 @@ install-exec-hook:
 	$(mkdir_p) $(DESTDIR)$(mandir)/man1
 	$(INSTALL_DATA) $(srcdir)/tmtv.1.@MANFORMAT@ \
 		$(DESTDIR)$(mandir)/man1/tmtv.1
+
+# Exercise pane lifetimes with all host production objects, without its entrypoint.
+tests/test-window-tmux.o: tmux.c tmux.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -Dmain=tmtv_program_main -c $(srcdir)/tmux.c -o $@
+
+tests/test-window-lifetime.o: tests/test-window-lifetime.c tmux.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-window-lifetime.c -o $@
+
+tests/test-window-lifetime: tests/test-window-lifetime.o tests/test-window-tmux.o $(tmtv_OBJECTS) $(tmtv_DEPENDENCIES)
+	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-window-lifetime.o tests/test-window-tmux.o $(filter-out tmux.o,$(tmtv_OBJECTS)) $(tmtv_LDADD) $(LIBS)
+
+CLEANFILES += tests/test-window-lifetime tests/test-window-lifetime.o tests/test-window-tmux.o
+EXTRA_DIST += tests/test-window-lifetime.c

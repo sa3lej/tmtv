@@ -75,6 +75,7 @@ struct window_pane_input_data {
 static struct window_pane *window_pane_create(struct window *, u_int, u_int,
 		    u_int);
 static void	window_pane_destroy(struct window_pane *);
+static void	window_pane_free(struct window_pane *);
 static void	window_pane_full_size_offset(struct window_pane *wp,
 		    u_int *xoff, u_int *yoff, u_int *sx, u_int *sy);
 
@@ -410,6 +411,25 @@ window_remove_ref(struct window *w, const char *from)
 
 	if (w->references == 0)
 		window_destroy(w);
+}
+
+void
+window_pane_add_ref(struct window_pane *wp, const char *from)
+{
+	wp->references++;
+	log_debug("%s: %%%u %s, now %d", __func__, wp->id, from,
+	    wp->references);
+}
+
+void
+window_pane_remove_ref(struct window_pane *wp, const char *from)
+{
+	wp->references--;
+	log_debug("%s: %%%u %s, now %d", __func__, wp->id, from,
+	    wp->references);
+
+	if (wp->references == 0)
+		window_pane_free(wp);
 }
 
 void
@@ -943,6 +963,7 @@ window_pane_create(struct window *w, u_int sx, u_int sy, u_int hlimit)
 	char			 host[HOST_NAME_MAX + 1];
 
 	wp = xcalloc(1, sizeof *wp);
+	wp->references = 1;
 	wp->window = w;
 	wp->options = options_create(w->options);
 	wp->flags = (PANE_STYLECHANGED|PANE_THEMECHANGED);
@@ -985,11 +1006,11 @@ window_pane_create(struct window *w, u_int sx, u_int sy, u_int hlimit)
 static void
 window_pane_destroy(struct window_pane *wp)
 {
-	struct window_pane_resize	*r;
-	struct window_pane_resize	*r1;
+	struct window_pane_resize *r, *r1;
 
+	RB_REMOVE(window_pane_tree, &all_window_panes, wp);
+	wp->flags |= PANE_DESTROYED;
 	window_pane_reset_mode_all(wp);
-	free(wp->searchstr);
 
 	if (wp->fd != -1) {
 #ifdef HAVE_UTEMPTER
@@ -997,20 +1018,20 @@ window_pane_destroy(struct window_pane *wp)
 		kill(getpid(), SIGCHLD);
 #endif
 		bufferevent_free(wp->event);
+		wp->event = NULL;
 		close(wp->fd);
+		wp->fd = -1;
 	}
-	if (wp->ictx != NULL)
+	if (wp->ictx != NULL) {
 		input_free(wp->ictx);
-
-	screen_free(&wp->status_screen);
-
-	screen_free(&wp->base);
-
+		wp->ictx = NULL;
+	}
 	if (wp->pipe_fd != -1) {
 		bufferevent_free(wp->pipe_event);
+		wp->pipe_event = NULL;
 		close(wp->pipe_fd);
+		wp->pipe_fd = -1;
 	}
-
 	if (event_initialized(&wp->resize_timer))
 		event_del(&wp->resize_timer);
 	if (event_initialized(&wp->sync_timer))
@@ -1019,9 +1040,17 @@ window_pane_destroy(struct window_pane *wp)
 		TAILQ_REMOVE(&wp->resize_queue, r, entry);
 		free(r);
 	}
+	window_pane_remove_ref(wp, __func__);
+}
 
-	RB_REMOVE(window_pane_tree, &all_window_panes, wp);
+static void
+window_pane_free(struct window_pane *wp)
+{
+	log_debug("pane %%%u freed (%d references)", wp->id, wp->references);
 
+	free(wp->searchstr);
+	screen_free(&wp->status_screen);
+	screen_free(&wp->base);
 	options_free(wp->options);
 	free((void *)wp->cwd);
 	free(wp->shell);

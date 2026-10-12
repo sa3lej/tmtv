@@ -1166,6 +1166,8 @@ TAILQ_HEAD(window_pane_resizes, window_pane_resize);
 
 /* Child window structure. */
 struct window_pane {
+	int		 references;
+
 	u_int		 id;
 	u_int		 active_point;
 
@@ -1198,6 +1200,7 @@ struct window_pane {
 #define PANE_THEMECHANGED 0x2000
 #define PANE_UNSEENCHANGES 0x4000
 #define PANE_REDRAWSCROLLBAR 0x8000
+#define PANE_DESTROYED 0x10000
 
 	u_int		 sb_slider_y;
 	u_int		 sb_slider_h;
@@ -3299,6 +3302,8 @@ void		 window_destroy_panes(struct window *);
 struct window_pane *window_pane_find_by_id_str(const char *);
 struct window_pane *window_pane_find_by_id(u_int);
 int		 window_pane_destroy_ready(struct window_pane *);
+void		 window_pane_add_ref(struct window_pane *, const char *);
+void		 window_pane_remove_ref(struct window_pane *, const char *);
 void		 window_pane_resize(struct window_pane *, u_int, u_int);
 int		 window_pane_set_mode(struct window_pane *,
 		     struct window_pane *, const struct window_mode *,
