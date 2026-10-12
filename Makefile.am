@@ -162,6 +162,7 @@ dist_tmtv_SOURCES = \
 	input-keys.c \
 	input.c \
 	job.c \
+	json.c \
 	key-bindings.c \
 	key-string.c \
 	layout-custom.c \
@@ -314,6 +315,7 @@ dist_tmtv_server_SOURCES = \
 	input-keys.c \
 	input.c \
 	job.c \
+	json.c \
 	key-bindings.c \
 	key-string.c \
 	layout-custom.c \

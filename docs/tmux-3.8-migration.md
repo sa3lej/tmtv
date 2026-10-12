@@ -146,3 +146,31 @@ selection migrate together. `compat/systemd.c` remains unchanged in this
 stage: the upstream cgroup dependency behavior requires separate validation,
 and this host has no `libsystemd` development package. The fuzz-only macros
 in the upstream `compat.h` change also remain for the later fuzz/core stage.
+
+## JSON layout support stage
+
+`json.c`, `xmalloc.c` and `xmalloc.h` now match the pinned official 3.8
+blobs exactly. Both production source lists include the parser and `tmux.h`
+exposes its upstream API. This prepares for JSON layouts without activating
+layout reconstruction, floating panes or a sharing protocol extension.
+The host and relay still report the 3.6a core version.
+
+`tests/test-json.c` links the production parser, allocation helpers and
+recallocarray fallback. Five tests cover pane-shaped object-array round trips,
+escape preservation, signed 64-bit boundaries, malformed/unsupported input,
+duplicate keys, excessive nesting, token-array growth, lookup type/missing-key
+errors, binary-safe memory duplication and the fatal multiplication-overflow
+guard in `xcalloc`. The parser is upstream's restricted JSON subset: arrays
+contain objects, strings cannot be empty, and escapes are preserved rather
+than decoded. It must not be treated as a general-purpose JSON decoder.
+
+Linux host and relay SIXEL builds passed and both binaries contain the parser
+and memory-copy symbols. All 167 standard tests passed. All five new tests
+also passed AddressSanitizer and UndefinedBehaviorSanitizer with leak detection.
+GCC emits a possible-uninitialized warning for the upstream tokenizer's `loc`
+under the test optimization flags; empty input returns before tokenization,
+and whitespace-only rejection is exercised by the sanitized tests. The
+upstream implementation is retained. The existing relay unchecked-write
+warnings remain. macOS, source wiring baseline reconciliation, full 3.8 core
+integration and authenticated floating-layout/viewer validation remain
+outstanding; this support stage does not establish those results.
