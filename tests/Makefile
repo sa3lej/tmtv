@@ -21,9 +21,9 @@ UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session 
 SERVER_TESTS = test-server-header test-session-tmate-ptr test-sse-mux test-server-format test-pty-pending test-resume
 TMTV ?= ../tmtv
 
-.PHONY: all unit server-unit functional hooks session-cleanup integration clean
+.PHONY: all unit server-unit functional hooks session-cleanup prompt-history integration clean
 
-all: unit server-unit functional hooks session-cleanup
+all: unit server-unit functional hooks session-cleanup prompt-history
 
 unit: $(UNIT_TESTS)
 	@echo ""
@@ -91,6 +91,9 @@ functional:
 	@echo ""
 	@echo "Running functional tests..."
 	@TMTV=$(TMTV) sh test-functional.sh
+
+prompt-history:
+	@TMTV=$(TMTV) python3 test-prompt-history.py
 
 hooks:
 	@echo ""

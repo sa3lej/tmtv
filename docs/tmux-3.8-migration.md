@@ -141,8 +141,9 @@ with leak detection enabled. These checks validate this limited stage, not
 assertions were not rerun; their supplied stale baseline failures remain
 unresolved. macOS and other platform validation is still outstanding.
 
-`compat/fgetln.c` and its declaration remain until the core callers and build
-selection migrate together. `compat/systemd.c` remains unchanged in this
+`compat/fgetln.c` and its declaration were retained here until the history
+reader stage below migrated the caller and build selection together.
+`compat/systemd.c` remains unchanged in this
 stage: the upstream cgroup dependency behavior requires separate validation,
 and this host has no `libsystemd` development package. The fuzz-only macros
 in the upstream `compat.h` change also remain for the later fuzz/core stage.
@@ -174,3 +175,42 @@ upstream implementation is retained. The existing relay unchecked-write
 warnings remain. macOS, source wiring baseline reconciliation, full 3.8 core
 integration and authenticated floating-layout/viewer validation remain
 outstanding; this support stage does not establish those results.
+
+## Prompt history reader stage
+
+The history loader in `status.c` now uses the pinned 3.8 `prompt-history.c`
+implementation, with only existing `status_prompt_*` API names substituted.
+It owns and frees a reusable `getline` buffer, strips newline terminators,
+and handles final lines without a newline. The last `fgetln` caller, fallback
+source, compatibility declaration and configure selection have migrated
+together. This does not yet move the prompt subsystem into the new 3.8 modules.
+
+`tests/test-prompt-history.py` starts isolated production host servers and
+queries `show-prompt-history`. Four tests cover all four prompt types, legacy
+and unknown type prefixes, embedded colons, blank entries, a 64 KiB line,
+buffer reuse, final lines without newline, and empty/missing files. Both Linux
+SIXEL binaries build and the standard suite passes 171 tests (167 existing
+plus four history tests). These tests also pass with the production portable
+`getline` linked into both binaries; symbol inspection confirms the fallback
+is present and `fgetln` is absent. Relay history loading is not exercised as
+an authenticated viewer scenario by these tests.
+
+On glibc, forcing an otherwise unnecessary fallback exposes its native
+`getdelim` declaration. The test-only preinclude reads that declaration before
+renaming the fallback's private helper; the pinned production source stays
+unchanged. Reproduce from the repository root:
+
+```sh
+./configure --enable-sixel ac_cv_func_getline=no \
+  CPPFLAGS="-include $PWD/tests/test-getline-config.h"
+make -j4
+make -C tests prompt-history
+```
+
+Restore the native configuration with `./configure --enable-sixel` and force
+relinking with `make -W status.o -W tmtv_server-status.o tmtv tmtv-server`;
+changing configure's fallback library list alone may leave existing binaries
+linked with the fallback. The native configuration and binaries were restored
+and checked with `nm` after this stage. Both binaries
+still report tmux 3.6a. Full 3.8 core, floating layout/protocol, authenticated
+viewer, macOS and stale wiring-baseline validation remain outstanding.
