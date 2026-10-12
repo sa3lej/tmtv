@@ -214,3 +214,29 @@ linked with the fallback. The native configuration and binaries were restored
 and checked with `nm` after this stage. Both binaries
 still report tmux 3.6a. Full 3.8 core, floating layout/protocol, authenticated
 viewer, macOS and stale wiring-baseline validation remain outstanding.
+
+## Shared child environment stage
+
+`environ.c` now adopts all changes from the pinned 3.8 implementation:
+NULL-safe environment cleanup, const-correct parsing and retention of inherited
+terminal variables for configuration jobs. Its only differences from that
+source are the existing defensive logging allocation check and tmtv's child
+identity hooks (`TMTV`, isolated `TMUX`, and `TMUX_PROGRAM`). Configuration
+`if-shell` and `run-shell` jobs can now inspect the outside terminal; ordinary
+panes still receive `default-terminal` and the multiplexer terminal metadata.
+
+`tests/test-child-environment.py` executes the production host's startup,
+configuration job and pane spawn paths on isolated local sockets. Three cases
+inspect actual child environments: inherited terminal metadata and socket
+identity, explicitly unset and hidden variables, and pane terminal overrides
+with matching session identity. The two configuration cases failed against
+the previous binary because `TERM` was removed, then passed after this port.
+Snapshots are written atomically to avoid reading partial child output.
+
+Validation: both Linux host and relay SIXEL binaries build, `make -C tests all`
+passes all 174 standard cases, and the three new cases pass again after the
+atomic snapshot change. Relay compilation uses the same migrated environment
+implementation; authenticated relay child execution is not covered here.
+macOS, complete 3.8 core/header integration, floating layouts/protocol and
+viewer validation remain outstanding. Runtime version remains 3.6a. This
+stage is committed locally, with no push, release, tag or deployment.
