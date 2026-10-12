@@ -152,6 +152,7 @@ dist_tmtv_SOURCES = \
 	control-notify.c \
 	control.c \
 	environ.c \
+	events-payload.c \
 	file.c \
 	format.c \
 	format-draw.c \
@@ -305,6 +306,7 @@ dist_tmtv_server_SOURCES = \
 	control-notify.c \
 	control.c \
 	environ.c \
+	events-payload.c \
 	file.c \
 	format.c \
 	format-draw.c \
@@ -450,3 +452,13 @@ tests/test-window-lifetime: tests/test-window-lifetime.o tests/test-window-tmux.
 
 CLEANFILES += tests/test-window-lifetime tests/test-window-lifetime.o tests/test-window-tmux.o
 EXTRA_DIST += tests/test-window-lifetime.c
+
+# Exercise event payloads through the complete production host.
+tests/test-event-payload.o: tests/test-event-payload.c tmux.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-event-payload.c -o $@
+
+tests/test-event-payload: tests/test-event-payload.o tests/test-window-tmux.o $(tmtv_OBJECTS) $(tmtv_DEPENDENCIES)
+	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-event-payload.o tests/test-window-tmux.o $(filter-out tmux.o,$(tmtv_OBJECTS)) $(tmtv_LDADD) $(LIBS)
+
+CLEANFILES += tests/test-event-payload tests/test-event-payload.o
+EXTRA_DIST += tests/test-event-payload.c

@@ -297,3 +297,33 @@ restored afterwards. These checks do not establish authenticated relay,
 recording, floating protocol or macOS compatibility. Full event payload and
 notification migration, header/core reconciliation and end-to-end validation
 remain outstanding. Runtime remains 3.6a; this stage is local only.
+
+## Retained event payload prerequisite
+
+`events-payload.c` matches the pinned official 3.8 blob exactly. Both host and
+relay source lists now compile it, and `tmux.h` exposes the matching opaque
+payload types, callbacks and API. Existing notification callers remain on
+`notify.c`; the new event dispatcher and hook subsystem are a later stage.
+Winlink session ownership was already initialized on all production allocation
+paths and needed no change.
+
+`tests/test-event-payload.c` links the complete production host with only its
+entrypoint renamed. Four cases exercise typed values and format expansion,
+private format exclusion, owned pointer replacement/free callbacks, repeated
+pane-item replacement, retention across whole-window destruction, inferred
+session/window targets, balanced target replacement, dead-session recovery,
+and fallback from a removed target pane to the active live pane. Fixture
+sessions/windows use production allocators; destruction and queued notification
+cleanup also run through production code. These tests introduce no stubs.
+
+Both Linux SIXEL binaries build and all 185 standard cases pass. The four new
+cases also pass ASan/UBSan with leak detection, instrumenting the payload,
+window, session and command-target implementations plus the test and renamed
+entrypoint and the reallocarray fallback; other linked host objects retain
+their normal build. Native configuration, objects and binaries were rebuilt
+from clean state, checked for absence of sanitizer symbols, and the standard
+suite passed again. These checks do not validate event dispatch or
+notification migration, client payload lifecycle, authenticated relay/viewer
+execution, floating protocol or macOS. Runtime still reports 3.6a, and stale
+wiring-baseline reconciliation remains outstanding. This stage is local only,
+with no push, tag, release or deployment.
