@@ -508,3 +508,12 @@ tests/test-monitor: tests/test-monitor.o tests/test-window-tmux.o $(tmtv_OBJECTS
 
 CLEANFILES += tests/test-monitor tests/test-monitor.o
 EXTRA_DIST += tests/test-monitor.c
+
+tests/test-control-subscriptions.o: tests/test-control-subscriptions.c tmux.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-control-subscriptions.c -o $@
+
+tests/test-control-subscriptions: tests/test-control-subscriptions.o tests/test-window-tmux.o $(tmtv_OBJECTS) $(tmtv_DEPENDENCIES)
+	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-control-subscriptions.o tests/test-window-tmux.o $(filter-out tmux.o,$(tmtv_OBJECTS)) $(tmtv_LDADD) $(LIBS)
+
+CLEANFILES += tests/test-control-subscriptions tests/test-control-subscriptions.o
+EXTRA_DIST += tests/test-control-subscriptions.c

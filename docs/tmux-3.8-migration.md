@@ -467,3 +467,53 @@ hook sink registration/notify caller replacement, floating layout/protocol,
 recording/clipboard/SIXEL/synchronized-rendering end-to-end and stale wiring
 validation remain outstanding. Runtime still reports 3.6a. Local commits only;
 remote pushes, tags, release and deployment remain held.
+
+## Control subscriptions through the shared monitor API
+
+Control mode now creates a client-owned monitor set and uses the pinned 3.8
+`control_add_sub`/`control_remove_sub` adapters. The old per-control-client
+subscription trees, cached values and timer are removed. The subscription
+change callback preserves the session/window/pane output shapes, using the
+existing `control_write` path until the broader notification guard migration.
+`control_stop` destroys the monitor before freeing transport state and adopts
+the pinned null-state guard and pointer clearing for repeated stop calls.
+
+The `refresh-client -B` helper matches pinned 3.8 exactly and uses
+`monitor_parse`. Known session (`name::format`), pane, all-pane, window and
+all-window selectors remain supported; unknown selectors no longer silently
+become session subscriptions. A bare name removes its subscription. Other
+refresh options, fork clipboard behavior, command routing and existing
+read-only gates are unchanged.
+
+Four cases in `tests/test-control-subscriptions.c` link the entire production
+host with only its entrypoint renamed. Real socket output and bounded libevent
+timers verify exact subscription lines, initial/change notifications,
+unchanged-value suppression, notification of false values, same-name
+replacement, removal, all-pane/all-window scans, single-window session
+isolation, following the client's new session, detached-session suppression,
+and stop cancellation of a pending timer. The single-pane case sends the
+actual refresh command through the control input socket, production parser
+and queue, then verifies a closed pane is ignored. Repeated stop clears client
+state safely. Replacing only the refresh helper with its previous parser
+(adapting enum names) fails the unknown-selector case and passes the other
+three cases.
+
+Linux SIXEL host and relay builds succeed. All 205 standard cases pass
+(198 C/shell and seven Python). The four control cases also pass ASan/UBSan
+with leak detection using isolated instrumented control, refresh, command
+parser, format, monitor, hooks, options, events, event payload, window, session,
+command queue, test and renamed entrypoint objects; other host objects retain
+normal compilation. Normal production objects are never replaced. Logs,
+negative-control source/binary and sanitizer reproduction script are under
+`.deps/tmux38-control-validation`. Normal host, relay and control test have no
+sanitizer references. The existing relay build warnings for unchecked `write`
+results remain; this stage introduces no compiler errors.
+
+This stage does not exercise authenticated relay or SSH/web clients, read-only
+command rejection, subscription mutation from callbacks, or macOS. Broader
+pinned control I/O changes (notification guards, reply backpressure, flushing
+and per-window sizes) remain unported. Monitor command syntax, string-key
+option arrays, expanded built-in monitor hooks and startup sink registration/
+notify replacement remain ahead, alongside the full core/header reconciliation,
+floating-pane protocol and rendering/input integration. Both built runtimes
+still report tmux 3.6a. Remote push, tags, release and deployment remain held.
