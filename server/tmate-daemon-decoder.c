@@ -782,13 +782,17 @@ static void tmate_write_copy_mode(__unused struct tmate_session *session,
 				  struct tmate_unpacker *uk)
 {
 	struct window_pane *wp;
-	int id;
+	int64_t id;
 	char *str;
 
 	id = unpack_int(uk);
-	wp = window_pane_find_by_id(id);
+	/* Validate the wire value before narrowing to the pane identifier. */
+	if (id < 0 || id > UINT_MAX)
+		return;
+	wp = window_pane_find_by_id((u_int)id);
 	if (!wp) {
-		tmate_info("copy_mode for unknown pane id=%d, discarding", id);
+		tmate_info("copy_mode for unknown pane id=%u, discarding",
+		    (u_int)id);
 		return;
 	}
 

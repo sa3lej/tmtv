@@ -14,7 +14,7 @@ read_message(void *session, struct tmate_unpacker *uk)
 }
 
 static void
-write_output(int id, const char *text, int fragmented)
+write_output(int64_t id, const char *text, int fragmented)
 {
 	struct tmate_decoder decoder;
 	msgpack_sbuffer sb;
@@ -27,7 +27,7 @@ write_output(int id, const char *text, int fragmented)
 	msgpack_packer_init(pk, &sb, msgpack_sbuffer_write);
 	msgpack_pack_array(pk, 3);
 	msgpack_pack_int(pk, TMATE_OUT_WRITE_COPY_MODE);
-	msgpack_pack_int(pk, id);
+	msgpack_pack_int64(pk, id);
 	msgpack_pack_string(pk, text);
 	tmate_decoder_init(&decoder, read_message, NULL);
 	while (offset < sb.size) {
@@ -132,6 +132,45 @@ TEST(unknown_pane_is_discarded)
 	write_output(INT_MAX, "discarded", 0);
 	ASSERT(TAILQ_EMPTY(&wp->modes));
 	ASSERT(wp->screen == &wp->base);
+	destroy_pane(wp);
+}
+
+TEST(invalid_output_id_cannot_enter_mode)
+{
+	struct window_pane *wp = create_pane();
+	int before = dispatched;
+
+	write_output((int64_t)UINT_MAX + 1 + wp->id, "aliased", 1);
+	write_output((int64_t)wp->id - ((int64_t)UINT_MAX + 1), "negative", 0);
+	write_output(INT64_MAX, "maximum", 1);
+	write_output(INT64_MIN, "minimum", 0);
+	ASSERT_EQ(dispatched, before + 4);
+	ASSERT(TAILQ_EMPTY(&wp->modes));
+	ASSERT(wp->screen == &wp->base);
+	write_output(wp->id, "valid after rejection", 1);
+	ASSERT(line_equals(wp, 0, "valid after rejection"));
+	destroy_pane(wp);
+}
+
+TEST(invalid_output_id_preserves_stack_and_backing)
+{
+	struct window_pane *wp = create_pane();
+	struct window_mode_entry *view, *clock;
+
+	write_output(wp->id, "preserved", 0);
+	view = TAILQ_FIRST(&wp->modes);
+	window_pane_set_mode(wp, NULL, &window_clock_mode, NULL, NULL, NULL);
+	clock = TAILQ_FIRST(&wp->modes);
+	write_output((int64_t)UINT_MAX + 1 + wp->id, "aliased", 0);
+	write_output((int64_t)wp->id - ((int64_t)UINT_MAX + 1), "negative", 1);
+	ASSERT(TAILQ_FIRST(&wp->modes) == clock);
+	ASSERT(TAILQ_NEXT(clock, entry) == view);
+	ASSERT(wp->screen == clock->screen);
+	window_pane_reset_mode(wp);
+	ASSERT(line_equals(wp, 0, "preserved"));
+	ASSERT(line_equals(wp, 1, ""));
+	write_output(wp->id, "valid next", 0);
+	ASSERT(line_equals(wp, 1, "valid next"));
 	destroy_pane(wp);
 }
 
@@ -291,6 +330,8 @@ main(int argc, char **argv)
 		RUN_TEST(initial_and_repeated_output);
 		RUN_TEST(fragmented_v4_message);
 		RUN_TEST(unknown_pane_is_discarded);
+		RUN_TEST(invalid_output_id_cannot_enter_mode);
+		RUN_TEST(invalid_output_id_preserves_stack_and_backing);
 		RUN_TEST(active_clock_mode_is_preserved_under_output);
 		RUN_TEST(active_copy_mode_has_separate_backing);
 		RUN_TEST(existing_view_mode_is_resumed);
