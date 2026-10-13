@@ -1129,6 +1129,7 @@ colour_palette_from_option(struct colour_palette *p, struct options *oo)
 {
 	struct options_entry		*o;
 	struct options_array_item	*a;
+	union options_value		*ov;
 	u_int				 i, n;
 	int				 c;
 
@@ -1147,12 +1148,9 @@ colour_palette_from_option(struct colour_palette *p, struct options *oo)
 		p->default_palette = xcalloc(256, sizeof *p->default_palette);
 	for (i = 0; i < 256; i++)
 		p->default_palette[i] = -1;
-	while (a != NULL) {
-		n = options_array_item_index(a);
-		if (n < 256) {
-			c = options_array_item_value(a)->number;
-			p->default_palette[n] = c;
-		}
-		a = options_array_next(a);
+	for (i = 0; i < 256; i++) {
+		ov = options_array_getv(o, "%u", i);
+		if (ov != NULL)
+			p->default_palette[i] = ov->number;
 	}
 }

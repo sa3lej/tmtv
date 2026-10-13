@@ -32,18 +32,69 @@
  */
 
 struct options_array_item {
-	u_int				 index;
+	char				*key;
 	union options_value		 value;
 	RB_ENTRY(options_array_item)	 entry;
 };
+
+static int
+options_array_key_to_number(const char *key, u_int *idx)
+{
+	const char	*errstr;
+	long long	 n;
+
+	if (*key == '\0')
+		return (-1);
+	for (const char *cp = key; *cp != '\0'; cp++) {
+		if (!isdigit((u_char)*cp))
+			return (0);
+	}
+
+	n = strtonum(key, 0, UINT_MAX, &errstr);
+	if (errstr != NULL)
+		return (-1);
+	if (idx != NULL)
+		*idx = n;
+	return (1);
+}
+
+static char *
+options_array_correct_key(const char *key)
+{
+	u_int	 idx;
+	int	 numeric;
+	char	*out;
+
+	numeric = options_array_key_to_number(key, &idx);
+	if (numeric == -1)
+		return (NULL);
+	if (numeric == 1) {
+		xasprintf(&out, "%u", idx);
+		return (out);
+	}
+	return (xstrdup(key));
+}
+
 static int
 options_array_cmp(struct options_array_item *a1, struct options_array_item *a2)
 {
-	if (a1->index < a2->index)
+	u_int	i1, i2;
+	int	n1, n2;
+
+	n1 = options_array_key_to_number(a1->key, &i1);
+	n2 = options_array_key_to_number(a2->key, &i2);
+	if (n1 && n2) {
+		if (i1 < i2)
+			return (-1);
+		if (i1 > i2)
+			return (1);
+		return (0);
+	}
+	if (n1)
 		return (-1);
-	if (a1->index > a2->index)
+	if (n2)
 		return (1);
-	return (0);
+	return (strcmp(a1->key, a2->key));
 }
 RB_GENERATE_STATIC(options_array, options_array_item, entry, options_array_cmp);
 
@@ -263,6 +314,7 @@ options_default(struct options *oo, const struct options_table_entry *oe)
 {
 	struct options_entry	*o;
 	union options_value	*ov;
+	char			 key[32];
 	u_int			 i;
 	struct cmd_parse_result	*pr;
 
@@ -274,8 +326,10 @@ options_default(struct options *oo, const struct options_table_entry *oe)
 			options_array_assign(o, oe->default_str, NULL);
 			return (o);
 		}
-		for (i = 0; oe->default_arr[i] != NULL; i++)
-			options_array_set(o, i, oe->default_arr[i], 0, NULL);
+		for (i = 0; oe->default_arr[i] != NULL; i++) {
+			xsnprintf(key, sizeof key, "%u", i);
+			options_array_set(o, key, oe->default_arr[i], 0, NULL);
+		}
 		return (o);
 	}
 
@@ -415,21 +469,21 @@ options_table_entry(struct options_entry *o)
 }
 
 static struct options_array_item *
-options_array_item(struct options_entry *o, u_int idx)
+options_array_item(struct options_entry *o, const char *key)
 {
 	struct options_array_item	a;
 
-	a.index = idx;
+	a.key = (char *)key;
 	return (RB_FIND(options_array, &o->value.array, &a));
 }
 
 static struct options_array_item *
-options_array_new(struct options_entry *o, u_int idx)
+options_array_new(struct options_entry *o, const char *key)
 {
 	struct options_array_item	*a;
 
 	a = xcalloc(1, sizeof *a);
-	a->index = idx;
+	a->key = xstrdup(key);
 	RB_INSERT(options_array, &o->value.array, a);
 	return (a);
 }
@@ -439,6 +493,7 @@ options_array_free(struct options_entry *o, struct options_array_item *a)
 {
 	options_value_free(o, &a->value);
 	RB_REMOVE(options_array, &o->value.array, a);
+	free(a->key);
 	free(a);
 }
 
@@ -455,24 +510,45 @@ options_array_clear(struct options_entry *o)
 }
 
 union options_value *
-options_array_get(struct options_entry *o, u_int idx)
+options_array_get(struct options_entry *o, const char *key)
 {
 	struct options_array_item	*a;
+	char				*new_key;
 
 	if (!OPTIONS_IS_ARRAY(o))
 		return (NULL);
-	a = options_array_item(o, idx);
+	new_key = options_array_correct_key(key);
+	if (new_key == NULL)
+		return (NULL);
+	a = options_array_item(o, new_key);
+	free(new_key);
 	if (a == NULL)
 		return (NULL);
 	return (&a->value);
 }
 
+union options_value *
+options_array_getv(struct options_entry *o, const char *fmt, ...)
+{
+	union options_value	*ov;
+	va_list			 ap;
+	char			*key;
+
+	va_start(ap, fmt);
+	xvasprintf(&key, fmt, ap);
+	va_end(ap);
+
+	ov = options_array_get(o, key);
+	free(key);
+	return (ov);
+}
+
 int
-options_array_set(struct options_entry *o, u_int idx, const char *value,
+options_array_set(struct options_entry *o, const char *key, const char *value,
     int append, char **cause)
 {
 	struct options_array_item	*a;
-	char				*new;
+	char				*new, *new_key;
 	struct cmd_parse_result		*pr;
 	long long		 	 number;
 
@@ -482,10 +558,18 @@ options_array_set(struct options_entry *o, u_int idx, const char *value,
 		return (-1);
 	}
 
+	new_key = options_array_correct_key(key);
+	if (new_key == NULL) {
+		if (cause != NULL)
+			xasprintf(cause, "bad array key: %s", key);
+		return (-1);
+	}
+
 	if (value == NULL) {
-		a = options_array_item(o, idx);
+		a = options_array_item(o, new_key);
 		if (a != NULL)
 			options_array_free(o, a);
+		free(new_key);
 		return (0);
 	}
 
@@ -502,26 +586,28 @@ options_array_set(struct options_entry *o, u_int idx, const char *value,
 			break;
 		}
 
-		a = options_array_item(o, idx);
+		a = options_array_item(o, new_key);
 		if (a == NULL)
-			a = options_array_new(o, idx);
+			a = options_array_new(o, new_key);
 		else
 			options_value_free(o, &a->value);
 		a->value.cmdlist = pr->cmdlist;
+		free(new_key);
 		return (0);
 	}
 
 	if (OPTIONS_IS_STRING(o)) {
-		a = options_array_item(o, idx);
+		a = options_array_item(o, new_key);
 		if (a != NULL && append)
 			xasprintf(&new, "%s%s", a->value.string, value);
 		else
 			new = xstrdup(value);
 		if (a == NULL)
-			a = options_array_new(o, idx);
+			a = options_array_new(o, new_key);
 		else
 			options_value_free(o, &a->value);
 		a->value.string = new;
+		free(new_key);
 		return (0);
 	}
 
@@ -530,17 +616,19 @@ options_array_set(struct options_entry *o, u_int idx, const char *value,
 			xasprintf(cause, "bad colour: %s", value);
 			return (-1);
 		}
-		a = options_array_item(o, idx);
+		a = options_array_item(o, new_key);
 		if (a == NULL)
-			a = options_array_new(o, idx);
+			a = options_array_new(o, new_key);
 		else
 			options_value_free(o, &a->value);
 		a->value.number = number;
+		free(new_key);
 		return (0);
 	}
 
 	if (cause != NULL)
 		*cause = xstrdup("wrong array type");
+		free(new_key);
 	return (-1);
 }
 
@@ -549,6 +637,7 @@ options_array_assign(struct options_entry *o, const char *s, char **cause)
 {
 	const char	*separator;
 	char		*copy, *next, *string;
+	char		 key[32];
 	u_int		 i;
 
 	separator = o->tableentry->separator;
@@ -558,10 +647,11 @@ options_array_assign(struct options_entry *o, const char *s, char **cause)
 		if (*s == '\0')
 			return (0);
 		for (i = 0; i < UINT_MAX; i++) {
-			if (options_array_item(o, i) == NULL)
+			if (options_array_getv(o, "%u", i) == NULL)
 				break;
 		}
-		return (options_array_set(o, i, s, 0, cause));
+		xsnprintf(key, sizeof key, "%u", i);
+		return (options_array_set(o, key, s, 0, cause));
 	}
 
 	if (*s == '\0')
@@ -571,12 +661,13 @@ options_array_assign(struct options_entry *o, const char *s, char **cause)
 		if (*next == '\0')
 			continue;
 		for (i = 0; i < UINT_MAX; i++) {
-			if (options_array_item(o, i) == NULL)
+			if (options_array_getv(o, "%u", i) == NULL)
 				break;
 		}
 		if (i == UINT_MAX)
 			break;
-		if (options_array_set(o, i, next, 0, cause) != 0) {
+		xsnprintf(key, sizeof key, "%u", i);
+		if (options_array_set(o, key, next, 0, cause) != 0) {
 			free(copy);
 			return (-1);
 		}
@@ -596,13 +687,13 @@ options_array_first(struct options_entry *o)
 struct options_array_item *
 options_array_next(struct options_array_item *a)
 {
-	return (RB_NEXT(options_array, &o->value.array, a));
+	return (RB_NEXT(options_array, , a));
 }
 
-u_int
-options_array_item_index(struct options_array_item *a)
+const char *
+options_array_item_key(struct options_array_item *a)
 {
-	return (a->index);
+	return (a->key);
 }
 
 union options_value *
@@ -624,15 +715,16 @@ options_is_string(struct options_entry *o)
 }
 
 char *
-options_to_string(struct options_entry *o, int idx, int numeric)
+options_to_string(struct options_entry *o, const char *key, int numeric)
 {
 	struct options_array_item	*a;
 	char				*result = NULL;
 	char				*last = NULL;
 	char				*next;
+	char				*new_key;
 
 	if (OPTIONS_IS_ARRAY(o)) {
-		if (idx == -1) {
+		if (key == NULL) {
 			RB_FOREACH(a, options_array, &o->value.array) {
 				next = options_value_to_string(o, &a->value,
 				    numeric);
@@ -649,7 +741,11 @@ options_to_string(struct options_entry *o, int idx, int numeric)
 				return (xstrdup(""));
 			return (result);
 		}
-		a = options_array_item(o, idx);
+		new_key = options_array_correct_key(key);
+		if (new_key == NULL)
+			return (xstrdup(""));
+		a = options_array_item(o, new_key);
+		free(new_key);
 		if (a == NULL)
 			return (xstrdup(""));
 		return (options_value_to_string(o, &a->value, numeric));
@@ -658,37 +754,40 @@ options_to_string(struct options_entry *o, int idx, int numeric)
 }
 
 char *
-options_parse(const char *name, int *idx)
+options_parse(const char *name, char **key)
 {
-	char	*copy, *cp, *end;
+	char	*copy, *cp, *end, *raw, *new_key;
 
 	if (*name == '\0')
 		return (NULL);
 	copy = xstrdup(name);
 	if ((cp = strchr(copy, '[')) == NULL) {
-		*idx = -1;
 		return (copy);
 	}
 	end = strchr(cp + 1, ']');
-	if (end == NULL || end[1] != '\0' || !isdigit((u_char)end[-1])) {
+	if (end == NULL || end[1] != '\0' || end == cp + 1) {
 		free(copy);
 		return (NULL);
 	}
-	if (sscanf(cp, "[%d]", idx) != 1 || *idx < 0) {
+	raw = xstrndup(cp + 1, end - (cp + 1));
+	new_key = options_array_correct_key(raw);
+	free(raw);
+	if (new_key == NULL) {
 		free(copy);
 		return (NULL);
 	}
+	*key = new_key;
 	*cp = '\0';
 	return (copy);
 }
 
 struct options_entry *
-options_parse_get(struct options *oo, const char *s, int *idx, int only)
+options_parse_get(struct options *oo, const char *s, char **key, int only)
 {
 	struct options_entry	*o;
 	char			*name;
 
-	name = options_parse(s, idx);
+	name = options_parse(s, key);
 	if (name == NULL)
 		return (NULL);
 	if (only)
@@ -696,6 +795,8 @@ options_parse_get(struct options *oo, const char *s, int *idx, int only)
 	else
 		o = options_get(oo, name);
 	free(name);
+	if (o == NULL)
+		free(*key), *key = NULL;
 	return (o);
 }
 
@@ -712,14 +813,14 @@ options_search(const char *name)
 }
 
 char *
-options_match(const char *s, int *idx, int *ambiguous)
+options_match(const char *s, char **key, int *ambiguous)
 {
 	const struct options_table_entry	*oe, *found;
 	char					*parsed;
 	const char				*name;
 	size_t					 namelen;
 
-	parsed = options_parse(s, idx);
+	parsed = options_parse(s, key);
 	if (parsed == NULL)
 		return (NULL);
 	if (*parsed == '@') {
@@ -740,6 +841,8 @@ options_match(const char *s, int *idx, int *ambiguous)
 			if (found != NULL) {
 				*ambiguous = 1;
 				free(parsed);
+				free(*key);
+				*key = NULL;
 				return (NULL);
 			}
 			found = oe;
@@ -748,19 +851,21 @@ options_match(const char *s, int *idx, int *ambiguous)
 	free(parsed);
 	if (found == NULL) {
 		*ambiguous = 0;
+		free(*key);
+		*key = NULL;
 		return (NULL);
 	}
 	return (xstrdup(found->name));
 }
 
 struct options_entry *
-options_match_get(struct options *oo, const char *s, int *idx, int only,
+options_match_get(struct options *oo, const char *s, char **key, int only,
     int *ambiguous)
 {
 	char			*name;
 	struct options_entry	*o;
 
-	name = options_match(s, idx, ambiguous);
+	name = options_match(s, key, ambiguous);
 	if (name == NULL)
 		return (NULL);
 	*ambiguous = 0;
@@ -769,6 +874,8 @@ options_match_get(struct options *oo, const char *s, int *idx, int only,
 	else
 		o = options_get(oo, name);
 	free(name);
+	if (o == NULL)
+		free(*key), *key = NULL;
 	return (o);
 }
 
@@ -1308,11 +1415,12 @@ options_push_changes(const char *name)
 }
 
 int
-options_remove_or_default(struct options_entry *o, int idx, char **cause)
+options_remove_or_default(struct options_entry *o, const char *key,
+    char **cause)
 {
 	struct options	*oo = o->owner;
 
-	if (idx == -1) {
+	if (key == NULL) {
 		if (o->tableentry != NULL &&
 		    (oo == global_options ||
 		    oo == global_s_options ||
@@ -1320,7 +1428,7 @@ options_remove_or_default(struct options_entry *o, int idx, char **cause)
 			options_default(oo, o->tableentry);
 		else
 			options_remove(o);
-	} else if (options_array_set(o, idx, NULL, 0, cause) != 0)
+	} else if (options_array_set(o, key, NULL, 0, cause) != 0)
 		return (-1);
 	return (0);
 }

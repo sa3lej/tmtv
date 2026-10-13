@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: cmd-set-option.c,v 1.146 2026/07/10 15:20:06 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -233,10 +233,10 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 	struct window_pane		*loop;
 	struct options			*oo;
 	struct options_entry		*parent, *o, *po;
-	char				*name, *argument, *expanded = NULL;
-	char				*cause;
+	char				*name, *argument, *cause;
+	char				*expanded = NULL, *array_key = NULL;
 	const char			*value;
-	int				 window, idx, already, error, ambiguous;
+	int				 window, already, error, ambiguous;
 	int				 scope;
 
 	window = (cmd_get_entry(self) == &cmd_set_window_option_entry);
@@ -254,13 +254,13 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 
 	/* If set-hook -R, fire the hook straight away. */
 	if (cmd_get_entry(self) == &cmd_set_hook_entry && args_has(args, 'R')) {
-		notify_hook(item, argument);
+		hooks_run(item, argument);
 		free(argument);
 		return (CMD_RETURN_NORMAL);
 	}
 
-	/* Parse option name and index. */
-	name = options_match(argument, &idx, &ambiguous);
+	/* Parse option name and array key. */
+	name = options_match(argument, &array_key, &ambiguous);
 	if (name == NULL) {
 		if (args_has(args, 'q'))
 			goto out;
@@ -292,21 +292,23 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 	o = options_get_only(oo, name);
 	parent = options_get(oo, name);
 
-	/* Check that array options and indexes match up. */
-	if (idx != -1 && (*name == '@' || !options_is_array(parent))) {
+	/* Check that array options and keys match up. */
+	if (array_key != NULL && (*name == '@' || !options_is_array(parent))) {
 		cmdq_error(item, "not an array: %s", argument);
 		goto fail;
 	}
 
 	/* With -o, check this option is not already set. */
 	if (!args_has(args, 'u') && args_has(args, 'o')) {
-		if (idx == -1)
+		if (array_key == NULL)
 			already = (o != NULL);
 		else {
 			if (o == NULL)
 				already = 0;
+			else if (options_array_get(o, array_key) != NULL)
+				already = 1;
 			else
-				already = (options_array_get(o, idx) != NULL);
+				already = 0;
 		}
 		if (already) {
 			if (args_has(args, 'q'))
@@ -322,7 +324,8 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 			po = options_get_only(loop->options, name);
 			if (po == NULL)
 				continue;
-			if (options_remove_or_default(po, idx, &cause) != 0) {
+			if (options_remove_or_default(po, array_key,
+			    &cause) != 0) {
 				cmdq_error(item, "%s", cause);
 				free(cause);
 				goto fail;
@@ -332,7 +335,7 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 	if (args_has(args, 'u') || args_has(args, 'U')) {
 		if (o == NULL)
 			goto out;
-		if (options_remove_or_default(o, idx, &cause) != 0) {
+		if (options_remove_or_default(o, array_key, &cause) != 0) {
 			cmdq_error(item, "%s", cause);
 			free(cause);
 			goto fail;
@@ -345,7 +348,7 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 		options_set_string(oo, name, append, "%s", value);
 		if (cmd_get_entry(self) == &cmd_set_hook_entry)
 			hooks_add_event(name);
-	} else if (idx == -1 && !options_is_array(parent)) {
+	} else if (array_key == NULL && !options_is_array(parent)) {
 		error = options_from_string(oo, options_table_entry(parent),
 		    options_table_entry(parent)->name, value,
 		    args_has(args, 'a'), &cause);
@@ -361,7 +364,7 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 		}
 		if (o == NULL)
 			o = options_empty(oo, options_table_entry(parent));
-		if (idx == -1) {
+		if (array_key == NULL) {
 			if (!append)
 				options_array_clear(o);
 			if (options_array_assign(o, value, &cause) != 0) {
@@ -369,7 +372,7 @@ cmd_set_option_exec(struct cmd *self, struct cmdq_item *item)
 				free(cause);
 				goto fail;
 			}
-		} else if (options_array_set(o, idx, value, append,
+		} else if (options_array_set(o, array_key, value, append,
 		    &cause) != 0) {
 			cmdq_error(item, "%s", cause);
 			free(cause);
@@ -439,11 +442,13 @@ out:
 	free(argument);
 	free(expanded);
 	free(name);
+	free(array_key);
 	return (CMD_RETURN_NORMAL);
 
 fail:
 	free(argument);
 	free(expanded);
 	free(name);
+	free(array_key);
 	return (CMD_RETURN_ERROR);
 }

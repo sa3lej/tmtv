@@ -62,7 +62,7 @@ TEST(notification_hooks_count_once_and_execute)
 	/* Updating the same entry preserves its metadata; removal resets it. */
 	options_set_string(global_s_options, "@options-hook", 0, "%s", "");
 	ASSERT_EQ(options_get_fire_count(o), 2);
-	ASSERT_EQ(options_remove_or_default(o, -1, NULL), 0);
+	ASSERT_EQ(options_remove_or_default(o, NULL, NULL), 0);
 	o = options_set_string(global_s_options, "@options-hook", 0, "%s", "");
 	ASSERT_EQ(options_get_fire_count(o), 0);
 	ASSERT_EQ(options_get_fire_time(o), 0);
@@ -90,9 +90,9 @@ TEST(command_hooks_multi_entry_and_nohooks)
 	struct cmdq_item *item;
 
 	options_array_clear(o);
-	ASSERT_EQ(options_array_set(o, 0,
+	ASSERT_EQ(options_array_set(o, "0",
 	    "set-option -g @command-hook-first yes", 0, NULL), 0);
-	ASSERT_EQ(options_array_set(o, 3,
+	ASSERT_EQ(options_array_set(o, "3",
 	    "set-option -g @command-hook-second yes", 0, NULL), 0);
 	current_time = 9012;
 	item = cmdq_append(NULL, command(0));
@@ -154,7 +154,7 @@ TEST(inheritance_shadowing_and_exact_search)
 	options_hook_fired(local);
 	ASSERT_EQ(options_get_fire_time(local), 8765);
 	ASSERT_EQ(options_get_fire_time(parent), 4321);
-	ASSERT_EQ(options_remove_or_default(local, -1, NULL), 0);
+	ASSERT_EQ(options_remove_or_default(local, NULL, NULL), 0);
 	ASSERT(options_get(child, "@options-hook") == parent);
 	options_free(child);
 }

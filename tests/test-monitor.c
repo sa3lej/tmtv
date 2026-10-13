@@ -141,6 +141,43 @@ command(struct fixture *f, const char *text)
 	return (output(f));
 }
 
+TEST(display_and_introspection)
+{
+	struct window *w;
+	struct window_pane *wp;
+	struct session *s = new_session(&w, &wp);
+	struct fixture f;
+	char *expected;
+	char *text;
+
+	start(&f, s);
+	xasprintf(&text, "set-hook -g -B '@watch-session::value'");
+	(void)command(&f, text);
+	free(text);
+	xasprintf(&text, "set-hook -p -B '@watch-pane:%%%u:value'", wp->id);
+	(void)command(&f, text);
+	free(text);
+	xasprintf(&text, "show-hooks -g -B -F '#{option_name}:#{hook_monitor_target}:#{hook_monitor_format}:#{hook_monitor_display}'");
+	ASSERT(strstr(command(&f, text),
+	    "@watch-session::value:@watch-session::value") != NULL);
+	free(text);
+	xasprintf(&text, "show-hooks -p -B -F '#{option_name}:#{hook_monitor_target}:#{hook_monitor_format}:#{hook_monitor_display}'");
+	xasprintf(&expected, "@watch-pane:%%%u:value:@watch-pane:%%%u:value",
+	    wp->id, wp->id);
+	ASSERT(strstr(command(&f, text), expected) != NULL);
+	free(expected);
+	free(text);
+	xasprintf(&text, "set-hook -gu -B @watch-session");
+	(void)command(&f, text);
+	free(text);
+	xasprintf(&text, "set-hook -pu -B @watch-pane");
+	(void)command(&f, text);
+	free(text);
+	stop(&f);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
 TEST(command_monitor_changes_replacement_and_removal)
 {
 	struct window *w;
@@ -293,13 +330,13 @@ TEST(command_pane_window_scopes_and_legacy_numeric_hooks)
 
 	command(&f, "set-hook -g 'command-error[4]' { set-option -g @legacy-result yes }");
 	legacy = options_get_only(global_s_options, "command-error");
-	ASSERT_NOT_NULL(options_array_get(legacy, 4));
+	ASSERT_NOT_NULL(options_array_getv(legacy, "%u", 4));
 	fires = options_get_fire_count(legacy);
 	command(&f, "set-hook -gR command-error");
 	ASSERT_STR_EQ(options_get_string(global_s_options, "@legacy-result"), "yes");
 	ASSERT_EQ(options_get_fire_count(legacy), fires + 1);
 	command(&f, "set-hook -gu 'command-error[4]'");
-	ASSERT(options_array_get(legacy, 4) == NULL);
+	ASSERT(options_array_getv(legacy, "%u", 4) == NULL);
 	stop(&f);
 	session_destroy(s, 0, __func__);
 	drain();
@@ -420,7 +457,7 @@ TEST(replacement_inheritance_option_removal_and_free)
 	tick();
 	ASSERT_EQ(reports, 1);
 	ASSERT_EQ(hooks_monitor_get_fire_count(o), 1);
-	ASSERT_EQ(options_remove_or_default(o, -1, NULL), 0);
+	ASSERT_EQ(options_remove_or_default(o, NULL, NULL), 0);
 	ASSERT_EQ(s->references, refs);
 	tick();
 	ASSERT_EQ(reports, 1); /* Removed option cancels its timer and sink. */
@@ -537,6 +574,7 @@ main(void)
 	RUN_TEST(dead_session_retained_until_monitor_destroy);
 	RUN_TEST(session_destruction_breaks_option_monitor_cycle);
 	RUN_TEST(pane_window_scans_and_subscription_replacement);
+	RUN_TEST(display_and_introspection);
 	drain();
 	while ((msg = TAILQ_FIRST(&message_log)) != NULL) {
 		TAILQ_REMOVE(&message_log, msg, entry);

@@ -3904,25 +3904,26 @@ format_find(struct format_tree *ft, const char *key, int modifiers,
 	struct format_entry		*fe, fe_find;
 	struct environ_entry		*envent;
 	struct options_entry		*o;
-	int				 idx;
+	char				*array_key = NULL;
 	char				*found = NULL, *saved, s[512];
 	const char			*errstr;
 	time_t				 t = 0;
 	struct tm			 tm;
 
-	o = options_parse_get(global_options, key, &idx, 0);
+	o = options_parse_get(global_options, key, &array_key, 0);
 	if (o == NULL && ft->wp != NULL)
-		o = options_parse_get(ft->wp->options, key, &idx, 0);
+		o = options_parse_get(ft->wp->options, key, &array_key, 0);
 	if (o == NULL && ft->w != NULL)
-		o = options_parse_get(ft->w->options, key, &idx, 0);
+		o = options_parse_get(ft->w->options, key, &array_key, 0);
 	if (o == NULL)
-		o = options_parse_get(global_w_options, key, &idx, 0);
+		o = options_parse_get(global_w_options, key, &array_key, 0);
 	if (o == NULL && ft->s != NULL)
-		o = options_parse_get(ft->s->options, key, &idx, 0);
+		o = options_parse_get(ft->s->options, key, &array_key, 0);
 	if (o == NULL)
-		o = options_parse_get(global_s_options, key, &idx, 0);
+		o = options_parse_get(global_s_options, key, &array_key, 0);
 	if (o != NULL) {
-		found = options_to_string(o, idx, 1);
+		found = options_to_string(o, array_key, 1);
+		free(array_key);
 		goto found;
 	}
 

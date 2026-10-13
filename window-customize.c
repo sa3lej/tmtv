@@ -90,7 +90,7 @@ struct window_customize_itemdata {
 
 	struct options				*oo;
 	char					*name;
-	int					 idx;
+	char					*array_key;
 };
 
 struct window_customize_modedata {
@@ -111,15 +111,18 @@ struct window_customize_modedata {
 };
 
 static uint64_t
-window_customize_get_tag(struct options_entry *o, int idx,
+window_customize_get_tag(struct options_entry *o,
+    struct options_array_item *a,
     const struct options_table_entry *oe)
 {
 	uint64_t	offset;
 
+	if (a != NULL)
+		return ((uint64_t)(uintptr_t)a);
 	if (oe == NULL)
 		return ((uint64_t)o);
 	offset = ((char *)oe - (char *)options_table) / sizeof *options_table;
-	return ((2ULL << 62)|(offset << 32)|((idx + 1) << 1)|1);
+	return ((2ULL << 62)|(offset << 32)|1);
 }
 
 static struct options *
@@ -224,6 +227,7 @@ window_customize_free_item(struct window_customize_itemdata *item)
 {
 	free(item->table);
 	free(item->name);
+	free(item->array_key);
 	free(item);
 }
 
@@ -237,26 +241,25 @@ window_customize_build_array(struct window_customize_modedata *data,
 	struct window_customize_itemdata	*item;
 	struct options_array_item		*ai;
 	char					*name, *value, *text;
-	u_int					 idx;
+	const char				*array_key;
 	uint64_t				 tag;
 
 	ai = options_array_first(o);
 	while (ai != NULL) {
-		idx = options_array_item_index(ai);
-
-		xasprintf(&name, "%s[%u]", options_name(o), idx);
+		array_key = options_array_item_key(ai);
+		xasprintf(&name, "%s[%s]", options_name(o), array_key);
 		format_add(ft, "option_name", "%s", name);
-		value = options_to_string(o, idx, 0);
+		value = options_to_string(o, array_key, 0);
 		format_add(ft, "option_value", "%s", value);
 
 		item = window_customize_add_item(data);
 		item->scope = scope;
 		item->oo = oo;
 		item->name = xstrdup(options_name(o));
-		item->idx = idx;
+		item->array_key = xstrdup(array_key);
 
 		text = format_expand(ft, data->format);
-		tag = window_customize_get_tag(o, idx, oe);
+		tag = window_customize_get_tag(o, ai, oe);
 		mode_tree_add(data->data, top, item, tag, name, text, -1);
 		free(text);
 
@@ -307,7 +310,7 @@ window_customize_build_option(struct window_customize_modedata *data,
 		format_add(ft, "option_unit", "%s", "");
 
 	if (!array) {
-		value = options_to_string(o, -1, 0);
+		value = options_to_string(o, NULL, 0);
 		format_add(ft, "option_value", "%s", value);
 		free(value);
 	}
@@ -324,13 +327,13 @@ window_customize_build_option(struct window_customize_modedata *data,
 	item->oo = oo;
 	item->scope = scope;
 	item->name = xstrdup(name);
-	item->idx = -1;
+	item->array_key = NULL;
 
 	if (array)
 		text = NULL;
 	else
 		text = format_expand(ft, data->format);
-	tag = window_customize_get_tag(o, -1, oe);
+	tag = window_customize_get_tag(o, NULL, oe);
 	top = mode_tree_add(data->data, top, item, tag, name, text, 0);
 	free(text);
 
@@ -482,7 +485,7 @@ window_customize_build_keys(struct window_customize_modedata *data,
 		item->table = xstrdup(kt->name);
 		item->key = bd->key;
 		item->name = xstrdup(key_string_lookup_key(item->key, 0));
-		item->idx = -1;
+		item->array_key = NULL;
 
 		expanded = format_expand(ft, data->format);
 		child = mode_tree_add(data->data, top, item, (uint64_t)bd,
@@ -652,7 +655,7 @@ window_customize_draw_option(struct window_customize_modedata *data,
 {
 	struct screen				 *s = ctx->s;
 	u_int					  cx = s->cx, cy = s->cy;
-	int					  idx;
+	const char				 *array_key;
 	struct options_entry			 *o, *parent;
 	struct options				 *go, *wo;
 	const struct options_table_entry	 *oe;
@@ -668,7 +671,7 @@ window_customize_draw_option(struct window_customize_modedata *data,
 	if (!window_customize_check_item(data, item, &fs))
 		return;
 	name = item->name;
-	idx = item->idx;
+	array_key = item->array_key;
 
 	o = options_get(item->oo, name);
 	if (o == NULL)
@@ -707,25 +710,25 @@ window_customize_draw_option(struct window_customize_modedata *data,
 	    &grid_default_cell, "This is a %s option.", text))
 		goto out;
 	if (oe != NULL && (oe->flags & OPTIONS_TABLE_IS_ARRAY)) {
-		if (idx != -1) {
+		if (array_key != NULL) {
 			if (!screen_write_text(ctx, cx, sx, sy - (s->cy - cy),
 			    0, &grid_default_cell,
-			    "This is an array option, index %u.", idx))
+			    "This is an array option, key %s.", array_key))
 				goto out;
 		} else {
 			if (!screen_write_text(ctx, cx, sx, sy - (s->cy - cy),
 			    0, &grid_default_cell, "This is an array option."))
 				goto out;
 		}
-		if (idx == -1)
+		if (array_key == NULL)
 			goto out;
 	}
 	screen_write_cursormove(ctx, cx, s->cy + 1, 0); /* skip line */
 	if (s->cy >= cy + sy - 1)
 		goto out;
 
-	value = options_to_string(o, idx, 0);
-	if (oe != NULL && idx == -1) {
+	value = options_to_string(o, array_key, 0);
+	if (oe != NULL && array_key == NULL) {
 		default_value = options_default_to_string(oe);
 		if (strcmp(default_value, value) == 0) {
 			free(default_value);
@@ -808,7 +811,7 @@ window_customize_draw_option(struct window_customize_modedata *data,
 	if (wo != NULL && options_owner(o) != wo) {
 		parent = options_get_only(wo, name);
 		if (parent != NULL) {
-			value = options_to_string(parent, -1 , 0);
+			value = options_to_string(parent, NULL, 0);
 			if (!screen_write_text(ctx, s->cx, sx,
 			    sy - (s->cy - cy), 0, &grid_default_cell,
 			    "Window value (from window %u): %s%s%s", fs.wl->idx,
@@ -819,7 +822,7 @@ window_customize_draw_option(struct window_customize_modedata *data,
 	if (go != NULL && options_owner(o) != go) {
 		parent = options_get_only(go, name);
 		if (parent != NULL) {
-			value = options_to_string(parent, -1 , 0);
+			value = options_to_string(parent, NULL, 0);
 			if (!screen_write_text(ctx, s->cx, sx,
 			    sy - (s->cy - cy), 0, &grid_default_cell,
 			    "Global value: %s%s%s", value, space, unit))
@@ -966,7 +969,9 @@ window_customize_set_option_callback(struct client *c, void *itemdata,
 	struct options				*oo = item->oo;
 	const char				*name = item->name;
 	char					*cause;
-	int					 idx = item->idx;
+	const char				*array_key = item->array_key;
+	u_int					 idx;
+	char					 keybuf[32];
 
 	if (s == NULL || *s == '\0' || data->dead)
 		return (0);
@@ -978,13 +983,15 @@ window_customize_set_option_callback(struct client *c, void *itemdata,
 	oe = options_table_entry(o);
 
 	if (oe != NULL && (oe->flags & OPTIONS_TABLE_IS_ARRAY)) {
-		if (idx == -1) {
+		if (array_key == NULL) {
 			for (idx = 0; idx < INT_MAX; idx++) {
-				if (options_array_get(o, idx) == NULL)
+				if (options_array_getv(o, "%u", idx) == NULL)
 					break;
 			}
+			xsnprintf(keybuf, sizeof keybuf, "%u", idx);
+			array_key = keybuf;
 		}
-		if (options_array_set(o, idx, s, 0, &cause) != 0)
+		if (options_array_set(o, array_key, s, 0, &cause) != 0)
 			goto fail;
 	} else {
 		if (options_from_string(oo, oe, name, s, 0, &cause) != 0)
@@ -1014,7 +1021,8 @@ window_customize_set_option(struct client *c,
 	const struct options_table_entry	*oe;
 	struct options				*oo;
 	struct window_customize_itemdata	*new_item;
-	int					 flag, idx = item->idx;
+	int					 flag;
+	const char				*array_key = item->array_key;
 	enum window_customize_scope		 scope = WINDOW_CUSTOMIZE_NONE;
 	u_int					 choice;
 	const char				*name = item->name, *space = "";
@@ -1100,25 +1108,26 @@ window_customize_set_option(struct client *c,
 		else if (scope != WINDOW_CUSTOMIZE_SERVER)
 			space = ", global";
 		if (oe != NULL && (oe->flags & OPTIONS_TABLE_IS_ARRAY)) {
-			if (idx == -1) {
+			if (array_key == NULL) {
 				xasprintf(&prompt, "(%s[+]%s%s) ", name, space,
 				    text);
 			} else {
-				xasprintf(&prompt, "(%s[%d]%s%s) ", name, idx,
-				    space, text);
+				xasprintf(&prompt, "(%s[%s]%s%s) ", name,
+				    array_key, space, text);
 			}
 		} else
 			xasprintf(&prompt, "(%s%s%s) ", name, space, text);
 		free(text);
 
-		value = options_to_string(o, idx, 0);
+		value = options_to_string(o, array_key, 0);
 
 		new_item = xcalloc(1, sizeof *new_item);
 		new_item->data = data;
 		new_item->scope = scope;
 		new_item->oo = oo;
 		new_item->name = xstrdup(name);
-		new_item->idx = idx;
+		if (array_key != NULL)
+			new_item->array_key = xstrdup(array_key);
 
 		data->references++;
 		status_prompt_set(c, NULL, prompt, value,
@@ -1143,9 +1152,10 @@ window_customize_unset_option(struct window_customize_modedata *data,
 	o = options_get(item->oo, item->name);
 	if (o == NULL)
 		return;
-	if (item->idx != -1 && item == mode_tree_get_current(data->data))
+	if (item->array_key != NULL &&
+	    item == mode_tree_get_current(data->data))
 		mode_tree_up(data->data, 0);
-	options_remove_or_default(o, item->idx, NULL);
+	options_remove_or_default(o, item->array_key, NULL);
 }
 
 static void
@@ -1157,14 +1167,14 @@ window_customize_reset_option(struct window_customize_modedata *data,
 
 	if (item == NULL || !window_customize_check_item(data, item, NULL))
 		return;
-	if (item->idx != -1)
+	if (item->array_key != NULL)
 		return;
 
 	oo = item->oo;
 	while (oo != NULL) {
 		o = options_get_only(item->oo, item->name);
 		if (o != NULL)
-			options_remove_or_default(o, -1, NULL);
+			options_remove_or_default(o, NULL, NULL);
 		oo = options_get_parent(oo);
 	}
 }
@@ -1410,7 +1420,7 @@ window_customize_key(struct window_mode_entry *wme, struct client *c,
 	struct window_pane			*wp = wme->wp;
 	struct window_customize_modedata	*data = wme->data;
 	struct window_customize_itemdata	*item, *new_item;
-	int					 finished, idx;
+	int					 finished;
 	char					*prompt;
 	u_int					 tagged;
 
@@ -1448,7 +1458,7 @@ window_customize_key(struct window_mode_entry *wme, struct client *c,
 		mode_tree_build(data->data);
 		break;
 	case 'd':
-		if (item == NULL || item->idx != -1)
+		if (item == NULL || item->array_key != NULL)
 			break;
 		xasprintf(&prompt, "Reset %s to default? ", item->name);
 		data->references++;
@@ -1477,9 +1487,9 @@ window_customize_key(struct window_mode_entry *wme, struct client *c,
 	case 'u':
 		if (item == NULL)
 			break;
-		idx = item->idx;
-		if (idx != -1)
-			xasprintf(&prompt, "Unset %s[%d]? ", item->name, idx);
+		if (item->array_key != NULL)
+			xasprintf(&prompt, "Unset %s[%s]? ", item->name,
+			    item->array_key);
 		else
 			xasprintf(&prompt, "Unset %s? ", item->name);
 		data->references++;
