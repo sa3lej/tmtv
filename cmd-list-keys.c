@@ -29,26 +29,12 @@
 
 static enum cmd_retval	cmd_list_keys_exec(struct cmd *, struct cmdq_item *);
 
-static enum cmd_retval	cmd_list_keys_commands(struct cmd *,
-			    struct cmdq_item *);
-
 const struct cmd_entry cmd_list_keys_entry = {
 	.name = "list-keys",
 	.alias = "lsk",
 
 	.args = { "1aNP:T:", 0, 1, NULL },
 	.usage = "[-1aN] [-P prefix-string] [-T key-table] [key]",
-
-	.flags = CMD_STARTSERVER|CMD_AFTERHOOK,
-	.exec = cmd_list_keys_exec
-};
-
-const struct cmd_entry cmd_list_commands_entry = {
-	.name = "list-commands",
-	.alias = "lscm",
-
-	.args = { "F:", 0, 1, NULL },
-	.usage = "[-F format] [command]",
 
 	.flags = CMD_STARTSERVER|CMD_AFTERHOOK,
 	.exec = cmd_list_keys_exec
@@ -157,9 +143,6 @@ cmd_list_keys_exec(struct cmd *self, struct cmdq_item *item)
 	key_code		 prefix, only = KEYC_UNKNOWN;
 	int			 repeat, width, tablewidth, keywidth, found = 0;
 	size_t			 tmpsize, tmpused, cplen;
-
-	if (cmd_get_entry(self) == &cmd_list_commands_entry)
-		return (cmd_list_keys_commands(self, item));
 
 	if ((keystr = args_string(args, 0)) != NULL) {
 		only = key_string_lookup_string(keystr);
@@ -320,69 +303,5 @@ out:
 		cmdq_error(item, "unknown key: %s", args_string(args, 0));
 		return (CMD_RETURN_ERROR);
 	}
-	return (CMD_RETURN_NORMAL);
-}
-
-static void
-cmd_list_single_command(const struct cmd_entry *entry, struct format_tree *ft,
-    const char *template, struct cmdq_item *item)
-{
-	const char	*s;
-	char		*line;
-
-	format_add(ft, "command_list_name", "%s", entry->name);
-	if (entry->alias != NULL)
-		s = entry->alias;
-	else
-		s = "";
-	format_add(ft, "command_list_alias", "%s", s);
-	if (entry->usage != NULL)
-		s = entry->usage;
-	else
-		s = "";
-	format_add(ft, "command_list_usage", "%s", s);
-
-	line = format_expand(ft, template);
-	if (*line != '\0')
-		cmdq_print(item, "%s", line);
-	free(line);
-}
-
-static enum cmd_retval
-cmd_list_keys_commands(struct cmd *self, struct cmdq_item *item)
-{
-	struct args		 *args = cmd_get_args(self);
-	const struct cmd_entry	**entryp;
-	const struct cmd_entry	 *entry;
-	struct format_tree	 *ft;
-	const char		 *template,  *command;
-	char			 *cause;
-
-	if ((template = args_get(args, 'F')) == NULL) {
-		template = "#{command_list_name}"
-		    "#{?command_list_alias, (#{command_list_alias}),} "
-		    "#{command_list_usage}";
-	}
-
-	ft = format_create(cmdq_get_client(item), item, FORMAT_NONE, 0);
-	format_defaults(ft, NULL, NULL, NULL, NULL);
-
-	command = args_string(args, 0);
-	if (command == NULL) {
-		for (entryp = cmd_table; *entryp != NULL; entryp++)
-			cmd_list_single_command(*entryp, ft, template, item);
-	} else {
-		entry = cmd_find(command, &cause);
-		if (entry != NULL)
-			cmd_list_single_command(entry, ft, template, item);
-		else {
-			cmdq_error(item, "%s", cause);
-			free(cause);
-			format_free(ft);
-			return (CMD_RETURN_ERROR);
-		}
-	}
-
-	format_free(ft);
 	return (CMD_RETURN_NORMAL);
 }

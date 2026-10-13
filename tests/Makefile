@@ -24,7 +24,7 @@ GC_SECTIONS := $(shell if [ "$$(uname -s)" = Darwin ]; then echo -Wl,-dead_strip
 
 .PHONY: all unit server-unit functional hooks session-cleanup prompt-history child-environment integration clean
 
-all: unit server-unit functional hooks session-cleanup prompt-history child-environment list-keys pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
+all: unit server-unit functional hooks session-cleanup prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
 
 unit: $(UNIT_TESTS)
 	@echo ""
@@ -103,6 +103,9 @@ prompt-history:
 list-keys:
 	@TMTV=$(TMTV) python3 test-list-keys.py
 
+list-commands:
+	@TMTV=$(TMTV) python3 test-list-commands.py
+
 child-environment:
 	@TMTV=$(TMTV) python3 test-child-environment.py
 
@@ -165,4 +168,4 @@ control-subscriptions:
 	$(MAKE) -C .. tests/test-control-subscriptions
 	./test-control-subscriptions
 
-.PHONY: list-keys
+.PHONY: list-keys list-commands
