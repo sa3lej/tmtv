@@ -3,8 +3,12 @@
 
 import os
 from pathlib import Path
+import select
+import shutil
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 
 
@@ -15,9 +19,8 @@ TYPES = ("command", "search", "target", "window-target")
 
 class PromptHistoryTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory(prefix="history-", dir=ROOT / "tests")
-        self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
+        self.root = Path(tempfile.mkdtemp(prefix="history-", dir=ROOT / "tests"))
+        self.addCleanup(self.cleanup_server)
         self.socket = self.root / "socket"
         self.history = self.root / "history"
         self.config = self.root / "config"
@@ -29,10 +32,23 @@ class PromptHistoryTests(unittest.TestCase):
             capture_output=True, text=True, timeout=10, check=check,
         )
 
+    def cleanup_server(self):
+        if self.socket.exists():
+            self.command("kill-server", check=False)
+            deadline = time.monotonic() + 10
+            # server_start unlinks this socket only after saving history. A
+            # disconnected kill-server client does not establish that fence.
+            while self.socket.exists():
+                if time.monotonic() >= deadline:
+                    self.fail(f"history shutdown timed out; preserved {self.root}")
+                time.sleep(0.01)
+        # Keep the directory for diagnosis if shutdown fails or times out.
+        if self.root.exists():
+            shutil.rmtree(self.root)
+
     def load(self, contents):
         if contents is not None:
             self.history.write_bytes(contents)
-        self.addCleanup(self.command, "kill-server", check=False)
         self.command("new-session", "-d", "-s", "history", "sleep 60")
         # This query runs after cfg_done has loaded history on the real server.
         self.command("show-options", "-g", "history-file")
@@ -59,6 +75,63 @@ class PromptHistoryTests(unittest.TestCase):
         self.load((f"command:{long_line}\nsearch:short\ncommand:last").encode())
         self.assertEqual(self.entries("command"), [long_line, "last"])
         self.assertEqual(self.entries("search"), ["short"])
+
+    def test_cleanup_waits_for_history_write(self):
+        # A FIFO deliberately blocks the real server's shutdown save after its
+        # kill-server client has disconnected. Drain it only after checking the
+        # fixture has kept the directory alive while shutdown is incomplete.
+        contents = b"command:" + b"x" * 262144 + b"\n"
+        self.load(contents)
+        self.history.unlink()
+        os.mkfifo(self.history)
+        reader = os.open(self.history, os.O_RDONLY | os.O_NONBLOCK)
+        returned = threading.Event()
+        errors = []
+        command = self.command
+
+        def observed_command(*args, **kwargs):
+            result = command(*args, **kwargs)
+            if args == ("kill-server",):
+                returned.set()
+            return result
+
+        def cleanup():
+            try:
+                self.cleanup_server()
+            except Exception as error:
+                errors.append(error)
+
+        self.command = observed_command
+        worker = threading.Thread(target=cleanup)
+        worker.start()
+        try:
+            self.assertTrue(returned.wait(10), "kill-server client did not return")
+            self.assertTrue(select.select([reader], [], [], 10)[0],
+                            "server did not begin saving history")
+            # Keep the writer blocked while giving teardown time to attempt
+            # removal; draining immediately could conceal the original race.
+            worker.join(0.1)
+            self.assertTrue(worker.is_alive(), "cleanup raced ahead of history save")
+            self.assertTrue(self.root.is_dir())
+            self.assertTrue(self.socket.exists())
+        finally:
+            # Even an assertion failure must unblock this test's server.
+            saved = bytearray()
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if not select.select([reader], [], [], 0.1)[0]:
+                    continue
+                chunk = os.read(reader, 65536)
+                if not chunk:
+                    break
+                saved.extend(chunk)
+            os.close(reader)
+            worker.join(10)
+            self.command = command
+        self.assertFalse(worker.is_alive(), "cleanup did not finish")
+        self.assertEqual(errors, [])
+        self.assertEqual(saved, contents)
+        self.assertFalse(self.root.exists())
 
     def test_empty_file(self):
         self.load(b"")
