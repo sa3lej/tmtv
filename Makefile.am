@@ -517,3 +517,12 @@ tests/test-control-subscriptions: tests/test-control-subscriptions.o tests/test-
 
 CLEANFILES += tests/test-control-subscriptions tests/test-control-subscriptions.o
 EXTRA_DIST += tests/test-control-subscriptions.c
+
+tests/test-mode-lifecycle.o: tests/test-mode-lifecycle.c tmux.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-mode-lifecycle.c -o $@
+
+tests/test-mode-lifecycle: tests/test-mode-lifecycle.o tests/test-window-tmux.o $(tmtv_OBJECTS) $(tmtv_DEPENDENCIES)
+	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-mode-lifecycle.o tests/test-window-tmux.o $(filter-out tmux.o,$(tmtv_OBJECTS)) $(tmtv_LDADD) $(LIBS)
+
+CLEANFILES += tests/test-mode-lifecycle tests/test-mode-lifecycle.o
+EXTRA_DIST += tests/test-mode-lifecycle.c

@@ -112,6 +112,6 @@ cmd_choose_tree_exec(struct cmd *self, struct cmdq_item *item)
 	else
 		mode = &window_tree_mode;
 
-	window_pane_set_mode(wp, NULL, mode, target, args);
+	window_pane_set_mode(wp, NULL, mode, item, target, args);
 	return (CMD_RETURN_NORMAL);
 }

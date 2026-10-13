@@ -790,13 +790,9 @@ static void tmate_write_copy_mode(__unused struct tmate_session *session,
 
 	str = unpack_string(uk);
 
-	/*
-	 * tmux 3.6a: window_pane_set_mode() takes 5 args and
-	 * window_copy_init_for_output()/window_copy_add() signatures changed.
-	 * Use the new API.
-	 */
+	/* Relay output has no originating local command queue item. */
 	if (TAILQ_EMPTY(&wp->modes))
-		window_pane_set_mode(wp, NULL, &window_copy_mode, NULL, NULL);
+		window_pane_set_mode(wp, NULL, &window_copy_mode, NULL, NULL, NULL);
 
 	window_copy_add(wp, 0, "%s", str);
 	free(str);

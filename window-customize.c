@@ -25,7 +25,7 @@
 #include "tmux.h"
 
 static struct screen	*window_customize_init(struct window_mode_entry *,
-			     struct cmd_find_state *, struct args *);
+			     struct cmdq_item *, struct cmd_find_state *, struct args *);
 static void		 window_customize_free(struct window_mode_entry *);
 static void		 window_customize_resize(struct window_mode_entry *,
 			      u_int, u_int);
@@ -872,7 +872,8 @@ window_customize_height(__unused void *modedata, __unused u_int height)
 }
 
 static struct screen *
-window_customize_init(struct window_mode_entry *wme, struct cmd_find_state *fs,
+window_customize_init(struct window_mode_entry *wme,
+    __unused struct cmdq_item *item, struct cmd_find_state *fs,
     struct args *args)
 {
 	struct window_pane			*wp = wme->wp;

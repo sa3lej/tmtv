@@ -75,6 +75,7 @@ struct window_pane_input_data {
 static struct window_pane *window_pane_create(struct window *, u_int, u_int,
 		    u_int);
 static void	window_pane_destroy(struct window_pane *);
+static void	window_pane_free_modes(struct window_pane *);
 static void	window_pane_free(struct window_pane *);
 static void	window_pane_full_size_offset(struct window_pane *wp,
 		    u_int *xoff, u_int *yoff, u_int *sx, u_int *sy);
@@ -1010,7 +1011,7 @@ window_pane_destroy(struct window_pane *wp)
 
 	RB_REMOVE(window_pane_tree, &all_window_panes, wp);
 	wp->flags |= PANE_DESTROYED;
-	window_pane_reset_mode_all(wp);
+	window_pane_free_modes(wp);
 
 	if (wp->fd != -1) {
 #ifdef HAVE_UTEMPTER
@@ -1165,14 +1166,18 @@ window_pane_resize(struct window_pane *wp, u_int sx, u_int sy)
 
 int
 window_pane_set_mode(struct window_pane *wp, struct window_pane *swp,
-    const struct window_mode *mode, struct cmd_find_state *fs,
-    struct args *args)
+    const struct window_mode *mode, struct cmdq_item *item,
+    struct cmd_find_state *fs, struct args *args)
 {
 	struct window_mode_entry	*wme;
 	struct window			*w = wp->window;
 
-	if (!TAILQ_EMPTY(&wp->modes) && TAILQ_FIRST(&wp->modes)->mode == mode)
-		return (1);
+	if (!TAILQ_EMPTY(&wp->modes)) {
+		if (TAILQ_FIRST(&wp->modes)->mode == mode)
+			return (1);
+		if (TAILQ_FIRST(&wp->modes)->mode->flags & WINDOW_MODE_NO_STACK)
+			window_pane_reset_mode(wp);
+	}
 
 	TAILQ_FOREACH(wme, &wp->modes, entry) {
 		if (wme->mode == mode)
@@ -1188,7 +1193,12 @@ window_pane_set_mode(struct window_pane *wp, struct window_pane *swp,
 		wme->mode = mode;
 		wme->prefix = 1;
 		TAILQ_INSERT_HEAD(&wp->modes, wme, entry);
-		wme->screen = wme->mode->init(wme, fs, args);
+		wme->screen = wme->mode->init(wme, item, fs, args);
+		if (wme->screen == NULL) {
+			TAILQ_REMOVE(&wp->modes, wme, entry);
+			free(wme);
+			return (1);
+		}
 	}
 	wp->screen = wme->screen;
 
@@ -1241,6 +1251,22 @@ window_pane_reset_mode_all(struct window_pane *wp)
 {
 	while (!TAILQ_EMPTY(&wp->modes))
 		window_pane_reset_mode(wp);
+}
+
+/* Destruction must not resize panes or fire mode-change events. */
+static void
+window_pane_free_modes(struct window_pane *wp)
+{
+	struct window_mode_entry	*wme;
+
+	while (!TAILQ_EMPTY(&wp->modes)) {
+		wme = TAILQ_FIRST(&wp->modes);
+		TAILQ_REMOVE(&wp->modes, wme, entry);
+		wme->mode->free(wme);
+		free(wme);
+	}
+
+	wp->screen = &wp->base;
 }
 
 static void

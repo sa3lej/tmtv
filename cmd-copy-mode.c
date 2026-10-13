@@ -77,7 +77,7 @@ cmd_copy_mode_exec(struct cmd *self, struct cmdq_item *item)
 	}
 
 	if (cmd_get_entry(self) == &cmd_clock_mode_entry) {
-		window_pane_set_mode(wp, NULL, &window_clock_mode, NULL, NULL);
+		window_pane_set_mode(wp, NULL, &window_clock_mode, item, NULL, NULL);
 		return (CMD_RETURN_NORMAL);
 	}
 
@@ -85,7 +85,7 @@ cmd_copy_mode_exec(struct cmd *self, struct cmdq_item *item)
 		swp = source->wp;
 	else
 		swp = wp;
-	if (!window_pane_set_mode(wp, swp, &window_copy_mode, NULL, args)) {
+	if (!window_pane_set_mode(wp, swp, &window_copy_mode, item, NULL, args)) {
 		if (args_has(args, 'M'))
 			window_copy_start_drag(c, &event->m);
 	}

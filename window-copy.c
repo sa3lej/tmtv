@@ -33,9 +33,9 @@ static void	window_copy_command(struct window_mode_entry *, struct client *,
 		    struct session *, struct winlink *, struct args *,
 		    struct mouse_event *);
 static struct screen *window_copy_init(struct window_mode_entry *,
-		    struct cmd_find_state *, struct args *);
+		    struct cmdq_item *, struct cmd_find_state *, struct args *);
 static struct screen *window_copy_view_init(struct window_mode_entry *,
-		    struct cmd_find_state *, struct args *);
+		    struct cmdq_item *, struct cmd_find_state *, struct args *);
 static void	window_copy_free(struct window_mode_entry *);
 static void	window_copy_resize(struct window_mode_entry *, u_int, u_int);
 static void	window_copy_formats(struct window_mode_entry *,
@@ -436,7 +436,8 @@ window_copy_common_init(struct window_mode_entry *wme)
 
 static struct screen *
 window_copy_init(struct window_mode_entry *wme,
-    __unused struct cmd_find_state *fs, struct args *args)
+    __unused struct cmdq_item *item, __unused struct cmd_find_state *fs,
+    struct args *args)
 {
 	struct window_pane		*wp = wme->swp;
 	struct window_copy_mode_data	*data;
@@ -460,8 +461,10 @@ window_copy_init(struct window_mode_entry *wme,
 	data->scroll_exit = args_has(args, 'e');
 	data->hide_position = args_has(args, 'H');
 
-	if (base->hyperlinks != NULL)
+	if (base->hyperlinks != NULL) {
+		hyperlinks_free(data->screen.hyperlinks);
 		data->screen.hyperlinks = hyperlinks_copy(base->hyperlinks);
+	}
 	data->screen.cx = data->cx;
 	data->screen.cy = data->cy;
 	data->mx = data->cx;
@@ -479,7 +482,8 @@ window_copy_init(struct window_mode_entry *wme,
 
 static struct screen *
 window_copy_view_init(struct window_mode_entry *wme,
-    __unused struct cmd_find_state *fs, __unused struct args *args)
+    __unused struct cmdq_item *item, __unused struct cmd_find_state *fs,
+    __unused struct args *args)
 {
 	struct window_pane		*wp = wme->wp;
 	struct window_copy_mode_data	*data;

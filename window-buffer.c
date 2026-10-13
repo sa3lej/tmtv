@@ -28,7 +28,7 @@
 #include "tmux.h"
 
 static struct screen	*window_buffer_init(struct window_mode_entry *,
-			     struct cmd_find_state *, struct args *);
+			     struct cmdq_item *, struct cmd_find_state *, struct args *);
 static void		 window_buffer_free(struct window_mode_entry *);
 static void		 window_buffer_resize(struct window_mode_entry *, u_int,
 			     u_int);
@@ -352,7 +352,8 @@ window_buffer_get_key(void *modedata, void *itemdata, u_int line)
 }
 
 static struct screen *
-window_buffer_init(struct window_mode_entry *wme, struct cmd_find_state *fs,
+window_buffer_init(struct window_mode_entry *wme,
+    __unused struct cmdq_item *item, struct cmd_find_state *fs,
     struct args *args)
 {
 	struct window_pane		*wp = wme->wp;

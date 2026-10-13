@@ -1103,8 +1103,12 @@ struct window_mode {
 	const char	*name;
 	const char	*default_format;
 
+	int		 flags;
+#define WINDOW_MODE_NO_STACK 0x2
+
 	struct screen	*(*init)(struct window_mode_entry *,
-			     struct cmd_find_state *, struct args *);
+			     struct cmdq_item *, struct cmd_find_state *,
+			     struct args *);
 	void		 (*free)(struct window_mode_entry *);
 	void		 (*resize)(struct window_mode_entry *, u_int, u_int);
 	void		 (*update)(struct window_mode_entry *);
@@ -3412,7 +3416,7 @@ void		 window_pane_remove_ref(struct window_pane *, const char *);
 void		 window_pane_resize(struct window_pane *, u_int, u_int);
 int		 window_pane_set_mode(struct window_pane *,
 		     struct window_pane *, const struct window_mode *,
-		     struct cmd_find_state *, struct args *);
+		     struct cmdq_item *, struct cmd_find_state *, struct args *);
 void		 window_pane_reset_mode(struct window_pane *);
 void		 window_pane_reset_mode_all(struct window_pane *);
 int		 window_pane_key(struct window_pane *, struct client *,
