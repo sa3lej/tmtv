@@ -200,72 +200,152 @@ static void tmate_uname(struct tmate_session *session,
 
 extern u_int next_window_pane_id;
 
-/* Legacy layouts carry rectangles, not a tree. Recover a single aligned
- * split only when its leaves and one-cell borders describe it exactly.
- * Mixed/nested and floating rectangles retain the legacy fallback for now.
+/* Recover tiled legacy rectangles using full one-cell-border cuts. A cut
+ * cannot cross any pane, and both sides must fill their assigned rectangle.
+ * This recovers split semantics, not the original grouping of collinear cuts.
+ * Failed candidates never attach leaves to panes; overlaps and non-tiled
+ * floating layouts retain the legacy fallback.
  */
+static int
+tmate_layout_xcompare(const void *a, const void *b)
+{
+	const struct window_pane *pa = *(struct window_pane * const *)a;
+	const struct window_pane *pb = *(struct window_pane * const *)b;
+
+	return ((pa->xoff > pb->xoff) - (pa->xoff < pb->xoff));
+}
+
+static int
+tmate_layout_ycompare(const void *a, const void *b)
+{
+	const struct window_pane *pa = *(struct window_pane * const *)a;
+	const struct window_pane *pb = *(struct window_pane * const *)b;
+
+	return ((pa->yoff > pb->yoff) - (pa->yoff < pb->yoff));
+}
+
+/* tmux groups adjacent splits of the same orientation in one node. */
+static void
+tmate_layout_append(struct layout_cell *root, struct layout_cell *lc)
+{
+	struct layout_cell *child;
+
+	if (lc->type == root->type) {
+		while ((child = TAILQ_FIRST(&lc->cells)) != NULL) {
+			TAILQ_REMOVE(&lc->cells, child, entry);
+			child->parent = root;
+			TAILQ_INSERT_TAIL(&root->cells, child, entry);
+		}
+		layout_free_cell(lc);
+	} else {
+		lc->parent = root;
+		TAILQ_INSERT_TAIL(&root->cells, lc, entry);
+	}
+}
+
+static struct layout_cell *
+tmate_layout_tree(struct window_pane **panes, u_int count,
+    u_int x, u_int y, u_int sx, u_int sy)
+{
+	struct layout_cell *root, *left, *right;
+	struct window_pane *wp;
+	u_int axis, i, end, start, limit, cut;
+
+	if (count == 1) {
+		wp = panes[0];
+		if (wp->xoff != x || wp->yoff != y || wp->sx != sx || wp->sy != sy)
+			return (NULL);
+		root = layout_create_cell(NULL);
+		layout_set_size(root, sx, sy, x, y);
+		root->type = LAYOUT_WINDOWPANE;
+		root->wp = wp; /* Attach only after the complete tree succeeds. */
+		return (root);
+	}
+	for (axis = 0; axis < 2; axis++) {
+		/* Sort only this local pointer array, never the pane list. */
+		qsort(panes, count, sizeof *panes,
+		    axis ? tmate_layout_ycompare : tmate_layout_xcompare);
+		start = axis ? y : x;
+		limit = start + (axis ? sy : sx);
+		end = start;
+		for (i = 1; i < count; i++) {
+			wp = panes[i - 1];
+			cut = axis ? wp->yoff + wp->sy : wp->xoff + wp->sx;
+			if (cut > end)
+				end = cut;
+			cut = axis ? panes[i]->yoff : panes[i]->xoff;
+			if (cut != end + 1 || end <= start || cut >= limit)
+				continue;
+			left = tmate_layout_tree(panes, i, x, y,
+			    axis ? sx : end - x, axis ? end - y : sy);
+			right = tmate_layout_tree(panes + i, count - i,
+			    axis ? x : cut, axis ? cut : y,
+			    axis ? sx : limit - cut, axis ? limit - cut : sy);
+			if (left == NULL || right == NULL) {
+				/* Panes have no attached cells until the whole tree succeeds. */
+				if (left != NULL)
+					layout_free_cell(left);
+				if (right != NULL)
+					layout_free_cell(right);
+				return (NULL);
+			}
+			root = layout_create_cell(NULL);
+			layout_set_size(root, sx, sy, x, y);
+			layout_make_node(root, axis ? LAYOUT_TOPBOTTOM : LAYOUT_LEFTRIGHT);
+			tmate_layout_append(root, left);
+			tmate_layout_append(root, right);
+			return (root);
+		}
+	}
+	return (NULL);
+}
+
+static void
+tmate_layout_attach(struct layout_cell *lc)
+{
+	struct layout_cell *child;
+
+	if (lc->type == LAYOUT_WINDOWPANE)
+		lc->wp->layout_cell = lc;
+	else {
+		TAILQ_FOREACH(child, &lc->cells, entry)
+			tmate_layout_attach(child);
+	}
+}
+
 static void
 tmate_layout_root(struct window *w)
 {
-	struct window_pane *panes[TMATE_MAX_PANES], *wp, *tmp;
+	struct window_pane *panes[TMATE_MAX_PANES], *wp;
 	struct layout_cell *root, *lc;
-	u_int count = 0, i, j, end, sx, sy;
-	int vertical = 1, horizontal = 1, aligned;
+	u_int count = 0, x = UINT_MAX, y = UINT_MAX, right = 0, bottom = 0;
 
-	TAILQ_FOREACH(wp, &w->panes, entry)
+	TAILQ_FOREACH(wp, &w->panes, entry) {
 		panes[count++] = wp;
+		if (wp->xoff < x)
+			x = wp->xoff;
+		if (wp->yoff < y)
+			y = wp->yoff;
+		if (wp->xoff + wp->sx > right)
+			right = wp->xoff + wp->sx;
+		if (wp->yoff + wp->sy > bottom)
+			bottom = wp->yoff + wp->sy;
+	}
 	if (w->layout_root != NULL)
 		layout_free(w);
 	if (count == 0)
 		return;
-	wp = panes[0];
-	for (i = 1; i < count; i++) {
-		vertical &= panes[i]->xoff == wp->xoff && panes[i]->sx == wp->sx;
-		horizontal &= panes[i]->yoff == wp->yoff && panes[i]->sy == wp->sy;
-	}
-	aligned = vertical || horizontal;
-	if (aligned) {
-		/* Pane list order is identity/order state, not spatial order. */
-		for (i = 1; i < count; i++) {
-			tmp = panes[i];
-			j = i;
-			while (j > 0 && (vertical ? panes[j - 1]->yoff > tmp->yoff :
-			    panes[j - 1]->xoff > tmp->xoff)) {
-				panes[j] = panes[j - 1];
-				j--;
-			}
-			panes[j] = tmp;
-		}
-		end = vertical ? panes[0]->yoff + panes[0]->sy :
-		    panes[0]->xoff + panes[0]->sx;
-		for (i = 1; i < count; i++) {
-			if ((vertical ? panes[i]->yoff : panes[i]->xoff) != end + 1)
-				aligned = 0;
-			end = vertical ? panes[i]->yoff + panes[i]->sy :
-			    panes[i]->xoff + panes[i]->sx;
-		}
-	}
-	if (!aligned) {
-		count = 0;
-		TAILQ_FOREACH(wp, &w->panes, entry)
-			panes[count++] = wp;
-	}
-	wp = panes[0];
-	root = w->layout_root = layout_create_cell(NULL);
-	if (count == 1) {
-		layout_set_size(root, wp->sx, wp->sy, wp->xoff, wp->yoff);
-		layout_make_leaf(root, wp);
+	root = tmate_layout_tree(panes, count, x, y, right - x, bottom - y);
+	if (root != NULL) {
+		w->layout_root = root;
+		tmate_layout_attach(root);
 		return;
 	}
-	if (aligned) {
-		sx = vertical ? wp->sx : end - wp->xoff;
-		sy = vertical ? end - wp->yoff : wp->sy;
-		layout_set_size(root, sx, sy, wp->xoff, wp->yoff);
-	} else
-		layout_set_size(root, w->sx, w->sy, 0, 0);
-	root->type = aligned && vertical ? LAYOUT_TOPBOTTOM : LAYOUT_LEFTRIGHT;
-	for (i = 0; i < count; i++) {
-		wp = panes[i];
+	root = w->layout_root = layout_create_cell(NULL);
+	layout_set_size(root, w->sx, w->sy, 0, 0);
+	layout_make_node(root, LAYOUT_LEFTRIGHT);
+	/* Restore legacy list order after the unsuccessful spatial sort. */
+	TAILQ_FOREACH(wp, &w->panes, entry) {
 		lc = layout_create_cell(root);
 		layout_set_size(lc, wp->sx, wp->sy, wp->xoff, wp->yoff);
 		layout_make_leaf(lc, wp);

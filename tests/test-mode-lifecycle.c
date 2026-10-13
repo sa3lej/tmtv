@@ -603,9 +603,9 @@ emit_reconnect_snapshot(void)
 /* Real split, resize and close APIs generate all wire geometry. Reverse the
  * spatial and pane-list orders with SPAWN_BEFORE to exercise tree ordering. */
 static int
-emit_split_reconnect(int vertical)
+emit_split_reconnect(int vertical, int mixed)
 {
-	struct window_pane *first = create_pane(), *second;
+	struct window_pane *first = create_pane(), *second, *third = NULL;
 	struct window *w = first->window;
 	struct session *s;
 	struct winlink *wl;
@@ -629,6 +629,15 @@ emit_split_reconnect(int vertical)
 	second = window_add_pane(w, first, 100, 0);
 	layout_assign_pane(lc, second, 0);
 	layout_fix_panes(w, NULL);
+	if (mixed) {
+		lc = layout_split_pane(first, vertical ? LAYOUT_LEFTRIGHT :
+		    LAYOUT_TOPBOTTOM, vertical ? 23 : 7, SPAWN_BEFORE);
+		if (lc == NULL)
+			abort();
+		third = window_add_pane(w, first, 100, 0);
+		layout_assign_pane(lc, third, 0);
+		layout_fix_panes(w, NULL);
+	}
 	window_set_active_pane(w, second, 0);
 	emit_layout = 1;
 	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
@@ -647,12 +656,18 @@ emit_split_reconnect(int vertical)
 			utf8_set(&gc.data, 'A');
 			grid_set_cell(first->base.grid, 0, 0, &gc);
 		}
+		if (third) {
+			utf8_set(&gc.data, 'C');
+			grid_set_cell(third->base.grid, 0, 0, &gc);
+		}
 		utf8_set(&gc.data, 'B');
 		grid_set_cell(second->base.grid, 0, 0, &gc);
 		tmate_send_reconnection_state(&tmate_session);
 		if (first)
 			tmate_pty_data(&tmate_session, first, "\033[1;1HZ", 7);
 		tmate_pty_data(&tmate_session, second, "\033[1;1HY", 7);
+		if (third)
+			tmate_pty_data(&tmate_session, third, "\033[1;1HW", 7);
 		tmate_decoder_init(&decoder, emit_snapshot_message, &pk);
 		decode_reconnect_buffer(&decoder, 1);
 		tmate_decoder_destroy(&decoder);
@@ -693,10 +708,13 @@ main(int argc, char **argv)
 	    strcmp(argv[1], "--emit-snapshot") == 0 ||
 	    strcmp(argv[1], "--emit-layout-snapshot") == 0 ||
 	    strcmp(argv[1], "--emit-vertical-reconnect") == 0 ||
-	    strcmp(argv[1], "--emit-horizontal-reconnect") == 0)) {
+	    strcmp(argv[1], "--emit-horizontal-reconnect") == 0 ||
+	    strcmp(argv[1], "--emit-mixed-vertical-reconnect") == 0 ||
+	    strcmp(argv[1], "--emit-mixed-horizontal-reconnect") == 0)) {
 		emit_layout = strcmp(argv[1], "--emit-layout-snapshot") == 0;
 		int result = strstr(argv[1], "-reconnect") != NULL ?
-		    emit_split_reconnect(strcmp(argv[1], "--emit-vertical-reconnect") == 0) :
+		    emit_split_reconnect(strstr(argv[1], "vertical") != NULL,
+		    strstr(argv[1], "mixed") != NULL) :
 		    (emit_layout || strcmp(argv[1], "--emit-snapshot") == 0) ?
 		    emit_reconnect_snapshot() :
 		    emit_copy_output(strcmp(argv[1], "--emit-copy-exit") == 0);

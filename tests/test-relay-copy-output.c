@@ -615,8 +615,8 @@ TEST(host_layout_snapshot_and_following_pty_restore_real_session)
 	ASSERT(RB_EMPTY(&sessions));
 }
 
-static int split_vertical, split_layouts, split_snapshots, split_output;
-static struct window_pane *split_first, *split_second;
+static int split_mixed, split_vertical, split_layouts, split_snapshots, split_output;
+static struct window_pane *split_first, *split_second, *split_third;
 
 static void
 read_split_message(void *session, struct tmate_unpacker *uk)
@@ -624,7 +624,7 @@ read_split_message(void *session, struct tmate_unpacker *uk)
 	struct tmate_unpacker original = *uk;
 	struct session *s;
 	struct window *w;
-	struct window_pane *wp;
+	struct window_pane *wp, *ordered;
 	struct layout_cell *leaf, *root;
 	struct grid_cell gc;
 	msgpack_object *panes, *pane;
@@ -645,11 +645,14 @@ read_split_message(void *session, struct tmate_unpacker *uk)
 		/* Compare each production leaf against actual encoded rectangles. */
 		panes = original.argv[3].via.array.ptr[0].via.array.ptr[2].via.array.ptr;
 		n = original.argv[3].via.array.ptr[0].via.array.ptr[2].via.array.size;
-		ASSERT_EQ(n, split_layouts < 3 ? 2 : 1);
+		ASSERT_EQ(n, (split_layouts < 3 ? 2 : 1) + split_mixed);
+		ordered = TAILQ_FIRST(&w->panes);
 		for (i = 0; i < n; i++) {
 			pane = panes[i].via.array.ptr;
 			wp = window_pane_find_by_id(pane[0].via.u64);
 			ASSERT(wp != NULL && wp->window == w && wp->ictx != NULL);
+			ASSERT(wp == ordered);
+			ordered = TAILQ_NEXT(ordered, entry);
 			leaf = wp->layout_cell;
 			ASSERT(leaf != NULL && leaf->wp == wp);
 			ASSERT_EQ(wp->sx, pane[1].via.u64);
@@ -665,6 +668,8 @@ read_split_message(void *session, struct tmate_unpacker *uk)
 		if (split_layouts == 1) {
 			split_first = window_pane_find_by_id(0);
 			split_second = window_pane_find_by_id(1);
+			if (split_mixed)
+				split_third = window_pane_find_by_id(2);
 		}
 		ASSERT(window_pane_find_by_id(1) == split_second);
 		ASSERT(w->active == split_second);
@@ -672,15 +677,37 @@ read_split_message(void *session, struct tmate_unpacker *uk)
 		ASSERT_EQ(root->sy, w->sy);
 		ASSERT_EQ(root->xoff, 0);
 		ASSERT_EQ(root->yoff, 0);
-		if (n == 2) {
-			ASSERT(window_pane_find_by_id(0) == split_first);
+		if (split_layouts < 3 || split_mixed) {
 			ASSERT_EQ(root->type, split_vertical ? LAYOUT_TOPBOTTOM : LAYOUT_LEFTRIGHT);
 			leaf = TAILQ_FIRST(&root->cells);
 			ASSERT(leaf == split_second->layout_cell && leaf->parent == root);
-			ASSERT(TAILQ_NEXT(leaf, entry) == split_first->layout_cell);
 			ASSERT(layout_search_by_border(root,
 			    split_vertical ? 0 : leaf->sx,
 			    split_vertical ? leaf->sy : 0) == leaf);
+			leaf = TAILQ_NEXT(leaf, entry);
+			ASSERT(leaf != NULL && leaf->parent == root);
+			ASSERT(TAILQ_NEXT(leaf, entry) == NULL);
+			if (split_layouts < 3) {
+				ASSERT(window_pane_find_by_id(0) == split_first);
+				if (split_mixed) {
+					ASSERT(window_pane_find_by_id(2) == split_third);
+					ASSERT_EQ(leaf->type, split_vertical ? LAYOUT_LEFTRIGHT : LAYOUT_TOPBOTTOM);
+					ASSERT(TAILQ_FIRST(&leaf->cells) == split_third->layout_cell);
+					ASSERT(TAILQ_NEXT(TAILQ_FIRST(&leaf->cells), entry) == split_first->layout_cell);
+					ASSERT(split_first->layout_cell->parent == leaf);
+					ASSERT(split_third->layout_cell->parent == leaf);
+					ASSERT_EQ(leaf->sx, split_vertical ? w->sx : split_first->sx);
+					ASSERT_EQ(leaf->sy, split_vertical ? split_first->sy : w->sy);
+					ASSERT(layout_search_by_border(root,
+					    split_vertical ? split_third->sx : leaf->xoff,
+					    split_vertical ? leaf->yoff : split_third->sy) == split_third->layout_cell);
+				} else
+					ASSERT(leaf == split_first->layout_cell);
+			} else {
+				ASSERT(window_pane_find_by_id(0) == NULL);
+				ASSERT(window_pane_find_by_id(2) == split_third);
+				ASSERT(leaf == split_third->layout_cell);
+			}
 		} else {
 			ASSERT(window_pane_find_by_id(0) == NULL);
 			ASSERT(root == split_second->layout_cell && root->parent == NULL);
@@ -693,14 +720,14 @@ read_split_message(void *session, struct tmate_unpacker *uk)
 			ASSERT_EQ(wp->base.grid->sx, wp->sx);
 			ASSERT_EQ(wp->base.grid->sy, wp->sy);
 			grid_get_cell(wp->base.grid, 0, wp->base.grid->hsize, &gc);
-			ASSERT_EQ(gc.data.data[0], wp->id == 0 ? 'A' : 'B');
+			ASSERT_EQ(gc.data.data[0], wp->id == 0 ? 'A' : wp->id == 1 ? 'B' : 'C');
 		}
 	} else if (opcode == TMATE_OUT_PTY_DATA) {
 		split_output++;
 		wp = window_pane_find_by_id(original.argv[1].via.u64);
 		ASSERT(wp != NULL);
 		grid_get_cell(wp->base.grid, 0, wp->base.grid->hsize, &gc);
-		ASSERT_EQ(gc.data.data[0], wp->id == 0 ? 'Z' : 'Y');
+		ASSERT_EQ(gc.data.data[0], wp->id == 0 ? 'Z' : wp->id == 1 ? 'Y' : 'W');
 		ASSERT_EQ(wp->base.cx, 1);
 		ASSERT_EQ(wp->base.cy, 0);
 	}
@@ -731,10 +758,10 @@ TEST(host_split_reconnect_resize_and_removal)
 	}
 	ASSERT(!ferror(stdin));
 	ASSERT_EQ(_tests_failed, failures);
-	ASSERT_EQ(dispatched, before + 11);
+	ASSERT_EQ(dispatched, before + 11 + 3 * split_mixed);
 	ASSERT_EQ(split_layouts, 3);
 	ASSERT_EQ(split_snapshots, 3);
-	ASSERT_EQ(split_output, 5);
+	ASSERT_EQ(split_output, 5 + 3 * split_mixed);
 	msgpack_unpacker_destroy(&decoder.unpacker);
 	s = RB_MIN(sessions, &sessions);
 	session_destroy(s, 0, __func__);
@@ -742,6 +769,145 @@ TEST(host_split_reconnect_resize_and_removal)
 		;
 	event_loop(EVLOOP_NONBLOCK);
 	ASSERT(RB_EMPTY(&sessions));
+}
+
+/* Exercise the protocol pane limit and unsuccessful partial tree cleanup. */
+static void
+send_rectangle_layout(u_int count, int variant)
+{
+	struct tmate_decoder decoder;
+	msgpack_sbuffer sb;
+	msgpack_packer pk;
+	char *buf;
+	size_t capacity, offset = 0, size;
+	u_int i, id, x, y, sx, sy;
+
+	msgpack_sbuffer_init(&sb);
+	msgpack_packer_init(&pk, &sb, msgpack_sbuffer_write);
+	msgpack_pack_array(&pk, 5);
+	msgpack_pack_int(&pk, TMATE_OUT_SYNC_LAYOUT);
+	msgpack_pack_int(&pk, variant < 0 ? 2 * count - 1 : 80);
+	msgpack_pack_int(&pk, variant < 0 ? 1 : 24);
+	msgpack_pack_array(&pk, 1);
+	msgpack_pack_array(&pk, 4);
+	msgpack_pack_int(&pk, 0);
+	msgpack_pack_str(&pk, 1);
+	msgpack_pack_str_body(&pk, "w", 1);
+	msgpack_pack_array(&pk, count);
+	for (i = 0; i < count; i++) {
+		id = count - 1 - i;
+		x = variant < 0 ? 2 * id : variant == 0 ? 0 :
+		    variant == 1 ? (id == 0 ? 0 : 11) : 12 * id;
+		y = variant == 1 && id == 2 ? 8 : 0;
+		sx = variant < 0 ? 1 : 10;
+		sy = variant < 0 ? 1 : variant == 1 && id == 1 ? 3 : 12;
+		msgpack_pack_array(&pk, 5);
+		msgpack_pack_uint32(&pk, id);
+		msgpack_pack_uint32(&pk, sx);
+		msgpack_pack_uint32(&pk, sy);
+		msgpack_pack_uint32(&pk, x);
+		msgpack_pack_uint32(&pk, y);
+	}
+	msgpack_pack_int(&pk, 0);
+	msgpack_pack_int(&pk, 0);
+	msgpack_pack_array(&pk, 3);
+	msgpack_pack_int(&pk, TMATE_OUT_PTY_DATA);
+	msgpack_pack_int(&pk, 0);
+	msgpack_pack_str(&pk, 1);
+	msgpack_pack_str_body(&pk, "X", 1);
+	tmate_decoder_init(&decoder, read_message, tmate_session);
+	while (offset < sb.size) {
+		tmate_decoder_get_buffer(&decoder, &buf, &capacity);
+		size = sb.size - offset;
+		if (size > capacity)
+			size = capacity;
+		memcpy(buf, sb.data + offset, size);
+		tmate_decoder_commit(&decoder, size);
+		offset += size;
+	}
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	msgpack_sbuffer_destroy(&sb);
+}
+
+static void
+remove_rectangle_session(void)
+{
+	struct session *s = RB_MIN(sessions, &sessions);
+
+	session_destroy(s, 0, __func__);
+	while (cmdq_next(NULL) != 0)
+		;
+	event_loop(EVLOOP_NONBLOCK);
+}
+
+TEST(maximum_panes_recover_spatial_tree)
+{
+	struct session *s;
+	struct window *w;
+	struct window_pane *wp;
+	struct layout_cell *lc;
+	struct grid_cell gc;
+	u_int i;
+
+	ASSERT(RB_EMPTY(&sessions));
+	send_rectangle_layout(1000, -1);
+	s = RB_MIN(sessions, &sessions);
+	ASSERT(s != NULL);
+	w = s->curw->window;
+	ASSERT_EQ(TAILQ_FIRST(&w->panes)->id, 999);
+	ASSERT_EQ(w->layout_root->type, LAYOUT_LEFTRIGHT);
+	ASSERT_EQ(w->layout_root->sx, 1999);
+	lc = TAILQ_FIRST(&w->layout_root->cells);
+	for (i = 0; i < 1000; i++) {
+		wp = window_pane_find_by_id(i);
+		ASSERT(wp != NULL && wp->ictx != NULL);
+		ASSERT(lc == wp->layout_cell);
+		ASSERT(lc->parent == w->layout_root);
+		ASSERT_EQ(lc->type, LAYOUT_WINDOWPANE);
+		ASSERT_EQ(lc->sx, 1);
+		ASSERT_EQ(lc->xoff, 2 * i);
+		lc = TAILQ_NEXT(lc, entry);
+	}
+	ASSERT(lc == NULL);
+	wp = window_pane_find_by_id(0);
+	grid_get_cell(wp->base.grid, 0, wp->base.grid->hsize, &gc);
+	ASSERT_EQ(gc.data.data[0], 'X');
+	remove_rectangle_session();
+	ASSERT(RB_EMPTY(&sessions));
+}
+
+TEST(non_tiled_rectangles_preserve_legacy_fallback)
+{
+	struct session *s;
+	struct window *w;
+	struct window_pane *wp;
+	struct layout_cell *lc;
+	int variant;
+
+	ASSERT(RB_EMPTY(&sessions));
+	for (variant = 0; variant < 3; variant++) {
+		send_rectangle_layout(3, variant);
+		s = RB_MIN(sessions, &sessions);
+		ASSERT(s != NULL);
+		w = s->curw->window;
+		ASSERT_EQ(w->layout_root->type, LAYOUT_LEFTRIGHT);
+		ASSERT_EQ(w->layout_root->sx, 80);
+		ASSERT_EQ(w->layout_root->sy, 24);
+		lc = TAILQ_FIRST(&w->layout_root->cells);
+		TAILQ_FOREACH(wp, &w->panes, entry) {
+			ASSERT(lc == wp->layout_cell && lc->wp == wp);
+			ASSERT(lc->parent == w->layout_root);
+			ASSERT_EQ(lc->type, LAYOUT_WINDOWPANE);
+			ASSERT_EQ(lc->sx, wp->sx);
+			ASSERT_EQ(lc->sy, wp->sy);
+			ASSERT_EQ(lc->xoff, wp->xoff);
+			ASSERT_EQ(lc->yoff, wp->yoff);
+			lc = TAILQ_NEXT(lc, entry);
+		}
+		ASSERT(lc == NULL);
+		remove_rectangle_session();
+		ASSERT(RB_EMPTY(&sessions));
+	}
 }
 
 /* A later invalid pane must not resize the earlier valid pane. */
@@ -1011,9 +1177,12 @@ main(int argc, char **argv)
 	}
 	TEST_SUITE_BEGIN("Production relay copy output");
 	if (argc == 2 && (strstr(argv[1], "--host-vertical-reconnect") == argv[1] ||
-	    strstr(argv[1], "--host-horizontal-reconnect") == argv[1])) {
+	    strstr(argv[1], "--host-horizontal-reconnect") == argv[1] ||
+	    strstr(argv[1], "--host-mixed-vertical-reconnect") == argv[1] ||
+	    strstr(argv[1], "--host-mixed-horizontal-reconnect") == argv[1])) {
 		snapshot_bulk = strstr(argv[1], "-bulk") != NULL;
 		split_vertical = strstr(argv[1], "-vertical-") != NULL;
+		split_mixed = strstr(argv[1], "-mixed-") != NULL;
 		RUN_TEST(host_split_reconnect_resize_and_removal);
 	} else if (argc == 2 && (strcmp(argv[1], "--host-layout-snapshot") == 0 ||
 	    strcmp(argv[1], "--host-layout-snapshot-bulk") == 0)) {
@@ -1028,6 +1197,8 @@ main(int argc, char **argv)
 		host_exit = strcmp(argv[1], "--host-exit") == 0;
 		RUN_TEST(host_encoder_output_routes_without_feedback);
 	} else {
+		RUN_TEST(maximum_panes_recover_spatial_tree);
+		RUN_TEST(non_tiled_rectangles_preserve_legacy_fallback);
 		RUN_TEST(malformed_layout_preserves_session_geometry_and_following_message);
 		RUN_TEST(malformed_snapshot_preserves_both_grids_and_message_boundaries);
 		RUN_TEST(web_snapshot_fields_and_history);
