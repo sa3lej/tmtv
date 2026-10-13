@@ -600,6 +600,75 @@ emit_reconnect_snapshot(void)
 	return (result);
 }
 
+/* Real split, resize and close APIs generate all wire geometry. Reverse the
+ * spatial and pane-list orders with SPAWN_BEFORE to exercise tree ordering. */
+static int
+emit_split_reconnect(int vertical)
+{
+	struct window_pane *first = create_pane(), *second;
+	struct window *w = first->window;
+	struct session *s;
+	struct winlink *wl;
+	struct layout_cell *lc;
+	struct tmate_decoder decoder;
+	struct grid_cell gc = grid_default_cell;
+	msgpack_sbuffer sb;
+	msgpack_packer pk;
+	int phase, result;
+
+	s = session_create(NULL, "split-reconnect", "/", environ_create(),
+	    options_create(global_s_options), NULL);
+	wl = winlink_add(&s->windows, 0);
+	wl->session = s;
+	winlink_set_window(wl, w);
+	s->curw = wl;
+	lc = layout_split_pane(first, vertical ? LAYOUT_TOPBOTTOM :
+	    LAYOUT_LEFTRIGHT, vertical ? 9 : 29, SPAWN_BEFORE);
+	if (lc == NULL)
+		abort();
+	second = window_add_pane(w, first, 100, 0);
+	layout_assign_pane(lc, second, 0);
+	layout_fix_panes(w, NULL);
+	window_set_active_pane(w, second, 0);
+	emit_layout = 1;
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	msgpack_sbuffer_init(&sb);
+	msgpack_packer_init(&pk, &sb, msgpack_sbuffer_write);
+	for (phase = 0; phase < 3; phase++) {
+		if (phase == 1) {
+			layout_resize(w, 91, 31);
+			window_resize(w, 91, 31, -1, -1);
+		} else if (phase == 2) {
+			layout_close_pane(first);
+			window_remove_pane(w, first);
+			first = NULL;
+		}
+		if (first) {
+			utf8_set(&gc.data, 'A');
+			grid_set_cell(first->base.grid, 0, 0, &gc);
+		}
+		utf8_set(&gc.data, 'B');
+		grid_set_cell(second->base.grid, 0, 0, &gc);
+		tmate_send_reconnection_state(&tmate_session);
+		if (first)
+			tmate_pty_data(&tmate_session, first, "\033[1;1HZ", 7);
+		tmate_pty_data(&tmate_session, second, "\033[1;1HY", 7);
+		tmate_decoder_init(&decoder, emit_snapshot_message, &pk);
+		decode_reconnect_buffer(&decoder, 1);
+		tmate_decoder_destroy(&decoder);
+	}
+	result = sb.size == 0 || fwrite(sb.data, 1, sb.size, stdout) != sb.size;
+	msgpack_sbuffer_destroy(&sb);
+	tmate_encoder_destroy(&tmate_session.encoder);
+	tmate_session.encoder.buffer = NULL;
+	session_destroy(s, 0, __func__);
+	while (cmdq_next(NULL) != 0)
+		;
+	event_loop(EVLOOP_NONBLOCK);
+	destroy_pane(second);
+	return (result);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -622,9 +691,13 @@ main(int argc, char **argv)
 	if (argc == 2 && (strcmp(argv[1], "--emit-copy-output") == 0 ||
 	    strcmp(argv[1], "--emit-copy-exit") == 0 ||
 	    strcmp(argv[1], "--emit-snapshot") == 0 ||
-	    strcmp(argv[1], "--emit-layout-snapshot") == 0)) {
+	    strcmp(argv[1], "--emit-layout-snapshot") == 0 ||
+	    strcmp(argv[1], "--emit-vertical-reconnect") == 0 ||
+	    strcmp(argv[1], "--emit-horizontal-reconnect") == 0)) {
 		emit_layout = strcmp(argv[1], "--emit-layout-snapshot") == 0;
-		int result = (emit_layout || strcmp(argv[1], "--emit-snapshot") == 0) ?
+		int result = strstr(argv[1], "-reconnect") != NULL ?
+		    emit_split_reconnect(strcmp(argv[1], "--emit-vertical-reconnect") == 0) :
+		    (emit_layout || strcmp(argv[1], "--emit-snapshot") == 0) ?
 		    emit_reconnect_snapshot() :
 		    emit_copy_output(strcmp(argv[1], "--emit-copy-exit") == 0);
 		options_free(global_w_options);

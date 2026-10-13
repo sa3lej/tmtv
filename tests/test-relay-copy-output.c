@@ -615,6 +615,135 @@ TEST(host_layout_snapshot_and_following_pty_restore_real_session)
 	ASSERT(RB_EMPTY(&sessions));
 }
 
+static int split_vertical, split_layouts, split_snapshots, split_output;
+static struct window_pane *split_first, *split_second;
+
+static void
+read_split_message(void *session, struct tmate_unpacker *uk)
+{
+	struct tmate_unpacker original = *uk;
+	struct session *s;
+	struct window *w;
+	struct window_pane *wp;
+	struct layout_cell *leaf, *root;
+	struct grid_cell gc;
+	msgpack_object *panes, *pane;
+	u_int i, n, opcode = uk->argv[0].via.u64;
+
+	tmate_dispatch_daemon_message(session, uk);
+	dispatched++;
+	s = RB_MIN(sessions, &sessions);
+	ASSERT(s != NULL);
+	w = s->curw->window;
+	root = w->layout_root;
+	ASSERT(root != NULL);
+	if (opcode == TMATE_OUT_SYNC_LAYOUT) {
+		split_layouts++;
+		ASSERT_EQ(winlink_count(&s->windows), 1);
+		ASSERT_EQ(w->sx, split_layouts == 1 ? 80 : 91);
+		ASSERT_EQ(w->sy, split_layouts == 1 ? 24 : 31);
+		/* Compare each production leaf against actual encoded rectangles. */
+		panes = original.argv[3].via.array.ptr[0].via.array.ptr[2].via.array.ptr;
+		n = original.argv[3].via.array.ptr[0].via.array.ptr[2].via.array.size;
+		ASSERT_EQ(n, split_layouts < 3 ? 2 : 1);
+		for (i = 0; i < n; i++) {
+			pane = panes[i].via.array.ptr;
+			wp = window_pane_find_by_id(pane[0].via.u64);
+			ASSERT(wp != NULL && wp->window == w && wp->ictx != NULL);
+			leaf = wp->layout_cell;
+			ASSERT(leaf != NULL && leaf->wp == wp);
+			ASSERT_EQ(wp->sx, pane[1].via.u64);
+			ASSERT_EQ(wp->sy, pane[2].via.u64);
+			ASSERT_EQ(wp->xoff, pane[3].via.u64);
+			ASSERT_EQ(wp->yoff, pane[4].via.u64);
+			ASSERT_EQ(leaf->sx, wp->sx);
+			ASSERT_EQ(leaf->sy, wp->sy);
+			ASSERT_EQ(leaf->xoff, wp->xoff);
+			ASSERT_EQ(leaf->yoff, wp->yoff);
+			ASSERT(wp->screen == &wp->base);
+		}
+		if (split_layouts == 1) {
+			split_first = window_pane_find_by_id(0);
+			split_second = window_pane_find_by_id(1);
+		}
+		ASSERT(window_pane_find_by_id(1) == split_second);
+		ASSERT(w->active == split_second);
+		ASSERT_EQ(root->sx, w->sx);
+		ASSERT_EQ(root->sy, w->sy);
+		ASSERT_EQ(root->xoff, 0);
+		ASSERT_EQ(root->yoff, 0);
+		if (n == 2) {
+			ASSERT(window_pane_find_by_id(0) == split_first);
+			ASSERT_EQ(root->type, split_vertical ? LAYOUT_TOPBOTTOM : LAYOUT_LEFTRIGHT);
+			leaf = TAILQ_FIRST(&root->cells);
+			ASSERT(leaf == split_second->layout_cell && leaf->parent == root);
+			ASSERT(TAILQ_NEXT(leaf, entry) == split_first->layout_cell);
+			ASSERT(layout_search_by_border(root,
+			    split_vertical ? 0 : leaf->sx,
+			    split_vertical ? leaf->sy : 0) == leaf);
+		} else {
+			ASSERT(window_pane_find_by_id(0) == NULL);
+			ASSERT(root == split_second->layout_cell && root->parent == NULL);
+			ASSERT_EQ(root->type, LAYOUT_WINDOWPANE);
+			ASSERT(TAILQ_NEXT(TAILQ_FIRST(&w->panes), entry) == NULL);
+		}
+	} else if (opcode == TMATE_OUT_SNAPSHOT) {
+		split_snapshots++;
+		TAILQ_FOREACH(wp, &w->panes, entry) {
+			ASSERT_EQ(wp->base.grid->sx, wp->sx);
+			ASSERT_EQ(wp->base.grid->sy, wp->sy);
+			grid_get_cell(wp->base.grid, 0, wp->base.grid->hsize, &gc);
+			ASSERT_EQ(gc.data.data[0], wp->id == 0 ? 'A' : 'B');
+		}
+	} else if (opcode == TMATE_OUT_PTY_DATA) {
+		split_output++;
+		wp = window_pane_find_by_id(original.argv[1].via.u64);
+		ASSERT(wp != NULL);
+		grid_get_cell(wp->base.grid, 0, wp->base.grid->hsize, &gc);
+		ASSERT_EQ(gc.data.data[0], wp->id == 0 ? 'Z' : 'Y');
+		ASSERT_EQ(wp->base.cx, 1);
+		ASSERT_EQ(wp->base.cy, 0);
+	}
+}
+
+TEST(host_split_reconnect_resize_and_removal)
+{
+	struct tmate_decoder decoder;
+	struct session *s;
+	char *buf;
+	size_t capacity, count;
+	int ch, before = dispatched, failures = _tests_failed;
+
+	ASSERT(RB_EMPTY(&sessions));
+	tmate_decoder_init(&decoder, read_split_message, tmate_session);
+	if (snapshot_bulk) {
+		do {
+			tmate_decoder_get_buffer(&decoder, &buf, &capacity);
+			count = fread(buf, 1, capacity, stdin);
+			tmate_decoder_commit(&decoder, count);
+		} while (count != 0);
+	} else {
+		while ((ch = getchar()) != EOF) {
+			tmate_decoder_get_buffer(&decoder, &buf, &capacity);
+			*buf = ch;
+			tmate_decoder_commit(&decoder, 1);
+		}
+	}
+	ASSERT(!ferror(stdin));
+	ASSERT_EQ(_tests_failed, failures);
+	ASSERT_EQ(dispatched, before + 11);
+	ASSERT_EQ(split_layouts, 3);
+	ASSERT_EQ(split_snapshots, 3);
+	ASSERT_EQ(split_output, 5);
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	s = RB_MIN(sessions, &sessions);
+	session_destroy(s, 0, __func__);
+	while (cmdq_next(NULL) != 0)
+		;
+	event_loop(EVLOOP_NONBLOCK);
+	ASSERT(RB_EMPTY(&sessions));
+}
+
 /* A later invalid pane must not resize the earlier valid pane. */
 static void
 send_invalid_layout(struct window_pane *wp, int variant)
@@ -881,7 +1010,12 @@ main(int argc, char **argv)
 			options_default(global_w_options, oe);
 	}
 	TEST_SUITE_BEGIN("Production relay copy output");
-	if (argc == 2 && (strcmp(argv[1], "--host-layout-snapshot") == 0 ||
+	if (argc == 2 && (strstr(argv[1], "--host-vertical-reconnect") == argv[1] ||
+	    strstr(argv[1], "--host-horizontal-reconnect") == argv[1])) {
+		snapshot_bulk = strstr(argv[1], "-bulk") != NULL;
+		split_vertical = strstr(argv[1], "-vertical-") != NULL;
+		RUN_TEST(host_split_reconnect_resize_and_removal);
+	} else if (argc == 2 && (strcmp(argv[1], "--host-layout-snapshot") == 0 ||
 	    strcmp(argv[1], "--host-layout-snapshot-bulk") == 0)) {
 		snapshot_bulk = strcmp(argv[1], "--host-layout-snapshot-bulk") == 0;
 		RUN_TEST(host_layout_snapshot_and_following_pty_restore_real_session);

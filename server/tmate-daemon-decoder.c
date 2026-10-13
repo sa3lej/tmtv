@@ -200,6 +200,79 @@ static void tmate_uname(struct tmate_session *session,
 
 extern u_int next_window_pane_id;
 
+/* Legacy layouts carry rectangles, not a tree. Recover a single aligned
+ * split only when its leaves and one-cell borders describe it exactly.
+ * Mixed/nested and floating rectangles retain the legacy fallback for now.
+ */
+static void
+tmate_layout_root(struct window *w)
+{
+	struct window_pane *panes[TMATE_MAX_PANES], *wp, *tmp;
+	struct layout_cell *root, *lc;
+	u_int count = 0, i, j, end, sx, sy;
+	int vertical = 1, horizontal = 1, aligned;
+
+	TAILQ_FOREACH(wp, &w->panes, entry)
+		panes[count++] = wp;
+	if (w->layout_root != NULL)
+		layout_free(w);
+	if (count == 0)
+		return;
+	wp = panes[0];
+	for (i = 1; i < count; i++) {
+		vertical &= panes[i]->xoff == wp->xoff && panes[i]->sx == wp->sx;
+		horizontal &= panes[i]->yoff == wp->yoff && panes[i]->sy == wp->sy;
+	}
+	aligned = vertical || horizontal;
+	if (aligned) {
+		/* Pane list order is identity/order state, not spatial order. */
+		for (i = 1; i < count; i++) {
+			tmp = panes[i];
+			j = i;
+			while (j > 0 && (vertical ? panes[j - 1]->yoff > tmp->yoff :
+			    panes[j - 1]->xoff > tmp->xoff)) {
+				panes[j] = panes[j - 1];
+				j--;
+			}
+			panes[j] = tmp;
+		}
+		end = vertical ? panes[0]->yoff + panes[0]->sy :
+		    panes[0]->xoff + panes[0]->sx;
+		for (i = 1; i < count; i++) {
+			if ((vertical ? panes[i]->yoff : panes[i]->xoff) != end + 1)
+				aligned = 0;
+			end = vertical ? panes[i]->yoff + panes[i]->sy :
+			    panes[i]->xoff + panes[i]->sx;
+		}
+	}
+	if (!aligned) {
+		count = 0;
+		TAILQ_FOREACH(wp, &w->panes, entry)
+			panes[count++] = wp;
+	}
+	wp = panes[0];
+	root = w->layout_root = layout_create_cell(NULL);
+	if (count == 1) {
+		layout_set_size(root, wp->sx, wp->sy, wp->xoff, wp->yoff);
+		layout_make_leaf(root, wp);
+		return;
+	}
+	if (aligned) {
+		sx = vertical ? wp->sx : end - wp->xoff;
+		sy = vertical ? end - wp->yoff : wp->sy;
+		layout_set_size(root, sx, sy, wp->xoff, wp->yoff);
+	} else
+		layout_set_size(root, w->sx, w->sy, 0, 0);
+	root->type = aligned && vertical ? LAYOUT_TOPBOTTOM : LAYOUT_LEFTRIGHT;
+	for (i = 0; i < count; i++) {
+		wp = panes[i];
+		lc = layout_create_cell(root);
+		layout_set_size(lc, wp->sx, wp->sy, wp->xoff, wp->yoff);
+		layout_make_leaf(lc, wp);
+		TAILQ_INSERT_TAIL(&root->cells, lc, entry);
+	}
+}
+
 static void tmate_sync_window_panes(struct window *w,
 				    struct tmate_unpacker *w_uk,
 				    int *num_panes)
@@ -210,6 +283,13 @@ static void tmate_sync_window_panes(struct window *w,
 	u_int seen_ids[TMATE_MAX_PANES];
 	int seen_count = 0;
 	int i, found;
+
+	/* Release every leaf while its pane is still alive. Closing individual
+	 * old leaves later would resize survivors over received rectangles. */
+	if (w->layout_root != NULL) {
+		layout_free(w);
+		w->layout_root = NULL;
+	}
 
 	unpack_each(&uk, &tmp_uk, w_uk) {
 		if (++(*num_panes) > TMATE_MAX_PANES)
@@ -229,6 +309,8 @@ static void tmate_sync_window_panes(struct window *w,
 			tmate_info("Pane id=%u in wrong window, "
 				   "moving to window idx=%d",
 				   id, w->id);
+			if (wp->layout_cell != NULL)
+				layout_close_pane(wp);
 			window_remove_pane(wp->window, wp);
 			wp = NULL;
 		}
@@ -274,40 +356,8 @@ static void tmate_sync_window_panes(struct window *w,
 			window_remove_pane(w, wp);
 	}
 
-	/*
-	 * Rebuild layout tree so that wp->layout_cell is non-NULL for
-	 * every pane.  tty_write()'s set_client_cb checks layout_cell
-	 * and skips panes where it is NULL, which blocks all incremental
-	 * screen updates to attached clients.
-	 */
-	{
-		int pane_count = 0;
-		TAILQ_FOREACH(wp, &w->panes, entry)
-			pane_count++;
-
-		if (w->layout_root != NULL)
-			layout_free(w);
-
-		if (pane_count == 1) {
-			struct layout_cell *lc;
-			wp = TAILQ_FIRST(&w->panes);
-			lc = w->layout_root = layout_create_cell(NULL);
-			layout_set_size(lc, wp->sx, wp->sy, wp->xoff, wp->yoff);
-			layout_make_leaf(lc, wp);
-		} else if (pane_count > 1) {
-			struct layout_cell *root, *lc;
-			root = w->layout_root = layout_create_cell(NULL);
-			layout_set_size(root, w->sx, w->sy, 0, 0);
-			root->type = LAYOUT_LEFTRIGHT;
-			TAILQ_FOREACH(wp, &w->panes, entry) {
-				lc = layout_create_cell(root);
-				layout_set_size(lc, wp->sx, wp->sy,
-						wp->xoff, wp->yoff);
-				layout_make_leaf(lc, wp);
-				TAILQ_INSERT_TAIL(&root->cells, lc, entry);
-			}
-		}
-	}
+	/* Pane leaves are also required by incremental tty rendering. */
+	tmate_layout_root(w);
 
 	active_pane_id = unpack_int(w_uk);
 	wp = window_pane_find_by_id(active_pane_id);

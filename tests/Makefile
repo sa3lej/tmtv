@@ -189,4 +189,9 @@ relay-copy-output:
 	    ./test-relay-copy-output --host-snapshot-bulk < "$$wire"; \
 	    ./test-mode-lifecycle --emit-layout-snapshot > "$$wire"; \
 	    ./test-relay-copy-output --host-layout-snapshot < "$$wire"; \
-	    ./test-relay-copy-output --host-layout-snapshot-bulk < "$$wire"
+	    ./test-relay-copy-output --host-layout-snapshot-bulk < "$$wire"; \
+	    for axis in horizontal vertical; do \
+	        ./test-mode-lifecycle --emit-$$axis-reconnect > "$$wire"; \
+	        ./test-relay-copy-output --host-$$axis-reconnect < "$$wire"; \
+	        ./test-relay-copy-output --host-$$axis-reconnect-bulk < "$$wire"; \
+	    done
