@@ -626,3 +626,21 @@ claimed for this stage. Monitor display scaling and expanded built-in hook hooks
 broader 3.8 core/header reconciliation, negotiated protocol and macOS remain
 open. Both runtimes still report tmux 3.6a. This work remains local; remote
 push, tags, release, deployment and final release approval are held.
+
+## Callback-safe subscription mutation
+
+Monitor callbacks may now add or remove subscriptions safely. The monitor
+scanner takes a bounded pointer snapshot before it invokes callbacks, so
+callback-driven mutation of the underlying subscription tree no longer
+invalidates the scan or frees an in-flight item. Callback-added subscriptions
+are not evaluated in the same scan pass; they are picked up on the next timer
+tick.
+
+One complete-host regression in `tests/test-monitor.c` adds and removes
+subscriptions from real change callbacks and asserts the deferred item is no
+longer reported after its callback removal. This closes the previously
+unvalidated callback-mutation path for monitor-owned subscriptions. It does not
+change authenticated relay behavior or float/protocol integration. Monitor
+scanner safety is the only new behavior in this stage; the other migration
+limits listed above still apply. This work is local, untested against a
+configured relay deployment, unpushed and undeployed.

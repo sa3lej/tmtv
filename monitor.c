@@ -62,6 +62,9 @@ struct monitor_item {
 	u_int				 fire_count;
 	time_t				 fire_time;
 
+	int				 dead;
+	TAILQ_ENTRY(monitor_item)	 dead_entry;
+
 	RB_ENTRY(monitor_item)		 entry;
 };
 RB_HEAD(monitor_items, monitor_item);
@@ -74,7 +77,9 @@ struct monitor_set {
 	void				*data;
 
 	struct monitor_items		 items;
+	TAILQ_HEAD(, monitor_item)	 dead_items;
 	struct event			 timer;
+	u_int				 iterating;
 	u_int				 generation;
 };
 
@@ -148,9 +153,9 @@ monitor_window_cmp(struct monitor_window *mw1, struct monitor_window *mw2)
 }
 RB_GENERATE_STATIC(monitor_windows, monitor_window, entry, monitor_window_cmp);
 
-/* Free a subscription. */
+/* Free memory owned by one subscription. */
 static void
-monitor_free_item(struct monitor_set *ms, struct monitor_item *me)
+monitor_free_item_final(struct monitor_item *me)
 {
 	struct monitor_pane	*mp, *mp1;
 	struct monitor_window	*mw, *mw1;
@@ -167,10 +172,50 @@ monitor_free_item(struct monitor_set *ms, struct monitor_item *me)
 	}
 	free(me->last);
 
-	RB_REMOVE(monitor_items, &ms->items, me);
 	free(me->name);
 	free(me->format);
 	free(me);
+}
+
+/* Free subscriptions deferred while their set is being scanned. */
+static void
+monitor_free_dead_items(struct monitor_set *ms)
+{
+	struct monitor_item	*me, *me1;
+
+	TAILQ_FOREACH_SAFE(me, &ms->dead_items, dead_entry, me1)
+		monitor_free_item_final(me);
+	TAILQ_INIT(&ms->dead_items);
+}
+
+/* Remove a subscription, deferring free memory while callbacks can run. */
+static void
+monitor_free_item(struct monitor_set *ms, struct monitor_item *me)
+{
+	RB_REMOVE(monitor_items, &ms->items, me);
+	if (ms->iterating > 0) {
+		me->dead = 1;
+		TAILQ_INSERT_TAIL(&ms->dead_items, me, dead_entry);
+	} else
+		monitor_free_item_final(me);
+}
+
+/* Copy the live subscription pointers before invoking callbacks. */
+static struct monitor_item **
+monitor_snapshot_items(struct monitor_set *ms, u_int *nitems)
+{
+	struct monitor_item	 **items;
+	struct monitor_item	 *me;
+	u_int			  n = 0;
+
+	RB_FOREACH(me, monitor_items, &ms->items)
+		n++;
+	items = xcalloc(n, sizeof *items);
+	n = 0;
+	RB_FOREACH(me, monitor_items, &ms->items)
+		items[n++] = me;
+	*nitems = n;
+	return (items);
 }
 
 /* Report a changed value. */
@@ -400,24 +445,35 @@ monitor_check_sessions(struct monitor_set *ms)
 {
 	struct client		*c = ms->client;
 	struct session		*s = monitor_get_session(ms);
-	struct monitor_item	*me, *me1;
+	struct monitor_item	**items;
+	struct monitor_item	*me;
+	u_int			 nitems, i;
 	struct format_tree	*ft;
 
 	ft = monitor_create_formats(c, s, NULL, NULL);
-	RB_FOREACH_SAFE(me, monitor_items, &ms->items, me1) {
-		if (me->type == MONITOR_SESSION)
+	items = monitor_snapshot_items(ms, &nitems);
+	for (i = 0; i < nitems; i++) {
+		me = items[i];
+		if (!me->dead && me->type == MONITOR_SESSION)
 			monitor_check_session(ms, me, ft);
 	}
 	format_free(ft);
+	free(items);
 }
 
 /* Check pane and window subscriptions. */
 static void
 monitor_check_panes_windows(struct monitor_set *ms)
 {
-	struct monitor_item	*me, *me1;
+	struct monitor_item	**items;
+	struct monitor_item	*me;
+	u_int			 nitems, i;
 
-	RB_FOREACH_SAFE(me, monitor_items, &ms->items, me1) {
+	items = monitor_snapshot_items(ms, &nitems);
+	for (i = 0; i < nitems; i++) {
+		me = items[i];
+		if (me->dead)
+			continue;
 		switch (me->type) {
 		case MONITOR_PANE:
 			monitor_check_pane(ms, me);
@@ -431,6 +487,7 @@ monitor_check_panes_windows(struct monitor_set *ms)
 			break;
 		}
 	}
+	free(items);
 }
 
 /* Check all-panes subscriptions. */
@@ -439,28 +496,35 @@ monitor_check_all_panes(struct monitor_set *ms)
 {
 	struct client		*c = ms->client;
 	struct session		*s = monitor_get_session(ms);
-	struct monitor_item	*me, *me1;
+	struct monitor_item	**items;
+	struct monitor_item	*me;
 	struct window_pane	*wp;
 	struct format_tree	*ft;
 	struct winlink		*wl;
+	u_int			 nitems, i;
 
 	if (++ms->generation == 0)
 		ms->generation = 1;
+	items = monitor_snapshot_items(ms, &nitems);
 	RB_FOREACH(wl, winlinks, &s->windows) {
 		TAILQ_FOREACH(wp, &wl->window->panes, entry) {
 			ft = monitor_create_formats(c, s, wl, wp);
-			RB_FOREACH_SAFE(me, monitor_items, &ms->items, me1) {
-				if (me->type != MONITOR_ALL_PANES)
+			for (i = 0; i < nitems; i++) {
+				me = items[i];
+				if (me->dead ||
+				    me->type != MONITOR_ALL_PANES)
 					continue;
 				monitor_check_all_panes_one(ms, me, ft, wl, wp);
 			}
 			format_free(ft);
 		}
 	}
-	RB_FOREACH_SAFE(me, monitor_items, &ms->items, me1) {
+	for (i = 0; i < nitems; i++) {
+		me = items[i];
 		if (me->type == MONITOR_ALL_PANES)
 			monitor_sweep_all_panes(me, ms->generation);
 	}
+	free(items);
 }
 
 /* Check all-windows subscriptions. */
@@ -469,25 +533,31 @@ monitor_check_all_windows(struct monitor_set *ms)
 {
 	struct client		*c = ms->client;
 	struct session		*s = monitor_get_session(ms);
-	struct monitor_item	*me, *me1;
+	struct monitor_item	**items;
+	struct monitor_item	*me;
 	struct format_tree	*ft;
 	struct winlink		*wl;
+	u_int			 nitems, i;
 
 	if (++ms->generation == 0)
 		ms->generation = 1;
+	items = monitor_snapshot_items(ms, &nitems);
 	RB_FOREACH(wl, winlinks, &s->windows) {
 		ft = monitor_create_formats(c, s, wl, NULL);
-		RB_FOREACH_SAFE(me, monitor_items, &ms->items, me1) {
-			if (me->type != MONITOR_ALL_WINDOWS)
+		for (i = 0; i < nitems; i++) {
+			me = items[i];
+			if (me->dead || me->type != MONITOR_ALL_WINDOWS)
 				continue;
 			monitor_check_all_windows_one(ms, me, ft, wl);
 		}
 		format_free(ft);
 	}
-	RB_FOREACH_SAFE(me, monitor_items, &ms->items, me1) {
+	for (i = 0; i < nitems; i++) {
+		me = items[i];
 		if (me->type == MONITOR_ALL_WINDOWS)
 			monitor_sweep_all_windows(me, ms->generation);
 	}
+	free(items);
 }
 
 /* Check subscriptions. */
@@ -523,6 +593,8 @@ monitor_timer(__unused int fd, __unused short events, void *data)
 		}
 	}
 
+	ms->iterating = 1;
+
 	if (have_session)
 		monitor_check_sessions(ms);
 	monitor_check_panes_windows(ms);
@@ -530,6 +602,9 @@ monitor_timer(__unused int fd, __unused short events, void *data)
 		monitor_check_all_panes(ms);
 	if (have_all_windows)
 		monitor_check_all_windows(ms);
+
+	ms->iterating = 0;
+	monitor_free_dead_items(ms);
 }
 
 /* Create a monitor set. */
@@ -542,6 +617,7 @@ monitor_create(monitor_cb cb, void *data)
 	ms->cb = cb;
 	ms->data = data;
 	RB_INIT(&ms->items);
+	TAILQ_INIT(&ms->dead_items);
 	return (ms);
 }
 

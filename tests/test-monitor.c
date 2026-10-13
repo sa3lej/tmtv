@@ -515,6 +515,45 @@ count_change(struct monitor_change *change, void *data)
 	reports++;
 }
 
+static struct monitor_set	*callback_ms;
+static void
+mutating_change(struct monitor_change *change, void *data)
+{
+	(void)data;
+
+	reports++;
+	if (strcmp(change->name, "aaa") != 0)
+		return;
+	monitor_remove(callback_ms, "zzz");
+}
+
+TEST(change_callbacks_add_and_remove_subscriptions)
+{
+	struct window			*w;
+	struct window_pane		*wp;
+	struct session			*s = new_session(&w, &wp);
+	struct monitor_set		*ms =
+	    monitor_create_session(s, mutating_change, NULL);
+
+	callback_ms = ms;
+	reports = 0;
+	monitor_add(ms, "aaa", MONITOR_SESSION, -1, "one",
+	    MONITOR_NOTIFY_INITIAL);
+	monitor_add(ms, "zzz", MONITOR_SESSION, -1, "one",
+	    MONITOR_NOTIFY_INITIAL);
+	tick();
+	ASSERT_EQ(reports, 1);
+	ASSERT_EQ(monitor_get_fire_count(ms, "aaa"), 1);
+	ASSERT_EQ(monitor_get_fire_count(ms, "zzz"), 0);
+	tick();
+	ASSERT_EQ(reports, 1);
+
+	monitor_remove(ms, "aaa");
+	monitor_destroy(ms);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
 TEST(dead_session_retained_until_monitor_destroy)
 {
 	struct window *w;
@@ -609,6 +648,7 @@ main(void)
 	RUN_TEST(dead_session_retained_until_monitor_destroy);
 	RUN_TEST(session_destruction_breaks_option_monitor_cycle);
 	RUN_TEST(pane_window_scans_and_subscription_replacement);
+	RUN_TEST(change_callbacks_add_and_remove_subscriptions);
 	RUN_TEST(display_and_introspection);
 	drain();
 	while ((msg = TAILQ_FIRST(&message_log)) != NULL) {
