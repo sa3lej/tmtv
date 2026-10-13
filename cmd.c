@@ -303,6 +303,8 @@ cmd_unpack_argv(char *buf, size_t len, int argc, char ***argv)
 
 	if (argc == 0)
 		return (0);
+	if (argc < 0 || argc > 1000 || len == 0)
+		return (-1);
 	*argv = xcalloc(argc, sizeof **argv);
 
 	buf[len - 1] = '\0';
@@ -833,14 +835,19 @@ cmd_mouse_pane(struct mouse_event *m, struct session **sp,
 	return (wp);
 }
 
-/* Replace the first %% or %idx in template by s. */
+/*
+ * Replace the first %% or any %idx in template by s. %% is intended for use in
+ * single quotes, so ' is escaped. %%% and %idx% are for double quotes, so a
+ * list of special characters is escaped. %idx is left unescaped.
+ */
 char *
 cmd_template_replace(const char *template, const char *s, int idx)
 {
-	char		 ch, *buf;
-	const char	*ptr, *cp, quote[] = "\"\\$;~";
-	int		 replaced, quoted;
-	size_t		 len;
+	char			 ch, *buf;
+	const char		*ptr, *cp, dquote[] = "\"\\$;~";
+	int			 replaced;
+	size_t			 len, slen;
+	enum { NQ, SQ, DQ }	 quote;
 
 	if (strchr(template, '%') == NULL)
 		return (xstrdup(template));
@@ -854,30 +861,52 @@ cmd_template_replace(const char *template, const char *s, int idx)
 	while (*ptr != '\0') {
 		switch (ch = *ptr++) {
 		case '%':
-			if (*ptr < '1' || *ptr > '9' || *ptr - '0' != idx) {
+			if (*ptr >= '1' && *ptr <= '9' && *ptr - '0' == idx) {
+				ptr++;
+				quote = NQ;
+				if (*ptr == '%') {
+					quote = DQ;
+					ptr++;
+				}
+			} else {
 				if (*ptr != '%' || replaced)
 					break;
 				replaced = 1;
-			}
-			ptr++;
-
-			quoted = (*ptr == '%');
-			if (quoted)
 				ptr++;
+				quote = SQ;
+				if (*ptr == '%') {
+					quote = DQ;
+					ptr++;
+				}
+			}
 
-			buf = xrealloc(buf, len + (strlen(s) * 3) + 1);
+			slen = strlen(s);
+			if (slen >= SIZE_MAX / 4 ||
+			    len > SIZE_MAX - (slen * 4) - 1)
+				fatalx("argument too long");
+			buf = xrealloc(buf, len + (slen * 4) + 1);
 			for (cp = s; *cp != '\0'; cp++) {
-				if (quoted && strchr(quote, *cp) != NULL)
+				if (quote == SQ && *cp == '\'') {
+					buf[len++] = '\'';
+					buf[len++] = '\\';
+					buf[len++] = '\'';
+					buf[len++] = '\'';
+					continue;
+				}
+				if (quote == DQ && strchr(dquote, *cp) != NULL)
 					buf[len++] = '\\';
 				buf[len++] = *cp;
 			}
 			buf[len] = '\0';
 			continue;
 		}
+		if (len > SIZE_MAX - 2)
+			fatalx("argument too long");
 		buf = xrealloc(buf, len + 2);
 		buf[len++] = ch;
 		buf[len] = '\0';
 	}
 
+	log_debug("%s: %s -> %s", __func__, template, buf);
 	return (buf);
 }

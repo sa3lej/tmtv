@@ -239,11 +239,102 @@ TEST(percentage_growth_respects_output_bounds)
 		;
 }
 
+TEST(packed_argv_rejects_invalid_counts_and_empty_payload)
+{
+	char **argv = NULL;
+	char buf[1001] = {0};
+
+	ASSERT_EQ(cmd_unpack_argv(NULL, 0, 0, &argv), 0);
+	ASSERT(argv == NULL);
+	ASSERT_EQ(cmd_unpack_argv(buf, sizeof buf, 1001, &argv), -1);
+	ASSERT(argv == NULL);
+	ASSERT_EQ(cmd_unpack_argv(buf, sizeof buf, -1, &argv), -1);
+	ASSERT(argv == NULL);
+	ASSERT_EQ(cmd_unpack_argv(NULL, 0, 1, &argv), -1);
+	ASSERT(argv == NULL);
+	ASSERT_EQ(cmd_unpack_argv(buf, 1000, 1000, &argv), 0);
+	ASSERT_STR_EQ(argv[999], "");
+	cmd_free_argv(1000, argv);
+}
+
+TEST(packed_argv_roundtrip_and_truncation)
+{
+	char *input[] = { "set-option", "-g", "@packed", "a 'quote'; value", "" };
+	char **argv = NULL;
+	char buf[64];
+	size_t len = 0;
+	u_int i;
+
+	for (i = 0; i < nitems(input); i++)
+		len += strlen(input[i]) + 1;
+	ASSERT_EQ(cmd_pack_argv(nitems(input), input, buf, len), 0);
+	ASSERT_EQ(cmd_unpack_argv(buf, len, nitems(input), &argv), 0);
+	for (i = 0; i < nitems(input); i++)
+		ASSERT_STR_EQ(argv[i], input[i]);
+	cmd_free_argv(nitems(input), argv);
+	ASSERT_EQ(cmd_unpack_argv(buf, len, nitems(input) + 1, &argv), -1);
+	/* Rejection already frees partially populated argv. */
+	ASSERT_EQ(cmd_pack_argv(nitems(input), input, buf, len - 1), -1);
+}
+
+TEST(template_quote_modes_and_placeholder_selection)
+{
+	char *value;
+	const char *templates[] = { "'%%'", "\"%%%\"", "\"%1%\"", "%1", "%% %% %1 %2 %", "literal" };
+	const char *expected[] = { "'a'\\''b'", "\"a'b\"", "\"a'b\"", "a'b", "a'\\''b %% a'b %2 %", "literal" };
+	u_int i;
+
+	for (i = 0; i < nitems(templates); i++) {
+		value = cmd_template_replace(templates[i], "a'b", 1);
+		ASSERT_STR_EQ(value, expected[i]);
+		free(value);
+	}
+	value = cmd_template_replace("%%% %2% %2 %1", "\"\\$;~", 2);
+	ASSERT_STR_EQ(value, "\\\"\\\\\\$\\;\\~ \\\"\\\\\\$\\;\\~ \"\\$;~ %1");
+	free(value);
+}
+
+TEST(prepared_template_executes_literal_without_injection)
+{
+	const char *templates[] = {
+		"set-option -g @template-value '%%'",
+		"set-option -g @template-value \"%%%\"",
+		"set-option -g @template-value \"%1%\""
+	};
+	char *payload[] = { "a' ; set-option -g @template-injected yes ; # \"\\$;~\nend" };
+	struct cmdq_item *item;
+	struct args_command_state *state;
+	struct cmd_list *result;
+	char *error = NULL;
+	u_int i;
+
+	for (i = 0; i < nitems(templates); i++) {
+		item = command("set-option -g @template-parent yes");
+		state = args_make_commands_prepare(cmdq_get_cmd(item), item,
+		    2, templates[i], 0, 0);
+		result = args_make_commands(state, 1, payload, &error);
+		ASSERT(result != NULL && error == NULL);
+		cmdq_append(NULL, cmdq_get_command(result, NULL));
+		cmd_list_free(result);
+		args_make_commands_free(state);
+		cmdq_append(NULL, item);
+		while (cmdq_next(NULL) != 0)
+			;
+		ASSERT_STR_EQ(options_get_string(global_s_options,
+		    "@template-value"), payload[0]);
+		ASSERT(options_get_only(global_s_options, "@template-injected") == NULL);
+	}
+}
+
 int
 main(void)
 {
 	setup();
 	TEST_SUITE_BEGIN("Production command queue and arguments");
+	RUN_TEST(packed_argv_rejects_invalid_counts_and_empty_payload);
+	RUN_TEST(packed_argv_roundtrip_and_truncation);
+	RUN_TEST(template_quote_modes_and_placeholder_selection);
+	RUN_TEST(prepared_template_executes_literal_without_injection);
 	RUN_TEST(optional_argument_preserves_following_flags);
 	RUN_TEST(prepared_command_block_returns_owned_reference);
 	RUN_TEST(immediate_string_command_has_single_owner);
