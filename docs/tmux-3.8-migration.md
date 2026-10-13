@@ -517,3 +517,55 @@ option arrays, expanded built-in monitor hooks and startup sink registration/
 notify replacement remain ahead, alongside the full core/header reconciliation,
 floating-pane protocol and rendering/input integration. Both built runtimes
 still report tmux 3.6a. Remote push, tags, release and deployment remain held.
+
+
+## Monitor hook commands and custom events
+
+The `set-hook` parser and the `-B` monitor and `-E` event command helpers
+match pinned official 3.8 exactly. Monitor commands now traverse the real
+command queue and target/scope resolution before creating option-owned monitors.
+The command suppresses initial delivery, supports `-T` false-value filtering,
+replacement without a new command, append and bare-name or full-subscription
+removal. Ordinary custom `set-hook @name` registers its event sink; `set-hook -E`
+fires a payload with the resolved client/session/window/pane target. Event hook
+commands use their usual command-level format expansion, such as `set-option -F`.
+
+This bounded port retains numeric option arrays and the existing `set-hook -R`
+notification path. Built-in hook startup registration and notification caller
+replacement remain deferred. Fork option replication, recording toggles and
+command routing/read-only gates are unchanged. Existing helper branches for
+`-F` and `-o` remain upstream code, but this stage does not extend the pinned
+`set-hook` argument flags to expose them.
+
+Five added cases in `tests/test-monitor.c` use complete production-host linkage
+with only the tmux entrypoint renamed. Actual parser/queue execution and Unix
+socket-backed control replies verify invalid subscription/name/arity errors,
+unchanged reference ownership on rejection, session/global/pane/window scopes,
+no initial delivery, changed and false values, replacement/append/removal,
+option-owned cleanup, custom event execution and target metadata. A legacy
+numeric built-in hook exercises indexed assignment/removal and `-R` execution;
+firing accounting is checked as a delta because intentional invalid commands
+also fire `command-error`. The five earlier monitor ownership/timer cases remain.
+All ten monitor cases pass. A negative control ignoring `-T` fails its false-value
+regression (expected zero fires, observed one).
+
+Both Linux SIXEL production binaries build and all 210 standard cases pass
+(203 C/shell and 7 Python). All ten complete-host monitor cases also pass
+ASan/UBSan with leak detection using isolated command, parser, format, monitor,
+hooks, options, events/payload, control, window, session, queue, test and renamed
+entrypoint objects; other linked objects are normal. Normal production objects
+were never replaced, and normal host/relay/monitor test binaries have no
+sanitizer references. Logs and isolated reproducer scripts are under
+`.deps/tmux38-hook-command-validation`. Diagnostic fixture corrections initialize
+and free the server message log, use `set-option -F` for event formats and compare
+legacy hook count deltas. The final suite and sanitizer checks ran after those
+corrections. This stage introduced no compiler warnings; the three earlier relay
+unused-write warnings were not recompiled by this incremental build.
+
+No authenticated relay/viewer, read-only rejection, callback subscription
+mutation, expanded built-in monitor hooks or macOS coverage is claimed. Pinned
+string-key arrays and monitor display/introspection remain separate command/options
+work; wider control I/O, full core/header reconciliation, floating panes/protocol,
+security/feature E2E and supported-platform validation remain open. Both runtimes
+still report tmux 3.6a. This work is local only; remote pushes, tags, release,
+deployment and final release approval remain held.

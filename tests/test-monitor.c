@@ -1,6 +1,8 @@
 /* Complete production host linkage; only tmux.c's entrypoint is renamed. */
 #include "../tmux.h"
 #include "test-harness.h"
+#include <sys/socket.h>
+#include <unistd.h>
 
 static struct event_base *base;
 
@@ -10,6 +12,7 @@ setup(void)
 	const struct options_table_entry *oe;
 
 	base = event_init();
+	TAILQ_INIT(&message_log);
 	socket_path = xstrdup("/isolated-monitor-test");
 	global_environ = environ_create();
 	global_options = options_create(NULL);
@@ -63,6 +66,271 @@ tick(void)
 	if (event_base_loopexit(base, &limit) != 0)
 		fatalx("timer bound failed");
 	event_base_loop(base, 0);
+	drain();
+}
+
+/* Real socket-backed control output; no control/monitor/parser stubs. */
+struct fixture {
+	struct client c;
+	int input[2], output[2];
+};
+
+static void
+start(struct fixture *f, struct session *s)
+{
+	memset(f, 0, sizeof *f);
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, f->input) != 0 ||
+	    socketpair(AF_UNIX, SOCK_STREAM, 0, f->output) != 0)
+		fatal("socketpair");
+	f->c.name = "control-test";
+	f->c.references = 1;
+	f->c.flags = CLIENT_CONTROL|CLIENT_ATTACHED;
+	f->c.session = s;
+	f->c.fd = f->input[0];
+	f->c.out_fd = f->output[0];
+	f->c.queue = cmdq_new();
+	f->c.environ = environ_create();
+	setblocking(f->output[1], 0);
+	control_start(&f->c);
+}
+
+static void
+stop(struct fixture *f)
+{
+	control_stop(&f->c);
+	control_stop(&f->c); /* Pinned stop is safe after an earlier stop. */
+	cmdq_free(f->c.queue);
+	environ_free(f->c.environ);
+	close(f->input[0]);
+	close(f->input[1]);
+	close(f->output[0]);
+	close(f->output[1]);
+}
+
+static char *
+output(struct fixture *f)
+{
+	static char buffer[8192];
+	ssize_t n;
+	size_t used = 0;
+
+	event_base_loop(base, EVLOOP_NONBLOCK);
+	while ((n = read(f->output[1], buffer + used,
+	    sizeof buffer - used - 1)) > 0)
+		used += n;
+	buffer[used] = '\0';
+	return (buffer);
+}
+
+/* Commands traverse the actual parser, client queue and target resolution. */
+static char *
+command(struct fixture *f, const char *text)
+{
+	struct cmd_parse_result *pr = cmd_parse_from_string(text, NULL);
+	struct cmdq_item *item;
+
+	if (pr->status != CMD_PARSE_SUCCESS)
+		fatalx("test command did not parse: %s", text);
+	item = cmdq_get_command(pr->cmdlist, NULL);
+	cmd_list_free(pr->cmdlist);
+	f->c.retval = 0;
+	cmdq_append(&f->c, item);
+	while (cmdq_next(&f->c) != 0)
+		;
+	drain();
+	return (output(f));
+}
+
+TEST(command_monitor_changes_replacement_and_removal)
+{
+	struct window *w;
+	struct window_pane *wp;
+	struct session *s = new_session(&w, &wp);
+	struct fixture f;
+	struct options_entry *o;
+	int refs = s->references;
+
+	start(&f, s);
+	options_set_string(s->options, "@command-value", 0, "one");
+	command(&f, "set-hook -B '@command-watch::#{@command-value}' { set-option -g @command-result '#{hook_value}/#{hook_last}' }");
+	ASSERT_EQ(f.c.retval, 0);
+	o = options_get_only(s->options, "@command-watch");
+	ASSERT_NOT_NULL(o);
+	ASSERT_NOT_NULL(options_get_monitor_data(o));
+	ASSERT_EQ(s->references, refs + 1);
+	tick(); /* Pinned command omits initial delivery. */
+	ASSERT_EQ(hooks_monitor_get_fire_count(o), 0);
+	ASSERT(options_get_only(global_s_options, "@command-result") == NULL);
+	options_set_string(s->options, "@command-value", 0, "two");
+	tick();
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@command-result"), "two/one");
+	ASSERT_EQ(hooks_monitor_get_fire_count(o), 1);
+	command(&f, "set-hook -B '@command-watch::#{@command-value}'");
+	ASSERT_EQ(s->references, refs + 1);
+	ASSERT_EQ(hooks_monitor_get_fire_count(o), 0);
+	tick();
+	options_set_string(s->options, "@command-value", 0, "0");
+	tick();
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@command-result"), "0/two");
+	command(&f, "set-hook -u -B '@command-watch'");
+	ASSERT(options_get_monitor_data(o) == NULL);
+	ASSERT_EQ(s->references, refs);
+	ASSERT_NOT_NULL(options_get_only(s->options, "@command-watch"));
+	options_set_string(s->options, "@command-value", 0, "after");
+	tick();
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@command-result"), "0/two");
+	ASSERT_EQ(f.c.references, 1);
+	stop(&f);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
+TEST(command_monitor_true_append_scope_and_option_cleanup)
+{
+	struct window *w;
+	struct window_pane *wp;
+	struct session *s = new_session(&w, &wp);
+	struct fixture f;
+	struct options_entry *o;
+	int refs = s->references;
+
+	start(&f, s);
+	options_set_string(s->options, "@true-value", 0, "one");
+	command(&f, "set-hook -T -B '@true-watch::#{@true-value}' 'set-option -g @true-result #{hook_value}'");
+	o = options_get_only(s->options, "@true-watch");
+	tick();
+	options_set_string(s->options, "@true-value", 0, "0");
+	tick();
+	ASSERT_EQ(hooks_monitor_get_fire_count(o), 0);
+	options_set_string(s->options, "@true-value", 0, "yes");
+	tick();
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@true-result"), "yes");
+	command(&f, "set-hook -a -T -B '@true-watch::#{@true-value}' ' ; set-option -g @append-result yes'");
+	tick();
+	options_set_string(s->options, "@true-value", 0, "next");
+	tick();
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@append-result"), "yes");
+	command(&f, "set-option -u @true-watch"); /* Option removal owns cleanup. */
+	ASSERT_EQ(s->references, refs);
+	ASSERT(options_get_only(s->options, "@true-watch") == NULL);
+	command(&f, "set-hook -g -B '@global-watch::constant'");
+	ASSERT_EQ(s->references, refs); /* Global monitors do not retain target. */
+	ASSERT_NOT_NULL(options_get_monitor_data(options_get_only(global_s_options, "@global-watch")));
+	command(&f, "set-hook -gu -B '@global-watch::constant'");
+	ASSERT(options_get_monitor_data(options_get_only(global_s_options, "@global-watch")) == NULL);
+	stop(&f);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
+TEST(command_monitor_validation_errors_preserve_ownership)
+{
+	struct window *w;
+	struct window_pane *wp;
+	struct session *s = new_session(&w, &wp);
+	struct fixture f;
+	struct options_entry *o;
+	int refs;
+	const char *invalid[] = {
+	    "set-hook -B '@invalid:unknown:value'",
+	    "set-hook -B 'plain::value'",
+	    "set-hook -B '@invalid::value' one two",
+	    "set-hook",
+	    "set-hook -E",
+	    "set-hook -E plain",
+	    "set-hook -E @invalid extra"
+	};
+	const char *errors[] = { "invalid subscription", "monitor hook name must start with @",
+	    "too many arguments", "missing argument", "missing argument",
+	    "event name must start with @", "too many arguments" };
+	u_int i;
+
+	start(&f, s);
+	command(&f, "set-hook -B '@valid::constant'");
+	o = options_get_only(s->options, "@valid");
+	refs = s->references;
+	for (i = 0; i < nitems(invalid); i++) {
+		ASSERT(strstr(command(&f, invalid[i]), errors[i]) != NULL);
+		ASSERT_EQ(f.c.retval, 1);
+		ASSERT_EQ(s->references, refs);
+		ASSERT_NOT_NULL(options_get_monitor_data(o));
+		ASSERT(options_get_only(s->options, "@invalid") == NULL);
+	}
+	command(&f, "set-hook -u -B '@valid::constant'");
+	stop(&f);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
+TEST(command_pane_window_scopes_and_legacy_numeric_hooks)
+{
+	struct window *w;
+	struct window_pane *wp;
+	struct session *s = new_session(&w, &wp);
+	struct fixture f;
+	struct options_entry *pane, *window, *legacy;
+	int refs = s->references;
+	u_int fires;
+	char *text;
+
+	start(&f, s);
+	xasprintf(&text, "set-hook -p -B '@pane-command:%%%u:#{pane_title}'", wp->id);
+	command(&f, text);
+	free(text);
+	pane = options_get_only(wp->options, "@pane-command");
+	ASSERT_NOT_NULL(options_get_monitor_data(pane));
+	xasprintf(&text, "set-hook -w -B '@window-command:@%u:#{window_name}'", w->id);
+	command(&f, text);
+	free(text);
+	window = options_get_only(w->options, "@window-command");
+	ASSERT_NOT_NULL(options_get_monitor_data(window));
+	ASSERT_EQ(s->references, refs + 2);
+	command(&f, "set-hook -pu -B @pane-command");
+	command(&f, "set-hook -wu -B @window-command");
+	ASSERT(options_get_monitor_data(pane) == NULL);
+	ASSERT(options_get_monitor_data(window) == NULL);
+	ASSERT_EQ(s->references, refs);
+
+	command(&f, "set-hook -g 'command-error[4]' { set-option -g @legacy-result yes }");
+	legacy = options_get_only(global_s_options, "command-error");
+	ASSERT_NOT_NULL(options_array_get(legacy, 4));
+	fires = options_get_fire_count(legacy);
+	command(&f, "set-hook -gR command-error");
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@legacy-result"), "yes");
+	ASSERT_EQ(options_get_fire_count(legacy), fires + 1);
+	command(&f, "set-hook -gu 'command-error[4]'");
+	ASSERT(options_array_get(legacy, 4) == NULL);
+	stop(&f);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
+TEST(command_custom_event_executes_with_target_metadata)
+{
+	struct window *w;
+	struct window_pane *wp;
+	struct session *s = new_session(&w, &wp);
+	struct fixture f;
+	struct options_entry *o;
+	char *expected;
+
+	start(&f, s);
+	command(&f, "set-hook @command-event { set-option -gF @event-result '#{hook}/#{hook_session}/#{hook_window}/#{hook_pane}' }");
+	o = options_get_only(s->options, "@command-event");
+	ASSERT_NOT_NULL(o);
+	ASSERT_EQ(options_get_fire_count(o), 0);
+	command(&f, "set-hook -E @command-event");
+	ASSERT_EQ(f.c.retval, 0);
+	xasprintf(&expected, "@command-event/$%u/@%u/%%%u", s->id, w->id, wp->id);
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@event-result"), expected);
+	free(expected);
+	ASSERT_EQ(options_get_fire_count(o), 1);
+	command(&f, "set-hook -u @command-event");
+	command(&f, "set-hook -E @command-event");
+	ASSERT_EQ(f.c.retval, 0);
+	ASSERT_EQ(f.c.references, 1);
+	stop(&f);
+	session_destroy(s, 0, __func__);
 	drain();
 }
 
@@ -256,14 +524,25 @@ TEST(pane_window_scans_and_subscription_replacement)
 int
 main(void)
 {
+	struct message_entry *msg;
 	setup();
 	TEST_SUITE_BEGIN("Production monitor ownership and hook lifecycle");
+	RUN_TEST(command_monitor_changes_replacement_and_removal);
+	RUN_TEST(command_monitor_true_append_scope_and_option_cleanup);
+	RUN_TEST(command_monitor_validation_errors_preserve_ownership);
+	RUN_TEST(command_pane_window_scopes_and_legacy_numeric_hooks);
+	RUN_TEST(command_custom_event_executes_with_target_metadata);
 	RUN_TEST(session_hook_executes_changes_and_filters_false);
 	RUN_TEST(replacement_inheritance_option_removal_and_free);
 	RUN_TEST(dead_session_retained_until_monitor_destroy);
 	RUN_TEST(session_destruction_breaks_option_monitor_cycle);
 	RUN_TEST(pane_window_scans_and_subscription_replacement);
 	drain();
+	while ((msg = TAILQ_FIRST(&message_log)) != NULL) {
+		TAILQ_REMOVE(&message_log, msg, entry);
+		free(msg->msg);
+		free(msg);
+	}
 	options_free(global_w_options);
 	options_free(global_s_options);
 	options_free(global_options);
