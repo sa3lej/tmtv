@@ -152,6 +152,7 @@ dist_tmtv_SOURCES = \
 	control-notify.c \
 	control.c \
 	environ.c \
+	events.c \
 	events-payload.c \
 	file.c \
 	format.c \
@@ -306,6 +307,7 @@ dist_tmtv_server_SOURCES = \
 	control-notify.c \
 	control.c \
 	environ.c \
+	events.c \
 	events-payload.c \
 	file.c \
 	format.c \
@@ -462,3 +464,13 @@ tests/test-event-payload: tests/test-event-payload.o tests/test-window-tmux.o $(
 
 CLEANFILES += tests/test-event-payload tests/test-event-payload.o
 EXTRA_DIST += tests/test-event-payload.c
+
+# Exercise event dispatch through the complete production host.
+tests/test-events.o: tests/test-events.c tmux.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-events.c -o $@
+
+tests/test-events: tests/test-events.o tests/test-window-tmux.o $(tmtv_OBJECTS) $(tmtv_DEPENDENCIES)
+	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-events.o tests/test-window-tmux.o $(filter-out tmux.o,$(tmtv_OBJECTS)) $(tmtv_LDADD) $(LIBS)
+
+CLEANFILES += tests/test-events tests/test-events.o
+EXTRA_DIST += tests/test-events.c

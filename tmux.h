@@ -78,6 +78,7 @@ struct tty_key;
 struct tmuxpeer;
 struct tmuxproc;
 struct winlink;
+struct events_sink;
 struct event_payload;
 struct event_payload_item;
 
@@ -2429,6 +2430,17 @@ enum event_payload_type {
 /* Event payload callbacks. */
 typedef void (*event_payload_free_cb)(void *);
 typedef void (*event_payload_print_cb)(void *, struct evbuffer *);
+
+/* events.c */
+typedef void (*events_cb)(const char *, struct event_payload *, void *);
+struct events_sink *events_add_sink(const char *, events_cb, void *);
+void	 events_remove_sink(struct events_sink *);
+void	 events_fire(const char *, struct event_payload *);
+void	 events_fire_client(const char *, struct client *);
+void	 events_fire_session(const char *, struct session *);
+void	 events_fire_window(const char *, struct window *);
+void	 events_fire_pane(const char *, struct window_pane *);
+void	 events_fire_winlink(const char *, struct winlink *);
 
 /* events-payload.c */
 struct event_payload *event_payload_create(void);

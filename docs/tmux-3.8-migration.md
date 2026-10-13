@@ -327,3 +327,30 @@ notification migration, client payload lifecycle, authenticated relay/viewer
 execution, floating protocol or macOS. Runtime still reports 3.6a, and stale
 wiring-baseline reconciliation remains outstanding. This stage is local only,
 with no push, tag, release or deployment.
+
+## Event dispatcher prerequisite
+
+`events.c` matches pinned official 3.8 exactly and is compiled into both host
+and relay. The matching opaque sink and callback API is exposed in `tmux.h`.
+Existing notification callers still use `notify.c`; registering production
+hook/monitor sinks and switching notification callers remain separate stages.
+
+Four complete-host-linked cases in `tests/test-events.c` use real dispatcher,
+payload and pane lifecycle code, with only the program entrypoint renamed.
+They verify event-name matching and ordered delivery, payload consumption with
+and without sinks, self-removal and pending-sink removal during delivery,
+idempotent removal while deferred, nested dispatch, generation boundaries for
+newly registered sinks, and removal remaining effective across nested events.
+The production pane wrapper is exercised while its callback removes the pane;
+retained pane/window references balance when dispatch consumes the payload.
+No dispatch, allocation or lifecycle stubs are used.
+
+Both Linux SIXEL binaries build and all 189 standard tests pass. The four new
+cases also pass ASan/UBSan with leak detection, instrumenting `events.c`,
+`events-payload.c`, `window.c`, the test and renamed entrypoint; other linked
+production objects retain their normal build. Normal objects/binaries were
+restored and checked for absence of sanitizer symbols, then the full standard
+suite passed again. These checks do not establish notification/hook migration,
+client/session/winlink wrapper behavior, authenticated relay/viewer execution,
+floating protocol or macOS compatibility. Runtime remains 3.6a. This stage is
+local only, with no push, tag, release or deployment.
