@@ -561,9 +561,6 @@ static void tmate_send_session_snapshot(struct tmate_session *session,
 	struct window_pane *pane;
 	int num_panes;
 
-	pack(array, 2);
-	pack(int, TMATE_OUT_SNAPSHOT);
-
 	/*
 	 * If no tmux session was provided, fall back to the first one.
 	 */
@@ -573,6 +570,10 @@ static void tmate_send_session_snapshot(struct tmate_session *session,
 		tmate_debug("snapshot requested with no sessions, skipping");
 		return;
 	}
+
+	/* Resolve the session before starting a message: never leave a partial array. */
+	pack(array, 2);
+	pack(int, TMATE_OUT_SNAPSHOT);
 
 	num_panes = 0;
 	RB_FOREACH(wl, winlinks, &s->windows) {

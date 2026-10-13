@@ -1,5 +1,6 @@
 /* Link the complete host. Test modes exercise the production lifecycle API. */
 #include "../tmate.h"
+#include "../tmate-protocol.h"
 #include "test-harness.h"
 #include <locale.h>
 
@@ -210,6 +211,86 @@ TEST(host_exit_only_emits_for_last_copy_mode)
 	destroy_pane(wp);
 }
 
+struct reconnect_messages {
+	int count;
+	int opcode[4];
+	int argc[4];
+};
+
+static void
+read_reconnect_message(void *userdata, struct tmate_unpacker *uk)
+{
+	struct reconnect_messages *messages = userdata;
+	int n = messages->count++;
+
+	if (n < 4) {
+		messages->argc[n] = uk->argc;
+		messages->opcode[n] = unpack_int(uk);
+	}
+}
+
+static void
+decode_reconnect_buffer(struct tmate_decoder *decoder, int fragmented)
+{
+	struct evbuffer *buffer = tmate_session.encoder.buffer;
+	char *bytes;
+	size_t capacity, count;
+
+	while (evbuffer_get_length(buffer) != 0) {
+		tmate_decoder_get_buffer(decoder, &bytes, &capacity);
+		count = fragmented ? 1 : evbuffer_get_length(buffer);
+		if (count > capacity)
+			count = capacity;
+		evbuffer_remove(buffer, bytes, count);
+		tmate_decoder_commit(decoder, count);
+	}
+}
+
+static void
+check_empty_session_reconnect(int fragmented)
+{
+	struct reconnect_messages messages = { 0 };
+	struct tmate_decoder decoder;
+	struct window_pane *wp = create_pane();
+	int before;
+
+	ASSERT(RB_EMPTY(&sessions));
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	/* Reconnect must discard the old stream and start with a fresh header. */
+	tmate_write_copy_mode(&tmate_session, wp, "discard before reconnect");
+	tmate_send_reconnection_state(&tmate_session);
+	tmate_decoder_init(&decoder, read_reconnect_message, &messages);
+	decode_reconnect_buffer(&decoder, fragmented);
+	before = messages.count;
+	/* An incomplete snapshot would swallow this as its second element. */
+	tmate_write_copy_mode(&tmate_session, wp, "after reconnect");
+	decode_reconnect_buffer(&decoder, fragmented);
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	tmate_encoder_destroy(&tmate_session.encoder);
+	destroy_pane(wp);
+
+	ASSERT_EQ(before, 3);
+	ASSERT_EQ(messages.count, 4);
+	ASSERT_EQ(messages.opcode[0], TMATE_OUT_HEADER);
+	ASSERT_EQ(messages.argc[0], 3);
+	ASSERT_EQ(messages.opcode[1], TMATE_OUT_UNAME);
+	ASSERT_EQ(messages.argc[1], 6);
+	ASSERT_EQ(messages.opcode[2], TMATE_OUT_READY);
+	ASSERT_EQ(messages.argc[2], 1);
+	ASSERT_EQ(messages.opcode[3], TMATE_OUT_WRITE_COPY_MODE);
+	ASSERT_EQ(messages.argc[3], 3);
+}
+
+TEST(empty_session_reconnect_keeps_message_boundaries)
+{
+	check_empty_session_reconnect(0);
+}
+
+TEST(fragmented_empty_session_reconnect_keeps_message_boundaries)
+{
+	check_empty_session_reconnect(1);
+}
+
 static int
 output_equals(struct window_pane *wp, u_int line, const char *expected)
 {
@@ -302,6 +383,8 @@ main(int argc, char **argv)
 	RUN_TEST(existing_mode_reorders_without_reinitializing);
 	RUN_TEST(real_copy_clock_and_view_modes);
 	RUN_TEST(host_exit_only_emits_for_last_copy_mode);
+	RUN_TEST(empty_session_reconnect_keeps_message_boundaries);
+	RUN_TEST(fragmented_empty_session_reconnect_keeps_message_boundaries);
 	options_free(global_w_options);
 	options_free(global_s_options);
 	options_free(global_options);
