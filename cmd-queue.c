@@ -395,6 +395,8 @@ cmdq_insert_hook(struct session *s, struct cmdq_item *item,
 		free(name);
 		return;
 	}
+	options_hook_fired(o);
+
 	log_debug("running hook %s (parent %p)", name, item);
 
 	/*

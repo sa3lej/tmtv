@@ -2509,6 +2509,10 @@ struct options_entry *options_default(struct options *,
 char		*options_default_to_string(const struct options_table_entry *);
 const char	*options_name(struct options_entry *);
 struct options	*options_owner(struct options_entry *);
+void		 options_hook_fired(struct options_entry *);
+u_int		 options_get_fire_count(struct options_entry *);
+time_t		 options_get_fire_time(struct options_entry *);
+const struct options_table_entry *options_search(const char *);
 const struct options_table_entry *options_table_entry(struct options_entry *);
 struct options_entry *options_get_only(struct options *, const char *);
 struct options_entry *options_get(struct options *, const char *);

@@ -57,6 +57,9 @@ struct options_entry {
 	int					 cached;
 	struct style				 style;
 
+	u_int					 fire_count;
+	time_t					 fire_time;
+
 	RB_ENTRY(options_entry)			 entry;
 };
 
@@ -371,6 +374,25 @@ options_owner(struct options_entry *o)
 	return (o->owner);
 }
 
+void
+options_hook_fired(struct options_entry *o)
+{
+	o->fire_count++;
+	o->fire_time = current_time;
+}
+
+u_int
+options_get_fire_count(struct options_entry *o)
+{
+	return (o->fire_count);
+}
+
+time_t
+options_get_fire_time(struct options_entry *o)
+{
+	return (o->fire_time);
+}
+
 const struct options_table_entry *
 options_table_entry(struct options_entry *o)
 {
@@ -660,6 +682,18 @@ options_parse_get(struct options *oo, const char *s, int *idx, int only)
 		o = options_get(oo, name);
 	free(name);
 	return (o);
+}
+
+const struct options_table_entry *
+options_search(const char *name)
+{
+	const struct options_table_entry	*oe;
+
+	for (oe = options_table; oe->name != NULL; oe++) {
+		if (strcmp(oe->name, name) == 0)
+			return (oe);
+	}
+	return (NULL);
 }
 
 char *

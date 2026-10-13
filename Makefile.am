@@ -484,3 +484,13 @@ tests/test-cmd-queue: tests/test-cmd-queue.o tests/test-window-tmux.o $(tmtv_OBJ
 
 CLEANFILES += tests/test-cmd-queue tests/test-cmd-queue.o
 EXTRA_DIST += tests/test-cmd-queue.c
+
+# Exercise hook accounting through production options, notification and queue paths.
+tests/test-options-hooks.o: tests/test-options-hooks.c tmux.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-options-hooks.c -o $@
+
+tests/test-options-hooks: tests/test-options-hooks.o tests/test-window-tmux.o $(tmtv_OBJECTS) $(tmtv_DEPENDENCIES)
+	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-options-hooks.o tests/test-window-tmux.o $(filter-out tmux.o,$(tmtv_OBJECTS)) $(tmtv_LDADD) $(LIBS)
+
+CLEANFILES += tests/test-options-hooks tests/test-options-hooks.o
+EXTRA_DIST += tests/test-options-hooks.c

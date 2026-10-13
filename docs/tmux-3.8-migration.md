@@ -381,3 +381,41 @@ exercise actual transport disconnection, authenticated relay forwarding,
 viewers or macOS. Runtime remains 3.6a; floating protocol and stale wiring
 validation remain outstanding. This stage is local only, with no push, tag,
 release or deployment.
+
+## Option hook firing metadata prerequisite
+
+The firing count/time fields, accessors and exact `options_search` lookup are
+copied from pinned 3.8 `options.c`. Existing `notify.c` and `cmdq_insert_hook`
+paths account once after resolving an option, before parsing/inserting its
+commands, matching pinned `hooks_insert` semantics. Inherited hooks update the
+owning entry; local entries have independent metadata. Updating a value retains
+metadata; removing/recreating the entry resets it. This stage preserves the
+existing numeric array API and fork relay command routing.
+
+Four cases in `tests/test-options-hooks.c` link the complete production host
+with only the program entrypoint renamed. They exercise immediate custom hook
+execution, deferred window notifications using production window/pane lifetime
+APIs, multi-entry command hook execution and `CMDQ_STATE_NOHOOKS` suppression,
+parent/local metadata and removal reset, and exact table lookup. Removing both
+production accounting calls made three integration cases fail; the API and
+inheritance case still passed. The fixtures initialize the production event
+base, socket identity, option tables and environment; there are no production
+parser, queue, notification or options stubs.
+
+Linux SIXEL host and relay builds and all 196 standard tests pass. All four
+cases also pass ASan/UBSan with leak detection, instrumenting `options.c`,
+`notify.c`, `cmd-queue.c`, `window.c`, the test and renamed entrypoint; other
+linked host objects retain normal compilation. Leak detection initially found
+562 bytes in 16 allocations: custom notification hooks retained parser-owned
+command lists after queue insertion took its own references. Releasing the
+parser reference after insertion fixes that production leak while the tests
+still verify hook commands execute. Normal objects/binaries are restored for
+the final suite; sanitizer symbols are checked separately.
+
+This does not port monitor ownership/lifecycle: `options_get_monitor_data`,
+`options_set_monitor_data` and `options_remove` monitor cleanup require the
+actual hooks/monitor modules. Reconcile those dependencies next, including the
+same custom-hook parser ownership when importing `hooks.c`. Event hook sinks
+are not registered and existing notify callers are not replaced in this stage.
+No full 3.8 runtime, authenticated relay/viewer, macOS or floating-pane
+validation is claimed. Remote pushes, tags, releases and deployment remain held.
