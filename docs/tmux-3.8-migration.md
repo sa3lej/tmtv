@@ -419,3 +419,51 @@ same custom-hook parser ownership when importing `hooks.c`. Event hook sinks
 are not registered and existing notify callers are not replaced in this stage.
 No full 3.8 runtime, authenticated relay/viewer, macOS or floating-pane
 validation is claimed. Remote pushes, tags, releases and deployment remain held.
+
+## Monitor ownership and hook lifecycle prerequisite
+
+`monitor.c` matches pinned official 3.8 exactly; both Linux host and relay now
+compile it and `hooks.c`. Option-owned monitor data and removal cleanup match
+the pinned APIs. The only differences from pinned `hooks.c` release the parser
+reference after queue insertion in both custom and expanded array hooks, and
+free expanded hook parse errors. This preserves the previously verified custom
+hook leak fix. Existing notify callers and command-hook routing are unchanged;
+startup does not yet register the new built-in hook sinks or expose monitor
+command syntax.
+
+Five cases in `tests/test-monitor.c` link the complete production host with
+only its entrypoint renamed. Bounded real libevent timers exercise monitor
+format evaluation, custom hook parsing, event payload dispatch, queue execution,
+initial notification, change detection, false-value filtering and firing
+metadata. Lifecycle cases verify replacement balances session references,
+inherited monitor ownership survives local removal, option removal and options
+free cancel timers/sinks, and destroyed sessions remain retained safely until
+an external monitor is destroyed. Pane/window scans and same-name subscription
+replacement use real production session/window/pane allocators.
+
+Review found a reference cycle when session options own a monitor that retains
+that same session: deferred `session_free` could never reach option cleanup.
+`session_destroy` now removes its local option monitors before dropping its
+owner reference. An external monitor anchor lets the regression inspect the
+remaining reference and cleared option state before final deferred freeing.
+Linking the prior production `session.c` makes only that regression fail
+(expected one reference, observed two). External monitor retention remains
+unchanged. Existing notification and fork recording teardown paths are kept.
+
+Both Linux SIXEL builds and all 201 standard cases pass. The five new cases
+also pass ASan/UBSan with leak detection, instrumenting monitor, hooks, options,
+events, payload, window, session, command queue, test and renamed entrypoint;
+other linked host objects retain normal compilation. Sanitized objects/binary
+are isolated under `.deps/tmux38-monitor-validation`; normal production objects
+were never replaced. Symbol inspection confirms no sanitizer references in
+normal host, relay and monitor test binaries. The fixture drains deferred
+session frees through the production event loop; its initial omission produced
+a 389-byte leak report and was corrected before final validation.
+
+These checks do not cover client control subscriptions, single-pane monitors,
+expanded built-in array monitor hooks, mutation of subscriptions from within a
+callback, authenticated relay/viewers or macOS. Broader core/header migration,
+hook sink registration/notify caller replacement, floating layout/protocol,
+recording/clipboard/SIXEL/synchronized-rendering end-to-end and stale wiring
+validation remain outstanding. Runtime still reports 3.6a. Local commits only;
+remote pushes, tags, release and deployment remain held.

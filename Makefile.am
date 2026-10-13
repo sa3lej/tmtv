@@ -153,6 +153,8 @@ dist_tmtv_SOURCES = \
 	control.c \
 	environ.c \
 	events.c \
+	hooks.c \
+	monitor.c \
 	events-payload.c \
 	file.c \
 	format.c \
@@ -308,6 +310,8 @@ dist_tmtv_server_SOURCES = \
 	control.c \
 	environ.c \
 	events.c \
+	hooks.c \
+	monitor.c \
 	events-payload.c \
 	file.c \
 	format.c \
@@ -494,3 +498,13 @@ tests/test-options-hooks: tests/test-options-hooks.o tests/test-window-tmux.o $(
 
 CLEANFILES += tests/test-options-hooks tests/test-options-hooks.o
 EXTRA_DIST += tests/test-options-hooks.c
+
+# Exercise option-owned monitors with complete host production objects.
+tests/test-monitor.o: tests/test-monitor.c tmux.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-monitor.c -o $@
+
+tests/test-monitor: tests/test-monitor.o tests/test-window-tmux.o $(tmtv_OBJECTS) $(tmtv_DEPENDENCIES)
+	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-monitor.o tests/test-window-tmux.o $(filter-out tmux.o,$(tmtv_OBJECTS)) $(tmtv_LDADD) $(LIBS)
+
+CLEANFILES += tests/test-monitor tests/test-monitor.o
+EXTRA_DIST += tests/test-monitor.c

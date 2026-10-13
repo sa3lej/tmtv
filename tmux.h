@@ -2431,6 +2431,28 @@ enum event_payload_type {
 typedef void (*event_payload_free_cb)(void *);
 typedef void (*event_payload_print_cb)(void *, struct evbuffer *);
 
+/* Monitor. */
+enum monitor_type {
+	MONITOR_SESSION,
+	MONITOR_PANE,
+	MONITOR_ALL_PANES,
+	MONITOR_WINDOW,
+	MONITOR_ALL_WINDOWS
+};
+#define MONITOR_NOTIFY_INITIAL 0x1
+#define MONITOR_NOTIFY_TRUE 0x2
+struct monitor_change {
+	const char		*name;
+	const char		*value;
+	const char		*last;
+
+	struct client		*c;
+	struct session		*s;
+	struct winlink		*wl;
+	struct window_pane	*wp;
+};
+typedef void (*monitor_cb)(struct monitor_change *, void *);
+
 /* events.c */
 typedef void (*events_cb)(const char *, struct event_payload *, void *);
 struct events_sink *events_add_sink(const char *, events_cb, void *);
@@ -2495,6 +2517,23 @@ void	notify_window(const char *, struct window *);
 void	notify_pane(const char *, struct window_pane *);
 void	notify_paste_buffer(const char *, int);
 
+/* hooks.c */
+void	 hooks_add_event(const char *);
+int	 hooks_is_event(const char *);
+int	 hooks_valid_event_name(const char *);
+void	 hooks_build_events(void);
+void	 hooks_run(struct cmdq_item *, const char *);
+void	 hooks_monitor_add(struct cmdq_item *, struct options *,
+	    const char *, enum monitor_type, int, const char *,
+	    int, struct cmd_find_state *, struct session *);
+void	 hooks_monitor_remove(struct options *, const char *);
+void	 hooks_monitor_free(void *);
+char	*hooks_monitor_to_string(struct options_entry *);
+int	 hooks_monitor_get(struct options_entry *, enum monitor_type *, int *,
+	     const char **);
+u_int	 hooks_monitor_get_fire_count(struct options_entry *);
+time_t	 hooks_monitor_get_fire_time(struct options_entry *);
+
 /* options.c */
 struct options	*options_create(struct options *);
 void		 options_free(struct options *);
@@ -2509,6 +2548,8 @@ struct options_entry *options_default(struct options *,
 char		*options_default_to_string(const struct options_table_entry *);
 const char	*options_name(struct options_entry *);
 struct options	*options_owner(struct options_entry *);
+void		*options_get_monitor_data(struct options_entry *);
+void		 options_set_monitor_data(struct options_entry *, void *);
 void		 options_hook_fired(struct options_entry *);
 u_int		 options_get_fire_count(struct options_entry *);
 time_t		 options_get_fire_time(struct options_entry *);
@@ -3553,6 +3594,18 @@ extern const struct window_mode window_customize_mode;
 void	 check_window_name(struct window *);
 char	*default_window_name(struct window *);
 char	*parse_window_name(const char *);
+
+/* monitor.c */
+struct monitor_set *monitor_create_client(struct client *, monitor_cb, void *);
+struct monitor_set *monitor_create_session(struct session *, monitor_cb, void *);
+void	monitor_destroy(struct monitor_set *);
+int	monitor_parse(const char *, char **, enum monitor_type *, int *,
+	    char **);
+void	monitor_add(struct monitor_set *, const char *, enum monitor_type, int,
+	    const char *, int);
+void	monitor_remove(struct monitor_set *, const char *);
+u_int	monitor_get_fire_count(struct monitor_set *, const char *);
+time_t	monitor_get_fire_time(struct monitor_set *, const char *);
 
 /* control.c */
 void	control_discard(struct client *);

@@ -198,7 +198,8 @@ session_free(__unused int fd, __unused short events, void *arg)
 void
 session_destroy(struct session *s, int notify, const char *from)
 {
-	struct winlink	*wl;
+	struct winlink		*wl;
+	struct options_entry	*o;
 
 	log_debug("session %s destroyed (%s)", s->name, from);
 
@@ -226,6 +227,10 @@ session_destroy(struct session *s, int notify, const char *from)
 	}
 
 	free((void *)s->cwd);
+
+	/* Local monitors retain this session: release them before its owner. */
+	for (o = options_first(s->options); o != NULL; o = options_next(o))
+		hooks_monitor_remove(s->options, options_name(o));
 
 	session_remove_ref(s, __func__);
 

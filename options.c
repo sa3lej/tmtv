@@ -57,6 +57,7 @@ struct options_entry {
 	int					 cached;
 	struct style				 style;
 
+	void					*monitor_data;
 	u_int					 fire_count;
 	time_t					 fire_time;
 
@@ -357,6 +358,8 @@ options_remove(struct options_entry *o)
 		options_array_clear(o);
 	else
 		options_value_free(o, &o->value);
+	if (o->monitor_data != NULL)
+		hooks_monitor_free(o->monitor_data);
 	RB_REMOVE(options_tree, &oo->tree, o);
 	free((void *)o->name);
 	free(o);
@@ -372,6 +375,18 @@ struct options *
 options_owner(struct options_entry *o)
 {
 	return (o->owner);
+}
+
+void *
+options_get_monitor_data(struct options_entry *o)
+{
+	return (o->monitor_data);
+}
+
+void
+options_set_monitor_data(struct options_entry *o, void *data)
+{
+	o->monitor_data = data;
 }
 
 void
