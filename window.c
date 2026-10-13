@@ -1212,6 +1212,12 @@ window_pane_set_mode(struct window_pane *wp, struct window_pane *swp,
 	server_status_window(wp->window);
 	events_fire_pane("pane-mode-changed", wp);
 
+#ifndef TMATE_SERVER_BUILD
+	if ((mode == &window_copy_mode || mode == &window_view_mode) &&
+	    tmate_session.encoder.buffer != NULL)
+		tmate_sync_copy_mode(&tmate_session, wp);
+#endif
+
 	return (0);
 }
 

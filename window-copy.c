@@ -99,6 +99,7 @@ static int	window_copy_update_selection(struct window_mode_entry *, int,
 		    int);
 static void	window_copy_synchronize_cursor(struct window_mode_entry *, int);
 static void    *window_copy_get_selection(struct window_mode_entry *, size_t *);
+static int	window_copy_set_selection(struct window_mode_entry *, int, int);
 static void	window_copy_copy_buffer(struct window_mode_entry *,
 		    const char *, void *, size_t, int, int);
 static void	window_copy_pipe(struct window_mode_entry *,
@@ -5122,6 +5123,115 @@ window_copy_clear_selection(struct window_mode_entry *wme)
 	px = window_copy_find_length(wme, py);
 	if (data->cx > px)
 		window_copy_update_cursor(wme, px, data->cy);
+}
+
+int
+window_copy_get_state(struct window_pane *wp, struct window_copy_state *state)
+{
+	struct window_mode_entry		*wme;
+	struct window_copy_mode_data	*data;
+	u_int				 last_line;
+
+	TAILQ_FOREACH(wme, &wp->modes, entry) {
+		if (wme->mode == &window_copy_mode ||
+		    wme->mode == &window_view_mode)
+			break;
+	}
+	if (wme == NULL)
+		return (0);
+
+	data = wme->data;
+	memset(state, 0, sizeof *state);
+	state->view_mode = wme->mode == &window_view_mode;
+	state->oy = data->oy;
+	state->cx = data->cx;
+	state->cy = data->cy;
+	state->rectangle = data->rectflag;
+	state->selection = data->screen.sel != NULL;
+	if (state->selection) {
+		last_line = screen_hsize(data->backing) +
+		    screen_size_y(data->backing) - 1;
+		if (data->sely > last_line)
+			return (0);
+		state->selx = data->selx;
+		state->transformed_sely = (int64_t)last_line - data->sely;
+	}
+	return (1);
+}
+
+int
+window_copy_state_is_valid(struct window_pane *wp,
+    const struct window_copy_state *state)
+{
+	u_int	sx = screen_size_x(&wp->base);
+	u_int	sy = screen_size_y(&wp->base);
+	u_int	hsize = screen_hsize(&wp->base);
+
+	if (state->view_mode != 0 && state->view_mode != 1)
+		return (0);
+	if (state->oy > hsize || (state->view_mode == 1 && state->oy != 0))
+		return (0);
+	if (state->cx >= sx || state->cy >= sy)
+		return (0);
+	if (!state->selection)
+		return (1);
+	if (state->rectangle != 0 && state->rectangle != 1)
+		return (0);
+	if (state->transformed_sely < 0)
+		return (0);
+	if (state->view_mode == 1 && state->transformed_sely >= sy)
+		return (0);
+	if (state->view_mode == 0 &&
+	    state->transformed_sely > (int64_t)hsize + sy - 1)
+		return (0);
+	if (state->selx >= sx)
+		return (0);
+	return (1);
+}
+
+void
+window_copy_restore_state(struct window_pane *wp,
+    const struct window_copy_state *state)
+{
+	const struct window_mode	*mode;
+	struct args			*args;
+	struct window_mode_entry		*wme;
+	struct window_copy_mode_data	*data;
+	struct screen_write_ctx		 ctx;
+	u_int				 selection_y;
+
+	mode = state->view_mode == 1 ? &window_view_mode :
+	    &window_copy_mode;
+	args = args_create();
+	window_pane_set_mode(wp, wp, mode, NULL, NULL, args);
+	args_free(args);
+
+	wme = TAILQ_FIRST(&wp->modes);
+	if (wme == NULL || wme->mode != mode)
+		return;
+	data = wme->data;
+
+	data->oy = state->oy;
+	window_copy_update_cursor(wme, state->cx, state->cy);
+	if (!state->selection)
+		window_copy_clear_selection(wme);
+	else {
+		selection_y = screen_hsize(data->backing) +
+		    screen_size_y(data->backing) - 1 -
+		    (u_int)state->transformed_sely;
+		data->selx = state->selx;
+		data->sely = selection_y;
+		data->endselx = state->cx;
+		data->endsely = screen_hsize(data->backing) + state->cy -
+		    state->oy;
+		data->rectflag = state->rectangle;
+		data->cursordrag = CURSORDRAG_ENDSEL;
+		window_copy_set_selection(wme, 1, 0);
+	}
+	window_copy_redraw_screen(wme);
+	screen_write_start_pane(&ctx, wp, NULL);
+	screen_write_cursormove(&ctx, data->cx, data->cy, 0);
+	screen_write_stop(&ctx);
 }
 
 static int

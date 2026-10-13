@@ -967,22 +967,70 @@ static void tmate_sync_copy_mode(__unused struct tmate_session *session,
 				 struct tmate_unpacker *uk)
 {
 	struct window_pane *wp;
-	struct window_mode_entry *wme;
 	struct tmate_unpacker cm_uk;
-	int64_t pane_id;
+	struct tmate_unpacker input_uk;
+	struct window_copy_state state;
+	int64_t pane_id, backing, oy, cx, cy, selx, transformed_sely, rectangle;
 
 	pane_id = unpack_int(uk);
 	unpack_array(uk, &cm_uk);
-	/* Nonempty legacy snapshots require separate state reconciliation. */
-	if (cm_uk.argc != 0 || pane_id < 0 || pane_id > UINT_MAX)
+	if (pane_id < 0 || pane_id > UINT_MAX)
 		return;
+	if (cm_uk.argc == 0) {
+		wp = window_pane_find_by_id((u_int)pane_id);
+		if (wp == NULL)
+			return;
+		if (TAILQ_FIRST(&wp->modes) != NULL &&
+		    (TAILQ_FIRST(&wp->modes)->mode == &window_copy_mode ||
+		    TAILQ_FIRST(&wp->modes)->mode == &window_view_mode))
+			window_pane_reset_mode(wp);
+		return;
+	}
+	if (cm_uk.argc != 6)
+		return;
+	backing = unpack_int(&cm_uk);
+	if (backing != 0 && backing != 1)
+		return;
+	oy = unpack_int(&cm_uk);
+	cx = unpack_int(&cm_uk);
+	cy = unpack_int(&cm_uk);
+	if (unpack_peek_type(&cm_uk) != MSGPACK_OBJECT_ARRAY)
+		return;
+	{
+		struct tmate_unpacker sel_uk;
+
+		unpack_array(&cm_uk, &sel_uk);
+		if (sel_uk.argc != 3)
+			return;
+		selx = unpack_int(&sel_uk);
+		transformed_sely = unpack_int(&sel_uk);
+		rectangle = unpack_int(&sel_uk);
+	}
+	if (cm_uk.argc != 1 ||
+	    unpack_peek_type(&cm_uk) != MSGPACK_OBJECT_ARRAY)
+		return;
+	unpack_array(&cm_uk, &input_uk);
+	if (input_uk.argc != 0)
+		return;
+	if (oy < 0 || cx < 0 || cy < 0 || selx < 0 || rectangle < 0)
+		return;
+	if (oy > INT_MAX || cx > INT_MAX || cy > INT_MAX ||
+	    selx > INT_MAX || rectangle > INT_MAX)
+		return;
+	state.view_mode = backing == 0;
+	state.oy = (u_int)oy;
+	state.cx = (u_int)cx;
+	state.cy = (u_int)cy;
+	state.selection = 1;
+	state.selx = (u_int)selx;
+	state.transformed_sely = transformed_sely;
+	state.rectangle = (int)rectangle;
 	wp = window_pane_find_by_id((u_int)pane_id);
 	if (wp == NULL)
 		return;
-	wme = TAILQ_FIRST(&wp->modes);
-	if (wme != NULL && (wme->mode == &window_copy_mode ||
-	    wme->mode == &window_view_mode))
-		window_pane_reset_mode(wp);
+	if (!window_copy_state_is_valid(wp, &state))
+		return;
+	window_copy_restore_state(wp, &state);
 }
 
 static void tmate_write_copy_mode(__unused struct tmate_session *session,

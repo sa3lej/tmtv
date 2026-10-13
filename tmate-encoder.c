@@ -417,12 +417,29 @@ void tmate_sync_copy_mode(struct tmate_session *session,
 {
 	PACK(session);
 	struct window_mode_entry *wme;
+	struct window_copy_state state;
 
-	/* Active copy/view snapshots are still pending. Never encode them as exit. */
+	/* An empty state means copy/view is inactive; active state follows. */
 	wme = TAILQ_FIRST(&wp->modes);
-	if (wme != NULL && (wme->mode == &window_copy_mode ||
-	    wme->mode == &window_view_mode))
+	if (wme != NULL && window_copy_get_state(wp, &state)) {
+		pack(array, 3);
+		pack(int, TMATE_OUT_SYNC_COPY_MODE);
+		pack(int, wp->id);
+		pack(array, 6);
+		pack(int, state.view_mode == 0);
+		pack(int, state.oy);
+		pack(int, state.cx);
+		pack(int, state.cy);
+		if (state.selection) {
+			pack(array, 3);
+			pack(int, state.selx);
+			pack(int64, state.transformed_sely);
+			pack(int, state.rectangle);
+		} else
+			pack(array, 0);
+		pack(array, 0);
 		return;
+	}
 
 	pack(array, 3);
 	pack(int, TMATE_OUT_SYNC_COPY_MODE);
@@ -621,6 +638,11 @@ static void tmate_send_reconnection_data(struct tmate_session *session)
 
 void tmate_send_reconnection_state(struct tmate_session *session)
 {
+	struct session *s;
+	struct winlink *wl;
+	struct window *w;
+	struct window_pane *wp;
+
 	/* Start with a fresh encoder */
 	tmate_encoder_destroy(&session->encoder);
 	tmate_encoder_init(&session->encoder, NULL, session);
@@ -635,6 +657,14 @@ void tmate_send_reconnection_state(struct tmate_session *session)
 	tmate_sync_layout(session, NULL);
 	tmate_send_session_snapshot(session, NULL,
 				    RECONNECTION_MAX_HISTORY_LINE);
+
+	s = tmate_find_session(session);
+	if (s != NULL)
+		RB_FOREACH(wl, winlinks, &s->windows) {
+			w = wl->window;
+			TAILQ_FOREACH(wp, &w->panes, entry)
+				tmate_sync_copy_mode(session, wp);
+		}
 
 	/* Send current status so late-joining viewers get it immediately */
 	tmate_expand_status();

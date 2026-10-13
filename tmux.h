@@ -3563,8 +3563,18 @@ extern const struct window_mode window_client_mode;
 /* window-copy.c */
 extern const struct window_mode window_copy_mode;
 extern const struct window_mode window_view_mode;
+struct window_copy_state {
+	int	 view_mode;
+	u_int	 oy;
+	u_int	 cx;
+	u_int	 cy;
+	int	 selection;
+	u_int	 selx;
+	int64_t transformed_sely;
+	int	 rectangle;
+};
 void printflike(3, 4) window_copy_add(struct window_pane *, int, const char *,
-		     ...);
+		    ...);
 void printflike(3, 0) window_copy_vadd(struct window_pane *, int, const char *,
 		     va_list);
 void		 window_copy_scroll(struct window_pane *, int, u_int, int);
@@ -3576,6 +3586,12 @@ char		*window_copy_get_line(struct window_pane *, u_int);
 int		 window_copy_get_current_offset(struct window_pane *, u_int *,
 		     u_int *);
 char		*window_copy_get_hyperlink(struct window_pane *, u_int, u_int);
+int		 window_copy_get_state(struct window_pane *,
+		     struct window_copy_state *);
+int		 window_copy_state_is_valid(struct window_pane *,
+		     const struct window_copy_state *);
+void		 window_copy_restore_state(struct window_pane *,
+		     const struct window_copy_state *);
 
 /* window-option.c */
 extern const struct window_mode window_customize_mode;

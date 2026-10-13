@@ -192,16 +192,21 @@ TEST(host_exit_only_emits_for_last_copy_mode)
 	buffer = tmate_session.encoder.buffer;
 	window_pane_set_mode(wp, NULL, &window_clock_mode, NULL, NULL, NULL);
 	window_pane_set_mode(wp, wp, &window_copy_mode, NULL, NULL, args);
+	/* Entering copy mode emits the active state. */
+	ASSERT(evbuffer_get_length(buffer) > 0);
+	evbuffer_drain(buffer, evbuffer_get_length(buffer));
 	tmate_sync_copy_mode(&tmate_session, wp);
-	ASSERT_EQ(evbuffer_get_length(buffer), 0);
+	ASSERT(evbuffer_get_length(buffer) > 0);
+	evbuffer_drain(buffer, evbuffer_get_length(buffer));
 	window_pane_set_mode(wp, NULL, &window_view_mode, NULL, NULL, NULL);
 	window_pane_reset_mode(wp);
-	/* The underlying copy mode is active: an empty state would be false. */
-	ASSERT_EQ(evbuffer_get_length(buffer), 0);
+	/* Both transitions preserve the active copy state. */
+	ASSERT(evbuffer_get_length(buffer) > 0);
+	evbuffer_drain(buffer, evbuffer_get_length(buffer));
 	window_pane_reset_mode(wp);
 	size = evbuffer_get_length(buffer);
-	ASSERT(size > 0);
-	window_pane_reset_mode(wp); /* unrelated clock exit */
+	ASSERT(size > 0); /* copy exit emits empty state while clock remains */
+	window_pane_reset_mode(wp);
 	ASSERT_EQ(evbuffer_get_length(buffer), size);
 	window_pane_reset_mode(wp); /* no mode */
 	ASSERT_EQ(evbuffer_get_length(buffer), size);
@@ -471,6 +476,8 @@ emit_copy_output(int exit_mode)
 	buffer = tmate_session.encoder.buffer;
 	window_pane_set_mode(first, NULL, &window_view_mode, NULL, NULL, NULL);
 	window_pane_set_mode(second, NULL, &window_view_mode, NULL, NULL, NULL);
+	/* State hooks are expected; remove them before the parsed-output check. */
+	evbuffer_drain(buffer, evbuffer_get_length(buffer));
 	/* Parsed output has different semantics and must not use this opcode. */
 	window_copy_add(first, 1, "%s", "parsed output");
 	result = evbuffer_get_length(buffer) != 0;
@@ -503,6 +510,46 @@ emit_copy_output(int exit_mode)
 }
 
 static int emit_layout;
+
+static int
+emit_copy_state(void)
+{
+	struct window_pane *wp = create_pane();
+	struct args *args = args_create();
+	struct window_copy_state state = {
+		.view_mode = 0,
+		.oy = 0,
+		.cx = 5,
+		.cy = 6,
+		.selection = 1,
+		.selx = 3,
+		.transformed_sely = 0,
+		.rectangle = 1
+	};
+	struct grid_cell gc = grid_default_cell;
+	struct evbuffer *buffer;
+	const unsigned char *bytes;
+	size_t size;
+	int result;
+
+	utf8_set(&gc.data, 'H');
+	grid_set_cell(wp->base.grid, 0, wp->base.grid->sy - 1, &gc);
+	grid_scroll_history(wp->base.grid, 1);
+	window_pane_set_mode(wp, wp, &window_copy_mode, NULL, NULL, args);
+	window_copy_restore_state(wp, &state);
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	window_pane_set_mode(wp, NULL, &window_clock_mode, NULL, NULL, NULL);
+	buffer = tmate_session.encoder.buffer;
+	tmate_sync_copy_mode(&tmate_session, wp);
+	size = evbuffer_get_length(buffer);
+	bytes = evbuffer_pullup(buffer, -1);
+	result = size == 0 || fwrite(bytes, 1, size, stdout) != size;
+	tmate_encoder_destroy(&tmate_session.encoder);
+	tmate_session.encoder.buffer = NULL;
+	args_free(args);
+	destroy_pane(wp);
+	return (result);
+}
 
 static void
 emit_snapshot_message(void *userdata, struct tmate_unpacker *uk)
@@ -705,6 +752,7 @@ main(int argc, char **argv)
 	}
 	if (argc == 2 && (strcmp(argv[1], "--emit-copy-output") == 0 ||
 	    strcmp(argv[1], "--emit-copy-exit") == 0 ||
+	    strcmp(argv[1], "--emit-copy-state") == 0 ||
 	    strcmp(argv[1], "--emit-snapshot") == 0 ||
 	    strcmp(argv[1], "--emit-layout-snapshot") == 0 ||
 	    strcmp(argv[1], "--emit-vertical-reconnect") == 0 ||
@@ -712,7 +760,9 @@ main(int argc, char **argv)
 	    strcmp(argv[1], "--emit-mixed-vertical-reconnect") == 0 ||
 	    strcmp(argv[1], "--emit-mixed-horizontal-reconnect") == 0)) {
 		emit_layout = strcmp(argv[1], "--emit-layout-snapshot") == 0;
-		int result = strstr(argv[1], "-reconnect") != NULL ?
+		int result = strcmp(argv[1], "--emit-copy-state") == 0 ?
+		    emit_copy_state() :
+		    strstr(argv[1], "-reconnect") != NULL ?
 		    emit_split_reconnect(strstr(argv[1], "vertical") != NULL,
 		    strstr(argv[1], "mixed") != NULL) :
 		    (emit_layout || strcmp(argv[1], "--emit-snapshot") == 0) ?

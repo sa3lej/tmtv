@@ -32,10 +32,13 @@ class ChildEnvironmentTests(unittest.TestCase):
             self.environment.pop(name, None)
 
     def command(self, *args, check=True):
-        return subprocess.run(
+        result = subprocess.run(
             [str(BINARY), "-S", str(self.socket), "-f", str(self.config), *args],
-            env=self.environment, capture_output=True, text=True, timeout=10, check=check,
+            env=self.environment, capture_output=True, text=True, timeout=10,
         )
+        if check and result.returncode != 0:
+            raise AssertionError(f"command {args} failed: {result.stderr}")
+        return result
 
     def snapshot_command(self, name):
         path = shlex.quote(str(self.root / name))
