@@ -1217,11 +1217,18 @@ window_pane_reset_mode(struct window_pane *wp)
 {
 	struct window_mode_entry	*wme, *next;
 	struct window			*w = wp->window;
+#ifndef TMATE_SERVER_BUILD
+	int				 copy_mode;
+#endif
 
 	if (TAILQ_EMPTY(&wp->modes))
 		return;
 
 	wme = TAILQ_FIRST(&wp->modes);
+#ifndef TMATE_SERVER_BUILD
+	copy_mode = wme->mode == &window_copy_mode ||
+	    wme->mode == &window_view_mode;
+#endif
 	TAILQ_REMOVE(&wp->modes, wme, entry);
 	wme->mode->free(wme);
 	free(wme);
@@ -1237,6 +1244,12 @@ window_pane_reset_mode(struct window_pane *wp)
 		if (next->mode->resize != NULL)
 			next->mode->resize(next, wp->sx, wp->sy);
 	}
+
+#ifndef TMATE_SERVER_BUILD
+	/* Only the host originates state; relay resets must not echo it. */
+	if (copy_mode && tmate_session.encoder.buffer != NULL)
+		tmate_sync_copy_mode(&tmate_session, wp);
+#endif
 
 	wp->flags |= (PANE_REDRAW|PANE_REDRAWSCROLLBAR|PANE_CHANGED);
 	layout_fix_panes(w, NULL);

@@ -418,23 +418,15 @@ void tmate_sync_copy_mode(struct tmate_session *session,
 	PACK(session);
 	struct window_mode_entry *wme;
 
+	/* Active copy/view snapshots are still pending. Never encode them as exit. */
+	wme = TAILQ_FIRST(&wp->modes);
+	if (wme != NULL && (wme->mode == &window_copy_mode ||
+	    wme->mode == &window_view_mode))
+		return;
+
 	pack(array, 3);
 	pack(int, TMATE_OUT_SYNC_COPY_MODE);
 	pack(int, wp->id);
-
-	/*
-	 * In tmux 3.6a, mode data is accessed via the modes list.
-	 * The internal window_copy_mode_data struct is private to
-	 * window-copy.c, so we can only send a minimal sync.
-	 */
-	wme = TAILQ_FIRST(&wp->modes);
-	if (wme == NULL || wme->mode != &window_copy_mode) {
-		pack(array, 0);
-		return;
-	}
-
-	/* Send minimal copy mode info - full sync would require
-	 * exposing window-copy.c internals via accessor functions */
 	pack(array, 0);
 }
 

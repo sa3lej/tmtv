@@ -180,6 +180,36 @@ TEST(real_copy_clock_and_view_modes)
 	destroy_pane(wp);
 }
 
+TEST(host_exit_only_emits_for_last_copy_mode)
+{
+	struct window_pane *wp = create_pane();
+	struct args *args = args_create();
+	struct evbuffer *buffer;
+	size_t size;
+
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	buffer = tmate_session.encoder.buffer;
+	window_pane_set_mode(wp, NULL, &window_clock_mode, NULL, NULL, NULL);
+	window_pane_set_mode(wp, wp, &window_copy_mode, NULL, NULL, args);
+	tmate_sync_copy_mode(&tmate_session, wp);
+	ASSERT_EQ(evbuffer_get_length(buffer), 0);
+	window_pane_set_mode(wp, NULL, &window_view_mode, NULL, NULL, NULL);
+	window_pane_reset_mode(wp);
+	/* The underlying copy mode is active: an empty state would be false. */
+	ASSERT_EQ(evbuffer_get_length(buffer), 0);
+	window_pane_reset_mode(wp);
+	size = evbuffer_get_length(buffer);
+	ASSERT(size > 0);
+	window_pane_reset_mode(wp); /* unrelated clock exit */
+	ASSERT_EQ(evbuffer_get_length(buffer), size);
+	window_pane_reset_mode(wp); /* no mode */
+	ASSERT_EQ(evbuffer_get_length(buffer), size);
+	tmate_encoder_destroy(&tmate_session.encoder);
+	tmate_session.encoder.buffer = NULL;
+	args_free(args);
+	destroy_pane(wp);
+}
+
 static int
 output_equals(struct window_pane *wp, u_int line, const char *expected)
 {
@@ -194,7 +224,7 @@ output_equals(struct window_pane *wp, u_int line, const char *expected)
 
 /* stdout contains only host-origin MessagePack, consumed by the relay test. */
 static int
-emit_copy_output(void)
+emit_copy_output(int exit_mode)
 {
 	struct window_pane *first = create_pane(), *second = create_pane();
 	struct evbuffer *buffer;
@@ -210,14 +240,24 @@ emit_copy_output(void)
 	window_copy_add(first, 1, "%s", "parsed output");
 	result = evbuffer_get_length(buffer) != 0;
 	window_pane_reset_mode_all(first);
+	evbuffer_drain(buffer, evbuffer_get_length(buffer));
 	window_pane_set_mode(first, NULL, &window_view_mode, NULL, NULL, NULL);
 	window_copy_add(first, 0, "%s %d", "literal %s", 38);
 	window_copy_add(second, 0, "%s", "other pane");
 	window_copy_add(first, 0, "%s", "second ⚡");
+	if (exit_mode) {
+		size_t before;
+		window_pane_reset_mode(first);
+		if (!TAILQ_EMPTY(&first->modes))
+			result = 1;
+		before = evbuffer_get_length(buffer);
+		window_pane_reset_mode(first); /* repeated reset sends nothing */
+		result |= before != evbuffer_get_length(buffer);
+	}
 	size = evbuffer_get_length(buffer);
 	bytes = evbuffer_pullup(buffer, -1);
-	result |= !output_equals(first, 0, "literal %s 38") ||
-	    !output_equals(first, 1, "second ⚡") ||
+	result |= (!exit_mode && (!output_equals(first, 0, "literal %s 38") ||
+	    !output_equals(first, 1, "second ⚡"))) ||
 	    !output_equals(second, 0, "other pane");
 	result |= size == 0 || fwrite(bytes, 1, size, stdout) != size;
 	tmate_encoder_destroy(&tmate_session.encoder);
@@ -246,8 +286,9 @@ main(int argc, char **argv)
 		if (oe->scope & OPTIONS_TABLE_WINDOW)
 			options_default(global_w_options, oe);
 	}
-	if (argc == 2 && strcmp(argv[1], "--emit-copy-output") == 0) {
-		int result = emit_copy_output();
+	if (argc == 2 && (strcmp(argv[1], "--emit-copy-output") == 0 ||
+	    strcmp(argv[1], "--emit-copy-exit") == 0)) {
+		int result = emit_copy_output(strcmp(argv[1], "--emit-copy-exit") == 0);
 		options_free(global_w_options);
 		options_free(global_s_options);
 		options_free(global_options);
@@ -260,6 +301,7 @@ main(int argc, char **argv)
 	RUN_TEST(no_stack_replacement_restores_underlying_mode_on_decline);
 	RUN_TEST(existing_mode_reorders_without_reinitializing);
 	RUN_TEST(real_copy_clock_and_view_modes);
+	RUN_TEST(host_exit_only_emits_for_last_copy_mode);
 	options_free(global_w_options);
 	options_free(global_s_options);
 	options_free(global_options);

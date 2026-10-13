@@ -759,19 +759,23 @@ static void tmate_status(struct tmate_session *session,
 static void tmate_sync_copy_mode(__unused struct tmate_session *session,
 				 struct tmate_unpacker *uk)
 {
-	/*
-	 * tmux 3.6a: window_copy_mode_data is private to window-copy.c.
-	 * We cannot directly manipulate copy mode state from outside.
-	 * For now, consume the message but skip the copy mode sync.
-	 * A proper fix would require adding accessor functions to window-copy.c.
-	 */
-	int pane_id;
+	struct window_pane *wp;
+	struct window_mode_entry *wme;
 	struct tmate_unpacker cm_uk;
+	int64_t pane_id;
 
 	pane_id = unpack_int(uk);
-	(void)pane_id;
 	unpack_array(uk, &cm_uk);
-	/* Consume remaining data silently */
+	/* Nonempty legacy snapshots require separate state reconciliation. */
+	if (cm_uk.argc != 0 || pane_id < 0 || pane_id > UINT_MAX)
+		return;
+	wp = window_pane_find_by_id((u_int)pane_id);
+	if (wp == NULL)
+		return;
+	wme = TAILQ_FIRST(&wp->modes);
+	if (wme != NULL && (wme->mode == &window_copy_mode ||
+	    wme->mode == &window_view_mode))
+		window_pane_reset_mode(wp);
 }
 
 static void tmate_write_copy_mode(__unused struct tmate_session *session,

@@ -43,6 +43,33 @@ write_output(int id, const char *text, int fragmented)
 	msgpack_sbuffer_destroy(&sb);
 }
 
+static void
+sync_state(int64_t id, int nonempty)
+{
+	struct tmate_decoder decoder;
+	msgpack_sbuffer sb;
+	msgpack_packer pk;
+	char *buf;
+	size_t capacity;
+
+	msgpack_sbuffer_init(&sb);
+	msgpack_packer_init(&pk, &sb, msgpack_sbuffer_write);
+	msgpack_pack_array(&pk, 3);
+	msgpack_pack_int(&pk, TMATE_OUT_SYNC_COPY_MODE);
+	msgpack_pack_int64(&pk, id);
+	msgpack_pack_array(&pk, nonempty ? 1 : 0);
+	if (nonempty)
+		msgpack_pack_int(&pk, 0);
+	tmate_decoder_init(&decoder, read_message, NULL);
+	tmate_decoder_get_buffer(&decoder, &buf, &capacity);
+	if (capacity < sb.size)
+		abort();
+	memcpy(buf, sb.data, sb.size);
+	tmate_decoder_commit(&decoder, sb.size);
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	msgpack_sbuffer_destroy(&sb);
+}
+
 static struct window_pane *
 create_pane(void)
 {
@@ -160,6 +187,48 @@ TEST(existing_view_mode_is_resumed)
 	destroy_pane(wp);
 }
 
+TEST(empty_state_exits_copy_and_preserves_unrelated_modes)
+{
+	struct window_pane *wp = create_pane();
+	struct args *args = args_create();
+	struct window_mode_entry *clock;
+	window_pane_set_mode(wp, NULL, &window_clock_mode, NULL, NULL, NULL);
+	clock = TAILQ_FIRST(&wp->modes);
+	window_pane_set_mode(wp, wp, &window_copy_mode, NULL, NULL, args);
+	sync_state(wp->id, 0);
+	ASSERT(TAILQ_FIRST(&wp->modes) == clock);
+	ASSERT(wp->screen == clock->screen);
+	sync_state(wp->id, 0);
+	ASSERT(TAILQ_FIRST(&wp->modes) == clock);
+	window_pane_reset_mode(wp);
+	sync_state(wp->id, 0);
+	ASSERT(TAILQ_EMPTY(&wp->modes));
+	ASSERT(wp->screen == &wp->base);
+	write_output(wp->id, "exit to base", 1);
+	sync_state(wp->id, 0);
+	ASSERT(TAILQ_EMPTY(&wp->modes));
+	ASSERT(wp->screen == &wp->base);
+	args_free(args);
+	destroy_pane(wp);
+}
+
+TEST(nonempty_and_invalid_pane_state_do_not_exit)
+{
+	struct window_pane *wp = create_pane();
+	struct window_mode_entry *view;
+	write_output(wp->id, "retained", 0);
+	view = TAILQ_FIRST(&wp->modes);
+	sync_state(wp->id, 1);
+	sync_state(-1, 0);
+	sync_state((int64_t)UINT_MAX + 1 + wp->id, 0);
+	sync_state(INT_MAX, 0);
+	ASSERT(TAILQ_FIRST(&wp->modes) == view);
+	ASSERT(line_equals(wp, 0, "retained"));
+	destroy_pane(wp);
+}
+
+static int host_exit;
+
 TEST(host_encoder_output_routes_without_feedback)
 {
 	struct window_pane *first = create_pane(), *second = create_pane();
@@ -178,14 +247,17 @@ TEST(host_encoder_output_routes_without_feedback)
 		tmate_decoder_commit(&decoder, 1);
 	}
 	ASSERT(!ferror(stdin));
-	ASSERT_EQ(dispatched, before + 3);
-	ASSERT(TAILQ_FIRST(&first->modes)->mode == &window_view_mode);
-	ASSERT(line_equals(first, 0, "literal %s 38"));
-	ASSERT(line_equals(first, 1, "second ⚡"));
+	ASSERT_EQ(dispatched, before + (host_exit ? 4 : 3));
 	ASSERT(line_equals(second, 0, "other pane"));
-	window_pane_reset_mode(first);
+	if (!host_exit) {
+		ASSERT(TAILQ_FIRST(&first->modes)->mode == &window_view_mode);
+		ASSERT(line_equals(first, 0, "literal %s 38"));
+		ASSERT(line_equals(first, 1, "second ⚡"));
+		window_pane_reset_mode(first);
+	}
 	ASSERT(TAILQ_FIRST(&first->modes)->mode == &window_clock_mode);
-	/* No host encoder is initialized in this relay process: feedback crashes. */
+	ASSERT(first->screen == TAILQ_FIRST(&first->modes)->screen);
+	/* Relay lifecycle runs without a host encoder; its hook is excluded. */
 	msgpack_unpacker_destroy(&decoder.unpacker);
 	destroy_pane(second);
 	destroy_pane(first);
@@ -211,7 +283,9 @@ main(int argc, char **argv)
 			options_default(global_w_options, oe);
 	}
 	TEST_SUITE_BEGIN("Production relay copy output");
-	if (argc == 2 && strcmp(argv[1], "--host-output") == 0) {
+	if (argc == 2 && (strcmp(argv[1], "--host-output") == 0 ||
+	    strcmp(argv[1], "--host-exit") == 0)) {
+		host_exit = strcmp(argv[1], "--host-exit") == 0;
 		RUN_TEST(host_encoder_output_routes_without_feedback);
 	} else {
 		RUN_TEST(initial_and_repeated_output);
@@ -220,6 +294,8 @@ main(int argc, char **argv)
 		RUN_TEST(active_clock_mode_is_preserved_under_output);
 		RUN_TEST(active_copy_mode_has_separate_backing);
 		RUN_TEST(existing_view_mode_is_resumed);
+		RUN_TEST(empty_state_exits_copy_and_preserves_unrelated_modes);
+		RUN_TEST(nonempty_and_invalid_pane_state_do_not_exit);
 	}
 	options_free(global_w_options);
 	options_free(global_s_options);
