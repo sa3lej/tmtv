@@ -326,11 +326,145 @@ TEST(prepared_template_executes_literal_without_injection)
 	}
 }
 
+
+/* Merge lists without flattening groups, as the production parser does. */
+static struct cmd_list *
+serialization_list(void)
+{
+	struct cmd_list *list = cmd_list_new();
+	struct cmd_parse_result *pr;
+	const char *groups[] = {
+		"set-option -g @serialized-one yes ; set-option -g @serialized-two two",
+		"set-option -g @serialized-three three"
+	};
+	u_int i;
+
+	for (i = 0; i < nitems(groups); i++) {
+		pr = cmd_parse_from_string(groups[i], NULL);
+		if (pr->status != CMD_PARSE_SUCCESS)
+			fatalx("serialization fixture did not parse");
+		cmd_list_move(list, pr->cmdlist);
+		cmd_list_free(pr->cmdlist);
+	}
+	return (list);
+}
+
+TEST(command_list_print_flags_preserve_or_flatten_groups)
+{
+	struct cmd_list *list = serialization_list(), *empty;
+	char *text, *expected;
+	const char *single[] = { " ; ", " \\; ", " ; ", " \\; " };
+	const char *group[] = { " ;; ", " \\;\\; ", " ; ", " \\; " };
+	int flags;
+
+	for (flags = 0; flags < 4; flags++) {
+		xasprintf(&expected, "set-option -g @serialized-one yes%s"
+		    "set-option -g @serialized-two two%s"
+		    "set-option -g @serialized-three three",
+		    single[flags], group[flags]);
+		text = cmd_list_print(list, flags);
+		ASSERT_STR_EQ(text, expected);
+		free(text);
+		free(expected);
+	}
+	cmd_list_free(list);
+	empty = cmd_list_new();
+	for (flags = 0; flags < 4; flags++) {
+		text = cmd_list_print(empty, flags);
+		ASSERT_STR_EQ(text, "");
+		free(text);
+	}
+	cmd_list_free(empty);
+}
+
+TEST(flattened_command_list_roundtrip_executes_all_commands)
+{
+	struct cmd_list *list = serialization_list();
+	struct cmd_parse_result *pr;
+	char *text;
+
+	text = cmd_list_print(list, CMD_LIST_PRINT_NO_GROUPS);
+	pr = cmd_parse_from_string(text, NULL);
+	ASSERT_EQ(pr->status, CMD_PARSE_SUCCESS);
+	cmdq_append(NULL, cmdq_get_command(pr->cmdlist, NULL));
+	cmd_list_free(pr->cmdlist);
+	cmd_list_free(list);
+	free(text);
+	while (cmdq_next(NULL) != 0)
+		;
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@serialized-one"), "yes");
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@serialized-two"), "two");
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@serialized-three"), "three");
+}
+
+TEST(escaped_grouped_binding_roundtrip_keeps_commands_in_binding)
+{
+	struct cmd_list *list = serialization_list();
+	struct key_table *table;
+	struct key_binding *bd;
+	struct cmd *cmd;
+	char *text, *binding;
+	u_int count = 0;
+
+	text = cmd_list_print(list,
+	    CMD_LIST_PRINT_ESCAPED|CMD_LIST_PRINT_NO_GROUPS);
+	xasprintf(&binding, "bind-key -T serialization-test x %s", text);
+	cmdq_append(NULL, command(binding));
+	while (cmdq_next(NULL) != 0)
+		;
+	table = key_bindings_get_table("serialization-test", 0);
+	ASSERT_NOT_NULL(table);
+	bd = key_bindings_get(table, 'x');
+	ASSERT_NOT_NULL(bd);
+	for (cmd = cmd_list_first(bd->cmdlist); cmd != NULL; cmd = cmd_list_next(cmd))
+		count++;
+	ASSERT_EQ(count, 3);
+	cmdq_append(NULL, cmdq_get_command(bd->cmdlist, NULL));
+	while (cmdq_next(NULL) != 0)
+		;
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@serialized-three"), "three");
+	key_bindings_remove_table("serialization-test");
+	cmd_list_free(list);
+	free(binding);
+	free(text);
+}
+
+TEST(nested_command_blocks_print_and_parse_literal_arguments)
+{
+	const char *input = "if-shell -F 1 { set-option -g @serialized-nested 'quote\"; dollar$ back\\slash' ; set-option -g @serialized-tail yes }";
+	struct cmd_parse_result *pr;
+	struct cmd_list *list;
+	char *text, *again;
+
+	pr = cmd_parse_from_string(input, NULL);
+	ASSERT_EQ(pr->status, CMD_PARSE_SUCCESS);
+	list = pr->cmdlist;
+	text = cmd_list_print(list, CMD_LIST_PRINT_NO_GROUPS);
+	pr = cmd_parse_from_string(text, NULL);
+	ASSERT_EQ(pr->status, CMD_PARSE_SUCCESS);
+	again = cmd_list_print(pr->cmdlist, CMD_LIST_PRINT_NO_GROUPS);
+	ASSERT_STR_EQ(again, text);
+	cmdq_append(NULL, cmdq_get_command(pr->cmdlist, NULL));
+	cmd_list_free(pr->cmdlist);
+	cmd_list_free(list);
+	free(again);
+	free(text);
+	while (cmdq_next(NULL) != 0)
+		;
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@serialized-nested"),
+	    "quote\"; dollar$ back\\slash");
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@serialized-tail"), "yes");
+}
+
 int
 main(void)
 {
 	setup();
 	TEST_SUITE_BEGIN("Production command queue and arguments");
+	RUN_TEST(command_list_print_flags_preserve_or_flatten_groups);
+	RUN_TEST(flattened_command_list_roundtrip_executes_all_commands);
+	RUN_TEST(escaped_grouped_binding_roundtrip_keeps_commands_in_binding);
+	RUN_TEST(nested_command_blocks_print_and_parse_literal_arguments);
 	RUN_TEST(packed_argv_rejects_invalid_counts_and_empty_payload);
 	RUN_TEST(packed_argv_roundtrip_and_truncation);
 	RUN_TEST(template_quote_modes_and_placeholder_selection);
