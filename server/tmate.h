@@ -387,6 +387,7 @@ extern void tmate_send_fin_to_ws_clients(struct tmate_session *session);
 extern void tmate_send_websocket_daemon_msg(struct tmate_session *session,
 					struct tmate_unpacker *uk);
 extern void tmate_send_websocket_header(struct tmate_session *session);
+extern void tmate_send_websocket_snapshot(unsigned int max_history);
 extern void tmate_init_websocket(struct tmate_session *session);
 extern void tmate_bind_websocket_socket(struct tmate_session *session);
 extern void tmate_start_websocket_listener(struct tmate_session *session);

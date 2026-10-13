@@ -266,6 +266,187 @@ TEST(nonempty_and_invalid_pane_state_do_not_exit)
 	destroy_pane(wp);
 }
 
+/* Exercise the legacy control snapshot serializer used by snapshot requests.
+ * The current browser renders VT data and has no CTL_SNAPSHOT cell decoder. */
+struct web_snapshot {
+	int messages, panes, id, cx, cy, mode, rows;
+	int cells[25], arity_ok;
+	uint64_t attrs[25][7];
+	char text[25][96];
+	size_t length[25];
+};
+
+static void
+read_web_snapshot(void *userdata, struct tmate_unpacker *uk)
+{
+	struct web_snapshot *state = userdata;
+	struct tmate_unpacker panes, pane, cursor, rows, row, attrs;
+	const char *bytes;
+	size_t length;
+	int i, j;
+
+	state->messages++;
+	state->arity_ok = uk->argc == 2 && unpack_int(uk) == TMATE_CTL_SNAPSHOT;
+	unpack_array(uk, &panes);
+	state->panes = panes.argc;
+	if (panes.argc == 0)
+		return;
+	unpack_array(&panes, &pane);
+	state->arity_ok &= pane.argc == 4;
+	state->id = unpack_int(&pane);
+	unpack_array(&pane, &cursor);
+	state->arity_ok &= cursor.argc == 2;
+	state->cx = unpack_int(&cursor);
+	state->cy = unpack_int(&cursor);
+	state->mode = unpack_int(&pane);
+	unpack_array(&pane, &rows);
+	state->rows = rows.argc;
+	for (i = 0; rows.argc && i < 25; i++) {
+		unpack_array(&rows, &row);
+		state->arity_ok &= row.argc == 2;
+		unpack_buffer(&row, &bytes, &length);
+		state->length[i] = length;
+		if (length != 0 && length <= sizeof state->text[i])
+			memcpy(state->text[i], bytes, length);
+		unpack_array(&row, &attrs);
+		state->cells[i] = attrs.argc;
+		for (j = 0; attrs.argc && j < 7; j++)
+			state->attrs[i][j] = unpack_int(&attrs);
+	}
+}
+
+static void
+capture_web_snapshot(struct web_snapshot *state, u_int history, int fragmented)
+{
+	struct tmate_session session = { 0 }, *previous = tmate_session;
+	struct tmate_decoder decoder;
+	struct evbuffer *output;
+	const unsigned char *bytes;
+	char *buf;
+	size_t length, offset = 0, capacity, count;
+
+	tmate_session = &session;
+	tmate_encoder_init(&session.websocket_encoder, NULL, NULL);
+	tmate_send_websocket_snapshot(history);
+	output = session.websocket_encoder.buffer;
+	length = evbuffer_get_length(output);
+	bytes = evbuffer_pullup(output, length);
+	tmate_decoder_init(&decoder, read_web_snapshot, state);
+	while (offset < length) {
+		tmate_decoder_get_buffer(&decoder, &buf, &capacity);
+		count = fragmented ? 1 : length - offset;
+		if (count > capacity)
+			count = capacity;
+		memcpy(buf, bytes + offset, count);
+		tmate_decoder_commit(&decoder, count);
+		offset += count;
+	}
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	event_free(session.websocket_encoder.ev_buffer);
+	evbuffer_free(output);
+	tmate_session = previous;
+}
+
+static void
+check_web_snapshot(int fragmented)
+{
+	struct web_snapshot state = { 0 };
+	struct window_pane *wp = create_pane();
+	struct session *s;
+	struct winlink *wl;
+	struct grid_cell gc = grid_default_cell;
+	u_int id = wp->id, mode = wp->base.mode;
+	int r = fragmented ? 0 : 1; /* bulk includes one history line */
+
+	s = session_create(NULL, "web-snapshot", "/", environ_create(),
+	    options_create(global_s_options), NULL);
+	wl = winlink_add(&s->windows, 0);
+	wl->session = s;
+	winlink_set_window(wl, wp->window);
+	s->curw = wl;
+	window_set_active_pane(wp->window, wp, 0);
+	utf8_set(&gc.data, 'A');
+	grid_set_cell(wp->base.grid, 0, 0, &gc);
+	grid_scroll_history(wp->base.grid, 8);
+	utf8_set(&gc.data, 'B');
+	grid_set_cell(wp->base.grid, 0, 1, &gc);
+	grid_scroll_history(wp->base.grid, 8);
+	gc = grid_default_cell;
+	grid_set_tab(&gc, 1);
+	gc.attr = GRID_ATTR_OVERLINE | GRID_ATTR_STRIKETHROUGH | GRID_ATTR_BRIGHT;
+	gc.fg = COLOUR_FLAG_RGB | 0x123456;
+	gc.bg = COLOUR_FLAG_RGB | 0x6543ab;
+	grid_set_cell(wp->base.grid, 0, 2, &gc);
+	gc = grid_default_cell;
+	utf8_open(&gc.data, 0xe7);
+	utf8_append(&gc.data, 0x95);
+	utf8_append(&gc.data, 0x8c); /* 界 */
+	gc.attr = GRID_ATTR_STRIKETHROUGH | GRID_ATTR_REVERSE;
+	grid_set_cell(wp->base.grid, 1, 2, &gc);
+	grid_set_padding(wp->base.grid, 2, 2);
+	gc = grid_default_cell;
+	utf8_set(&gc.data, 0x1b);
+	grid_set_cell(wp->base.grid, 3, 2, &gc);
+	utf8_set(&gc.data, 0x7f);
+	grid_set_cell(wp->base.grid, 4, 2, &gc);
+	utf8_set(&gc.data, 0x00);
+	grid_set_cell(wp->base.grid, 5, 2, &gc);
+	utf8_set(&gc.data, 'X');
+	gc.attr = GRID_ATTR_UNDERSCORE_5 | GRID_ATTR_ITALICS;
+	gc.fg = COLOUR_FLAG_256 | 0xfe;
+	gc.bg = COLOUR_FLAG_256 | 0xab;
+	grid_set_cell(wp->base.grid, 6, 2, &gc);
+	wp->base.cx = 7;
+	wp->base.cy = 3;
+	capture_web_snapshot(&state, r, fragmented);
+	session_destroy(s, 0, __func__);
+	while (cmdq_next(NULL) != 0)
+		;
+	event_loop(EVLOOP_NONBLOCK);
+	destroy_pane(wp);
+
+	ASSERT_EQ(state.messages, 1);
+	ASSERT(state.arity_ok);
+	ASSERT_EQ(state.panes, 1);
+	ASSERT_EQ(state.id, id);
+	ASSERT_EQ(state.cx, 7);
+	ASSERT_EQ(state.cy, 3);
+	ASSERT_EQ(state.mode, mode);
+	ASSERT_EQ(state.rows, 24 + r);
+	if (r)
+		ASSERT(state.text[0][0] == 'B');
+	ASSERT(state.cells[r] >= 7);
+	ASSERT_EQ(state.length[r], state.cells[r] + 2);
+	/* UTF-8, padding sentinel and sanitized control bytes stay aligned. */
+	ASSERT(memcmp(state.text[r], " 界!   X", 9) == 0);
+	ASSERT_EQ(state.attrs[r][0], UINT32_C(0x8001ab56));
+	ASSERT_EQ(state.attrs[r][1], UINT32_C(0x00100808));
+	ASSERT_EQ(state.attrs[r][2], UINT32_C(0x04000808));
+	ASSERT_EQ(state.attrs[r][3], UINT32_C(0x00000808));
+	ASSERT_EQ(state.attrs[r][4], UINT32_C(0x00000808));
+	ASSERT_EQ(state.attrs[r][5], UINT32_C(0x00000808));
+	ASSERT_EQ(state.attrs[r][6], UINT32_C(0x0040abfe));
+}
+
+TEST(web_snapshot_fields_and_history)
+{
+	check_web_snapshot(0);
+}
+
+TEST(fragmented_web_snapshot_fields_without_history)
+{
+	check_web_snapshot(1);
+}
+
+TEST(empty_session_web_snapshot_is_complete)
+{
+	struct web_snapshot state = { 0 };
+	capture_web_snapshot(&state, 0, 1);
+	ASSERT_EQ(state.messages, 1);
+	ASSERT(state.arity_ok);
+	ASSERT_EQ(state.panes, 0);
+}
+
 static int host_exit;
 
 TEST(host_encoder_output_routes_without_feedback)
@@ -327,6 +508,9 @@ main(int argc, char **argv)
 		host_exit = strcmp(argv[1], "--host-exit") == 0;
 		RUN_TEST(host_encoder_output_routes_without_feedback);
 	} else {
+		RUN_TEST(web_snapshot_fields_and_history);
+		RUN_TEST(fragmented_web_snapshot_fields_without_history);
+		RUN_TEST(empty_session_web_snapshot_is_complete);
 		RUN_TEST(initial_and_repeated_output);
 		RUN_TEST(fragmented_v4_message);
 		RUN_TEST(unknown_pane_is_discarded);

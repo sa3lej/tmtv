@@ -1519,15 +1519,18 @@ static void do_snapshot(unsigned int max_history_lines,
 		pack(array, line->cellsize);
 		for (i = 0; i < line->cellsize; i++) {
 			grid_get_cell(grid, i, line_i, &gc);
-			pack(unsigned_int, ((gc.flags << 24) |
-					    (gc.attr  << 16) |
-					    (gc.bg    << 8)  |
-					     gc.fg        ));
+			/* Legacy fields are one byte each; high bits must not
+			 * corrupt neighbours. TAB's flag requires an unsigned shift.
+			 * Richer attributes/truecolour need protocol negotiation. */
+			pack(unsigned_int, (((uint32_t)gc.flags << 24) |
+				    ((uint32_t)(gc.attr & 0xff) << 16) |
+				    ((uint32_t)(gc.bg & 0xff) << 8) |
+				    (uint32_t)(gc.fg & 0xff)));
 		}
 	}
 }
 
-static void tmate_send_snapshot_ex(unsigned int max_history)
+void tmate_send_websocket_snapshot(unsigned int max_history)
 {
 	struct session *s;
 	struct winlink *wl;
@@ -1565,7 +1568,7 @@ static void tmate_send_snapshot_ex(unsigned int max_history)
 
 static void tmate_send_snapshot(void)
 {
-	tmate_send_snapshot_ex(TMATE_HLIMIT);
+	tmate_send_websocket_snapshot(TMATE_HLIMIT);
 }
 
 /* --- Viewer counting --- */
