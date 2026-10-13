@@ -474,3 +474,13 @@ tests/test-events: tests/test-events.o tests/test-window-tmux.o $(tmtv_OBJECTS) 
 
 CLEANFILES += tests/test-events tests/test-events.o
 EXTRA_DIST += tests/test-events.c
+
+# Exercise parsed commands and disconnect cancellation in the production queue.
+tests/test-cmd-queue.o: tests/test-cmd-queue.c tmux.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-cmd-queue.c -o $@
+
+tests/test-cmd-queue: tests/test-cmd-queue.o tests/test-window-tmux.o $(tmtv_OBJECTS) $(tmtv_DEPENDENCIES)
+	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-cmd-queue.o tests/test-window-tmux.o $(filter-out tmux.o,$(tmtv_OBJECTS)) $(tmtv_LDADD) $(LIBS)
+
+CLEANFILES += tests/test-cmd-queue tests/test-cmd-queue.o
+EXTRA_DIST += tests/test-cmd-queue.c

@@ -2877,6 +2877,7 @@ void cmdq_free(struct cmdq_list *);
 const char	 *cmdq_get_name(struct cmdq_item *);
 struct client	 *cmdq_get_client(struct cmdq_item *);
 struct client	 *cmdq_get_target_client(struct cmdq_item *);
+struct cmd *	  cmdq_get_cmd(struct cmdq_item *);
 struct cmdq_state *cmdq_get_state(struct cmdq_item *);
 struct cmd_find_state *cmdq_get_target(struct cmdq_item *);
 struct cmd_find_state *cmdq_get_source(struct cmdq_item *);

@@ -354,3 +354,30 @@ suite passed again. These checks do not establish notification/hook migration,
 client/session/winlink wrapper behavior, authenticated relay/viewer execution,
 floating protocol or macOS compatibility. Runtime remains 3.6a. This stage is
 local only, with no push, tag, release or deployment.
+
+## Command queue disconnect prerequisite
+
+The `cmdq_get_cmd` accessor and early `CLIENT_DEAD` rejection in
+`cmdq_fire_command` match pinned official 3.8 exactly. The guard runs before
+logging, target lookup, command execution and the fork's relay-forwarding
+branch. Existing tmtv routing remains in place. Hook/monitor integration and
+broader command-queue changes remain separate stages.
+
+Three cases in `tests/test-cmd-queue.c` link the complete production host,
+renaming only its entrypoint. They parse real `set-option` commands and drain
+production queues, verifying live-client/global execution, command identity,
+disconnect before execution, grouped cancellation, disconnect during queue
+draining, cleanup callbacks and balanced queue-held client references. Client
+fixtures own production queues and environments; no parser, execution,
+allocation or reference-cleanup stubs are used. Both disconnect cases failed
+before the guard because the commands still changed options.
+
+Both Linux SIXEL binaries build and all 192 standard tests pass. The three
+new cases also pass ASan/UBSan with leak detection, instrumenting
+`cmd-queue.c`, the test and renamed entrypoint; other host objects keep their
+normal build. Normal objects and binaries were restored, checked for absence
+of sanitizer symbols and the full suite passed again. These tests do not
+exercise actual transport disconnection, authenticated relay forwarding,
+viewers or macOS. Runtime remains 3.6a; floating protocol and stale wiring
+validation remain outstanding. This stage is local only, with no push, tag,
+release or deployment.

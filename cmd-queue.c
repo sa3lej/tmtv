@@ -150,6 +150,13 @@ cmdq_get_name(struct cmdq_item *item)
 	return (item->name);
 }
 
+/* Get item command. */
+struct cmd *
+cmdq_get_cmd(struct cmdq_item *item)
+{
+	return (item->cmd);
+}
+
 /* Get item client. */
 struct client *
 cmdq_get_client(struct cmdq_item *item)
@@ -609,6 +616,9 @@ cmdq_fire_command(struct cmdq_item *item)
 	struct cmd_find_state	*fsp, fs;
 	int			 flags, quiet = 0;
 	char			*tmp;
+
+	if (item->client != NULL && (item->client->flags & CLIENT_DEAD))
+		return (CMD_RETURN_ERROR);
 
 	if (cfg_finished)
 		cmdq_add_message(item);
