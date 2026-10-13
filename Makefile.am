@@ -176,7 +176,6 @@ dist_tmtv_SOURCES = \
 	menu.c \
 	mode-tree.c \
 	names.c \
-	notify.c \
 	options-table.c \
 	options.c \
 	paste.c \
@@ -333,7 +332,6 @@ dist_tmtv_server_SOURCES = \
 	menu.c \
 	mode-tree.c \
 	names.c \
-	notify.c \
 	options-table.c \
 	options.c \
 	paste.c \

@@ -437,7 +437,7 @@ window_set_name(struct window *w, const char *new_name)
 {
 	free(w->name);
 	utf8_stravis(&w->name, new_name, VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL);
-	notify_window("window-renamed", w);
+	events_fire_window("window-renamed", w);
 }
 
 void
@@ -534,13 +534,13 @@ window_pane_update_focus(struct window_pane *wp)
 			log_debug("%s: %%%u focus out", __func__, wp->id);
 			if (wp->base.mode & MODE_FOCUSON)
 				bufferevent_write(wp->event, "\033[O", 3);
-			notify_pane("pane-focus-out", wp);
+			events_fire_pane("pane-focus-out", wp);
 			wp->flags &= ~PANE_FOCUSED;
 		} else if (focused && (~wp->flags & PANE_FOCUSED)) {
 			log_debug("%s: %%%u focus in", __func__, wp->id);
 			if (wp->base.mode & MODE_FOCUSON)
 				bufferevent_write(wp->event, "\033[I", 3);
-			notify_pane("pane-focus-in", wp);
+			events_fire_pane("pane-focus-in", wp);
 			wp->flags |= PANE_FOCUSED;
 		} else
 			log_debug("%s: %%%u focus unchanged", __func__, wp->id);
@@ -573,7 +573,7 @@ window_set_active_pane(struct window *w, struct window_pane *wp, int notify)
 	tty_update_window_offset(w);
 
 	if (notify)
-		notify_window("window-pane-changed", w);
+		events_fire_window("window-pane-changed", w);
 	return (1);
 }
 
@@ -704,7 +704,7 @@ window_zoom(struct window_pane *wp)
 	w->saved_layout_root = w->layout_root;
 	layout_init(w, wp);
 	w->flags |= WINDOW_ZOOMED;
-	notify_window("window-layout-changed", w);
+	events_fire_window("window-layout-changed", w);
 
 	return (0);
 }
@@ -729,7 +729,7 @@ window_unzoom(struct window *w, int notify)
 	layout_fix_panes(w, NULL);
 
 	if (notify)
-		notify_window("window-layout-changed", w);
+		events_fire_window("window-layout-changed", w);
 
 	return (0);
 }
@@ -804,7 +804,7 @@ window_lost_pane(struct window *w, struct window_pane *wp)
 		if (w->active != NULL) {
 			window_pane_stack_remove(&w->last_panes, w->active);
 			w->active->flags |= PANE_CHANGED;
-			notify_window("window-pane-changed", w);
+			events_fire_window("window-pane-changed", w);
 			window_update_focus(w);
 		}
 	}
@@ -1197,7 +1197,7 @@ window_pane_set_mode(struct window_pane *wp, struct window_pane *swp,
 
 	server_redraw_window_borders(wp->window);
 	server_status_window(wp->window);
-	notify_pane("pane-mode-changed", wp);
+	events_fire_pane("pane-mode-changed", wp);
 
 	return (0);
 }
@@ -1233,7 +1233,7 @@ window_pane_reset_mode(struct window_pane *wp)
 
 	server_redraw_window_borders(wp->window);
 	server_status_window(wp->window);
-	notify_pane("pane-mode-changed", wp);
+	events_fire_pane("pane-mode-changed", wp);
 }
 
 void

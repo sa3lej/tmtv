@@ -35,7 +35,7 @@ drain(void)
 static enum cmd_retval
 fire_notification(struct cmdq_item *item, void *data)
 {
-	notify_hook(item, data);
+	hooks_run(item, data);
 	return (CMD_RETURN_NORMAL);
 }
 
@@ -125,7 +125,7 @@ TEST(deferred_notification_accounting)
 	o = options_set_string(global_s_options, "@deferred-hook", 0,
 	    "set-option -g @deferred-result yes");
 	current_time = 2468;
-	notify_window("@deferred-hook", w);
+	events_fire_window("@deferred-hook", w);
 	ASSERT_EQ(options_get_fire_count(o), 0);
 	drain();
 	ASSERT_EQ(options_get_fire_count(o), 1);

@@ -530,12 +530,12 @@ removal. Ordinary custom `set-hook @name` registers its event sink; `set-hook -E
 fires a payload with the resolved client/session/window/pane target. Event hook
 commands use their usual command-level format expansion, such as `set-option -F`.
 
-This bounded port retains numeric option arrays and the existing `set-hook -R`
-notification path. Built-in hook startup registration and notification caller
-replacement remain deferred. Fork option replication, recording toggles and
-command routing/read-only gates are unchanged. Existing helper branches for
-`-F` and `-o` remain upstream code, but this stage does not extend the pinned
-`set-hook` argument flags to expose them.
+This bounded port retains numeric option arrays. Fork option replication,
+recording toggles and command routing/read-only gates are unchanged. Existing
+helper branches for `-F` and `-o` remain upstream code, but this stage does not
+extend the pinned `set-hook` argument flags to expose them. Built-in hook
+startup registration and notification caller replacement moved to the next
+stage.
 
 Five added cases in `tests/test-monitor.c` use complete production-host linkage
 with only the tmux entrypoint renamed. Actual parser/queue execution and Unix
@@ -569,3 +569,23 @@ work; wider control I/O, full core/header reconciliation, floating panes/protoco
 security/feature E2E and supported-platform validation remain open. Both runtimes
 still report tmux 3.6a. This work is local only; remote pushes, tags, release,
 deployment and final release approval remain held.
+
+## Notification event sinks and startup hooks
+
+The pinned 3.8 notifier is now the production path. `hooks_build_events`
+registers sinks for every built-in hook option, `control_build_events`
+registers the 14 control notification sinks, and `server_start` wires both
+before session creation. The obsolete `notify.c` module is gone. The former
+direct notification calls now emit event payloads, including paste-buffer
+changes and deletions.
+
+`control-notify.c` follows the pinned event-payload callbacks. Its immediate
+outbound writer is deliberately a local interim shim to the existing control
+transport, so command reply guards preserve current tmtv semantics until
+guard-aware notification transport and reply backpressure are ported. Paste
+events are routed to `events_fire`, while `tmtv-ready` remains a fork event.
+No authenticated relay/viewer or macOS coverage is claimed. Broader control
+I/O, floating panes/protocol, full core/header reconciliation, supported
+platforms, stale wiring reconciliation and E2E viewer validation remain open.
+Both runtimes still report tmux 3.6a. This work is local only; remote pushes,
+tags, release and deployment remain held.

@@ -311,7 +311,7 @@ static void handle_ready(struct tmate_session *session,
 		if (s != NULL) {
 			if (!session->reconnected)
 				cfg_show_causes(s);
-			notify_session("tmtv-ready", s);
+			events_fire_session("tmtv-ready", s);
 		}
 	}
 }

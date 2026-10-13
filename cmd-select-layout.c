@@ -139,7 +139,7 @@ changed:
 	free(oldlayout);
 	recalculate_sizes();
 	server_redraw_window(w);
-	notify_window("window-layout-changed", w);
+	events_fire_window("window-layout-changed", w);
 	return (CMD_RETURN_NORMAL);
 
 error:

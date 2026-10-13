@@ -13,6 +13,7 @@ setup(void)
 
 	base = event_init();
 	TAILQ_INIT(&message_log);
+	TAILQ_INIT(&clients);
 	socket_path = xstrdup("/isolated-monitor-test");
 	global_environ = environ_create();
 	global_options = options_create(NULL);
@@ -92,6 +93,7 @@ start(struct fixture *f, struct session *s)
 	f->c.environ = environ_create();
 	setblocking(f->output[1], 0);
 	control_start(&f->c);
+	TAILQ_INSERT_TAIL(&clients, &f->c, entry);
 }
 
 static void
@@ -99,6 +101,7 @@ stop(struct fixture *f)
 {
 	control_stop(&f->c);
 	control_stop(&f->c); /* Pinned stop is safe after an earlier stop. */
+	TAILQ_REMOVE(&clients, &f->c, entry);
 	cmdq_free(f->c.queue);
 	environ_free(f->c.environ);
 	close(f->input[0]);
@@ -371,6 +374,37 @@ TEST(command_custom_event_executes_with_target_metadata)
 	drain();
 }
 
+TEST(built_in_startup_hooks_and_control_notices)
+{
+	struct window *w1, *w2;
+	struct window_pane *wp1, *wp2;
+	struct session *s1 = new_session(&w1, &wp1);
+	struct session *s2 = new_session(&w2, &wp2);
+	struct fixture f;
+	struct options_entry *o;
+
+	options_array_set(options_get_only(global_s_options, "session-created"),
+	    "0", "set-option -g @startup-hook yes", 0, NULL);
+	drain();
+	hooks_build_events();
+	control_build_events();
+	ASSERT(hooks_is_event("session-created"));
+	start(&f, s1);
+	events_fire_session("session-created", s1);
+	drain();
+	ASSERT_STR_EQ(output(&f), "%sessions-changed\n");
+	o = options_get_only(global_s_options, "session-created");
+	ASSERT_NOT_NULL(o);
+	ASSERT_EQ(options_get_fire_count(o), 1);
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@startup-hook"), "yes");
+	options_remove_or_default(o, NULL, NULL);
+	stop(&f);
+	session_destroy(s1, 0, __func__);
+	drain();
+	session_destroy(s2, 0, __func__);
+	drain();
+}
+
 TEST(session_hook_executes_changes_and_filters_false)
 {
 	struct window *w;
@@ -569,6 +603,7 @@ main(void)
 	RUN_TEST(command_monitor_validation_errors_preserve_ownership);
 	RUN_TEST(command_pane_window_scopes_and_legacy_numeric_hooks);
 	RUN_TEST(command_custom_event_executes_with_target_metadata);
+	RUN_TEST(built_in_startup_hooks_and_control_notices);
 	RUN_TEST(session_hook_executes_changes_and_filters_false);
 	RUN_TEST(replacement_inheritance_option_removal_and_free);
 	RUN_TEST(dead_session_retained_until_monitor_destroy);

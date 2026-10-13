@@ -2125,7 +2125,7 @@ input_csi_dispatch_winops(struct input_ctx *ictx)
 				screen_pop_title(sctx->s);
 				if (wp == NULL)
 					break;
-				notify_pane("pane-title-changed", wp);
+				events_fire_pane("pane-title-changed", wp);
 				server_redraw_window_borders(w);
 				server_status_window(w);
 				break;
@@ -2677,7 +2677,7 @@ input_exit_osc(struct input_ctx *ictx)
 		if (wp != NULL &&
 		    options_get_number(wp->options, "allow-set-title") &&
 		    screen_set_title(sctx->s, p)) {
-			notify_pane("pane-title-changed", wp);
+			events_fire_pane("pane-title-changed", wp);
 			server_redraw_window_borders(wp->window);
 			server_status_window(wp->window);
 		}
@@ -2755,7 +2755,7 @@ input_exit_apc(struct input_ctx *ictx)
 	if (wp != NULL &&
 	    options_get_number(wp->options, "allow-set-title") &&
 	    screen_set_title(sctx->s, ictx->input_buf)) {
-		notify_pane("pane-title-changed", wp);
+		events_fire_pane("pane-title-changed", wp);
 		server_redraw_window_borders(wp->window);
 		server_status_window(wp->window);
 	}
@@ -3172,7 +3172,7 @@ input_osc_52(struct input_ctx *ictx, const char *p)
 	screen_write_start_pane(&ctx, wp, NULL);
 	screen_write_setselection(&ctx, flags, out, outlen);
 	screen_write_stop(&ctx);
-	notify_pane("pane-set-clipboard", wp);
+	events_fire_pane("pane-set-clipboard", wp);
 
 	paste_add(NULL, out, outlen);
 }

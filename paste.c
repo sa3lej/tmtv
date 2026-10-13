@@ -60,6 +60,8 @@ static u_int	paste_num_automatic;
 static RB_HEAD(paste_name_tree, paste_buffer) paste_by_name;
 static RB_HEAD(paste_time_tree, paste_buffer) paste_by_time;
 
+static void paste_fire_event(const char *, const char *);
+
 static int	paste_cmp_names(const struct paste_buffer *,
 		    const struct paste_buffer *);
 RB_GENERATE_STATIC(paste_name_tree, paste_buffer, name_entry, paste_cmp_names);
@@ -82,6 +84,16 @@ paste_cmp_times(const struct paste_buffer *a, const struct paste_buffer *b)
 	if (a->order < b->order)
 		return (1);
 	return (0);
+}
+
+static void
+paste_fire_event(const char *name, const char *pbname)
+{
+	struct event_payload	*ep;
+
+	ep = event_payload_create();
+	event_payload_set_string(ep, "paste_buffer", "%s", pbname);
+	events_fire(name, ep);
 }
 
 /* Get paste buffer name. */
@@ -162,7 +174,7 @@ paste_get_name(const char *name)
 void
 paste_free(struct paste_buffer *pb)
 {
-	notify_paste_buffer(pb->name, 1);
+	paste_fire_event("paste-buffer-deleted", pb->name);
 
 	RB_REMOVE(paste_name_tree, &paste_by_name, pb);
 	RB_REMOVE(paste_time_tree, &paste_by_time, pb);
@@ -221,7 +233,7 @@ paste_add(const char *prefix, char *data, size_t size)
 	RB_INSERT(paste_name_tree, &paste_by_name, pb);
 	RB_INSERT(paste_time_tree, &paste_by_time, pb);
 
-	notify_paste_buffer(pb->name, 0);
+	paste_fire_event("paste-buffer-changed", pb->name);
 
 	/*
 	 * Shared clipboard: broadcast to remote side.
@@ -296,8 +308,8 @@ paste_rename(const char *oldname, const char *newname, char **cause)
 
 	RB_INSERT(paste_name_tree, &paste_by_name, pb);
 
-	notify_paste_buffer(oldname, 1);
-	notify_paste_buffer(newname, 0);
+	paste_fire_event("paste-buffer-deleted", oldname);
+	paste_fire_event("paste-buffer-changed", newname);
 
 	return (0);
 }
@@ -347,7 +359,7 @@ paste_set(char *data, size_t size, const char *name, char **cause)
 	RB_INSERT(paste_name_tree, &paste_by_name, pb);
 	RB_INSERT(paste_time_tree, &paste_by_time, pb);
 
-	notify_paste_buffer(name, 0);
+	paste_fire_event("paste-buffer-changed", name);
 
 	return (0);
 }
@@ -360,7 +372,7 @@ paste_replace(struct paste_buffer *pb, char *data, size_t size)
 	pb->data = data;
 	pb->size = size;
 
-	notify_paste_buffer(pb->name, 0);
+	paste_fire_event("paste-buffer-changed", pb->name);
 }
 
 /*

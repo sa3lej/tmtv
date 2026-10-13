@@ -414,7 +414,7 @@ server_client_set_session(struct client *c, struct session *s)
 		alerts_check_session(s);
 		tty_update_client_offset(c);
 		status_timer_start(c);
-		notify_client("client-session-changed", c);
+		events_fire_client("client-session-changed", c);
 		server_redraw_client(c);
 	}
 
@@ -455,7 +455,7 @@ server_client_lost(struct client *c)
 
 	if (c->flags & CLIENT_ATTACHED) {
 		server_client_attached_lost(c);
-		notify_client("client-detached", c);
+		events_fire_client("client-detached", c);
 	}
 
 	if (c->flags & CLIENT_CONTROL)
@@ -2318,7 +2318,7 @@ server_client_update_latest(struct client *c)
 	if (options_get_number(w->options, "window-size") == WINDOW_SIZE_LATEST)
 		recalculate_size(w, 0);
 
-	notify_client("client-active", c);
+	events_fire_client("client-active", c);
 }
 
 /* Get repeat time. */
@@ -3495,7 +3495,7 @@ server_client_dispatch(struct imsg *imsg, void *arg)
 			c->overlay_resize(c, c->overlay_data);
 		server_redraw_client(c);
 		if (c->session != NULL)
-			notify_client("client-resized", c);
+			events_fire_client("client-resized", c);
 		break;
 	case MSG_EXITING:
 		if (datalen != 0)
@@ -4088,10 +4088,10 @@ server_client_report_theme(struct client *c, enum client_theme theme)
 {
 	if (theme == THEME_LIGHT) {
 		c->theme = THEME_LIGHT;
-		notify_client("client-light-theme", c);
+		events_fire_client("client-light-theme", c);
 	} else {
 		c->theme = THEME_DARK;
-		notify_client("client-dark-theme", c);
+		events_fire_client("client-dark-theme", c);
 	}
 
 	/*

@@ -75,7 +75,7 @@ cmd_rename_session_exec(struct cmd *self, struct cmdq_item *item)
 	RB_INSERT(sessions, &sessions, s);
 
 	server_status_session(s);
-	notify_session("session-renamed", s);
+	events_fire_session("session-renamed", s);
 
 	return (CMD_RETURN_NORMAL);
 }

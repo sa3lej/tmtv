@@ -173,7 +173,7 @@ layout_set_even(struct window *w, enum layout_type type)
 	layout_print_cell(w->layout_root, __func__, 1);
 
 	window_resize(w, lc->sx, lc->sy, -1, -1);
-	notify_window("window-layout-changed", w);
+	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
 
@@ -283,7 +283,7 @@ layout_set_main_h(struct window *w)
 	layout_print_cell(w->layout_root, __func__, 1);
 
 	window_resize(w, lc->sx, lc->sy, -1, -1);
-	notify_window("window-layout-changed", w);
+	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
 
@@ -381,7 +381,7 @@ layout_set_main_h_mirrored(struct window *w)
 	layout_print_cell(w->layout_root, __func__, 1);
 
 	window_resize(w, lc->sx, lc->sy, -1, -1);
-	notify_window("window-layout-changed", w);
+	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
 
@@ -479,7 +479,7 @@ layout_set_main_v(struct window *w)
 	layout_print_cell(w->layout_root, __func__, 1);
 
 	window_resize(w, lc->sx, lc->sy, -1, -1);
-	notify_window("window-layout-changed", w);
+	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
 
@@ -577,7 +577,7 @@ layout_set_main_v_mirrored(struct window *w)
 	layout_print_cell(w->layout_root, __func__, 1);
 
 	window_resize(w, lc->sx, lc->sy, -1, -1);
-	notify_window("window-layout-changed", w);
+	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }
 
@@ -691,6 +691,6 @@ layout_set_tiled(struct window *w)
 	layout_print_cell(w->layout_root, __func__, 1);
 
 	window_resize(w, lc->sx, lc->sy, -1, -1);
-	notify_window("window-layout-changed", w);
+	events_fire_window("window-layout-changed", w);
 	server_redraw_window(w);
 }

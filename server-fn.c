@@ -268,8 +268,7 @@ server_link_window(struct session *src, struct winlink *srcwl,
 			 * Can't use session_detach as it will destroy session
 			 * if this makes it empty.
 			 */
-			notify_session_window("window-unlinked", dst,
-			    dstwl->window);
+			events_fire_winlink("window-unlinked", dstwl);
 			dstwl->flags &= ~WINLINK_ALERTFLAGS;
 			winlink_stack_remove(&dst->lastw, dstwl);
 			winlink_remove(&dst->windows, dstwl);
@@ -346,7 +345,7 @@ server_destroy_pane(struct window_pane *wp, int notify)
 
 		gettimeofday(&wp->dead_time, NULL);
 		if (notify)
-			notify_pane("pane-died", wp);
+			events_fire_pane("pane-died", wp);
 
 		s = options_get_string(wp->options, "remain-on-exit-format");
 		if (*s != '\0') {
@@ -369,7 +368,7 @@ server_destroy_pane(struct window_pane *wp, int notify)
 	}
 
 	if (notify)
-		notify_pane("pane-exited", wp);
+		events_fire_pane("pane-exited", wp);
 
 	server_unzoom_window(w);
 	server_client_remove_pane(wp);

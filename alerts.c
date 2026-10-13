@@ -205,7 +205,7 @@ alerts_check_bell(struct window *w)
 		}
 		if (!alerts_action_applies(wl, "bell-action"))
 			continue;
-		notify_winlink("alert-bell", wl);
+		events_fire_winlink("alert-bell", wl);
 
 		if (s->flags & SESSION_ALERTED)
 			continue;
@@ -241,7 +241,7 @@ alerts_check_activity(struct window *w)
 		}
 		if (!alerts_action_applies(wl, "activity-action"))
 			continue;
-		notify_winlink("alert-activity", wl);
+		events_fire_winlink("alert-activity", wl);
 
 		if (s->flags & SESSION_ALERTED)
 			continue;
@@ -277,7 +277,7 @@ alerts_check_silence(struct window *w)
 		}
 		if (!alerts_action_applies(wl, "silence-action"))
 			continue;
-		notify_winlink("alert-silence", wl);
+		events_fire_winlink("alert-silence", wl);
 
 		if (s->flags & SESSION_ALERTED)
 			continue;

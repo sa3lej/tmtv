@@ -2498,16 +2498,6 @@ struct window_pane *event_payload_get_pane(struct event_payload *,
 	     const char *);
 void	*event_payload_get_pointer(struct event_payload *, const char *);
 
-/* notify.c */
-void	notify_hook(struct cmdq_item *, const char *);
-void	notify_client(const char *, struct client *);
-void	notify_session(const char *, struct session *);
-void	notify_winlink(const char *, struct winlink *);
-void	notify_session_window(const char *, struct session *, struct window *);
-void	notify_window(const char *, struct window *);
-void	notify_pane(const char *, struct window_pane *);
-void	notify_paste_buffer(const char *, int);
-
 /* hooks.c */
 void	 hooks_add_event(const char *);
 int	 hooks_is_event(const char *);
@@ -3620,20 +3610,7 @@ void	control_add_sub(struct client *, const char *, enum monitor_type,
 void	control_remove_sub(struct client *, const char *);
 
 /* control-notify.c */
-void	control_notify_pane_mode_changed(int);
-void	control_notify_window_layout_changed(struct window *);
-void	control_notify_window_pane_changed(struct window *);
-void	control_notify_window_unlinked(struct session *, struct window *);
-void	control_notify_window_linked(struct session *, struct window *);
-void	control_notify_window_renamed(struct window *);
-void	control_notify_client_session_changed(struct client *);
-void	control_notify_client_detached(struct client *);
-void	control_notify_session_renamed(struct session *);
-void	control_notify_session_created(struct session *);
-void	control_notify_session_closed(struct session *);
-void	control_notify_session_window_changed(struct session *);
-void	control_notify_paste_buffer_changed(const char *);
-void	control_notify_paste_buffer_deleted(const char *);
+void	control_build_events(void);
 
 /* session.c */
 extern struct sessions sessions;
