@@ -177,5 +177,8 @@ mode-lifecycle:
 
 .PHONY: relay-copy-output
 relay-copy-output:
-	$(MAKE) -C .. tests/test-relay-copy-output
+	$(MAKE) -C .. tests/test-relay-copy-output tests/test-mode-lifecycle
 	./test-relay-copy-output
+	@set -eu; wire=$$(mktemp); trap 'rm -f "$$wire"' EXIT HUP INT TERM; \
+	    ./test-mode-lifecycle --emit-copy-output > "$$wire"; \
+	    ./test-relay-copy-output --host-output < "$$wire"

@@ -1,6 +1,7 @@
 /* Link the complete host. Test modes exercise the production lifecycle API. */
-#include "../tmux.h"
+#include "../tmate.h"
 #include "test-harness.h"
+#include <locale.h>
 
 static struct cmdq_item *seen_item;
 static struct cmd_find_state *seen_fs;
@@ -179,11 +180,60 @@ TEST(real_copy_clock_and_view_modes)
 	destroy_pane(wp);
 }
 
+static int
+output_equals(struct window_pane *wp, u_int line, const char *expected)
+{
+	struct window_mode_entry *wme = TAILQ_FIRST(&wp->modes);
+	struct screen *backing = wme->mode->get_screen(wme);
+	char *text = grid_string_cells(backing->grid, 0, line,
+	    screen_size_x(backing), NULL, 0, backing);
+	int result = strcmp(text, expected) == 0;
+	free(text);
+	return (result);
+}
+
+/* stdout contains only host-origin MessagePack, consumed by the relay test. */
+static int
+emit_copy_output(void)
+{
+	struct window_pane *first = create_pane(), *second = create_pane();
+	struct evbuffer *buffer;
+	unsigned char *bytes;
+	size_t size;
+	int result;
+
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	buffer = tmate_session.encoder.buffer;
+	window_pane_set_mode(first, NULL, &window_view_mode, NULL, NULL, NULL);
+	window_pane_set_mode(second, NULL, &window_view_mode, NULL, NULL, NULL);
+	/* Parsed output has different semantics and must not use this opcode. */
+	window_copy_add(first, 1, "%s", "parsed output");
+	result = evbuffer_get_length(buffer) != 0;
+	window_pane_reset_mode_all(first);
+	window_pane_set_mode(first, NULL, &window_view_mode, NULL, NULL, NULL);
+	window_copy_add(first, 0, "%s %d", "literal %s", 38);
+	window_copy_add(second, 0, "%s", "other pane");
+	window_copy_add(first, 0, "%s", "second ⚡");
+	size = evbuffer_get_length(buffer);
+	bytes = evbuffer_pullup(buffer, -1);
+	result |= !output_equals(first, 0, "literal %s 38") ||
+	    !output_equals(first, 1, "second ⚡") ||
+	    !output_equals(second, 0, "other pane");
+	result |= size == 0 || fwrite(bytes, 1, size, stdout) != size;
+	tmate_encoder_destroy(&tmate_session.encoder);
+	tmate_session.encoder.buffer = NULL;
+	destroy_pane(second);
+	destroy_pane(first);
+	return (result);
+}
+
 int
-main(void)
+main(int argc, char **argv)
 {
 	const struct options_table_entry *oe;
-	event_init();
+	if (setlocale(LC_CTYPE, "C.UTF-8") == NULL)
+		setlocale(LC_CTYPE, "en_US.UTF-8");
+	tmate_session.ev_base = event_init();
 	global_environ = environ_create();
 	global_options = options_create(NULL);
 	global_s_options = options_create(NULL);
@@ -195,6 +245,14 @@ main(void)
 			options_default(global_s_options, oe);
 		if (oe->scope & OPTIONS_TABLE_WINDOW)
 			options_default(global_w_options, oe);
+	}
+	if (argc == 2 && strcmp(argv[1], "--emit-copy-output") == 0) {
+		int result = emit_copy_output();
+		options_free(global_w_options);
+		options_free(global_s_options);
+		options_free(global_options);
+		environ_free(global_environ);
+		return (result);
 	}
 	TEST_SUITE_BEGIN("Production mode lifecycle");
 	RUN_TEST(context_and_duplicate_entry);

@@ -2,6 +2,7 @@
 #include "../server/tmate.h"
 #include "../server/tmate-protocol.h"
 #include "test-harness.h"
+#include <locale.h>
 
 static int dispatched;
 
@@ -159,10 +160,43 @@ TEST(existing_view_mode_is_resumed)
 	destroy_pane(wp);
 }
 
+TEST(host_encoder_output_routes_without_feedback)
+{
+	struct window_pane *first = create_pane(), *second = create_pane();
+	struct tmate_decoder decoder;
+	char *buf;
+	size_t capacity;
+	int ch, before = dispatched;
+
+	window_pane_set_mode(first, NULL, &window_clock_mode, NULL, NULL, NULL);
+	tmate_decoder_init(&decoder, read_message, NULL);
+	/* Exercise every streaming boundary using the actual host encoder bytes. */
+	while ((ch = getchar()) != EOF) {
+		tmate_decoder_get_buffer(&decoder, &buf, &capacity);
+		ASSERT(capacity > 0);
+		*buf = ch;
+		tmate_decoder_commit(&decoder, 1);
+	}
+	ASSERT(!ferror(stdin));
+	ASSERT_EQ(dispatched, before + 3);
+	ASSERT(TAILQ_FIRST(&first->modes)->mode == &window_view_mode);
+	ASSERT(line_equals(first, 0, "literal %s 38"));
+	ASSERT(line_equals(first, 1, "second ⚡"));
+	ASSERT(line_equals(second, 0, "other pane"));
+	window_pane_reset_mode(first);
+	ASSERT(TAILQ_FIRST(&first->modes)->mode == &window_clock_mode);
+	/* No host encoder is initialized in this relay process: feedback crashes. */
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	destroy_pane(second);
+	destroy_pane(first);
+}
+
 int
-main(void)
+main(int argc, char **argv)
 {
 	const struct options_table_entry *oe;
+	if (setlocale(LC_CTYPE, "C.UTF-8") == NULL)
+		setlocale(LC_CTYPE, "en_US.UTF-8");
 	event_init();
 	global_environ = environ_create();
 	global_options = options_create(NULL);
@@ -177,12 +211,16 @@ main(void)
 			options_default(global_w_options, oe);
 	}
 	TEST_SUITE_BEGIN("Production relay copy output");
-	RUN_TEST(initial_and_repeated_output);
-	RUN_TEST(fragmented_v4_message);
-	RUN_TEST(unknown_pane_is_discarded);
-	RUN_TEST(active_clock_mode_is_preserved_under_output);
-	RUN_TEST(active_copy_mode_has_separate_backing);
-	RUN_TEST(existing_view_mode_is_resumed);
+	if (argc == 2 && strcmp(argv[1], "--host-output") == 0) {
+		RUN_TEST(host_encoder_output_routes_without_feedback);
+	} else {
+		RUN_TEST(initial_and_repeated_output);
+		RUN_TEST(fragmented_v4_message);
+		RUN_TEST(unknown_pane_is_discarded);
+		RUN_TEST(active_clock_mode_is_preserved_under_output);
+		RUN_TEST(active_copy_mode_has_separate_backing);
+		RUN_TEST(existing_view_mode_is_resumed);
+	}
 	options_free(global_w_options);
 	options_free(global_s_options);
 	options_free(global_options);

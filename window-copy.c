@@ -25,6 +25,9 @@
 #include <time.h>
 
 #include "tmux.h"
+#ifndef TMATE_SERVER_BUILD
+#include "tmate.h"
+#endif
 
 struct window_copy_mode_data;
 
@@ -577,6 +580,19 @@ window_copy_vadd(struct window_pane *wp, int parse, const char *fmt, va_list ap)
 		}
 	} else {
 		memcpy(&gc, &grid_default_cell, sizeof gc);
+#ifndef TMATE_SERVER_BUILD
+		/* The legacy wire operation carries literal view output only. */
+		if (wme->mode == &window_view_mode &&
+		    tmate_session.encoder.buffer != NULL) {
+			va_list copy;
+
+			va_copy(copy, ap);
+			xvasprintf(&text, fmt, copy);
+			va_end(copy);
+			tmate_write_copy_mode(&tmate_session, wp, text);
+			free(text);
+		}
+#endif
 		screen_write_vnputs(&backing_ctx, 0, &gc, fmt, ap);
 	}
 	screen_write_stop(&backing_ctx);
