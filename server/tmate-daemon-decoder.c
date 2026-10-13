@@ -838,19 +838,172 @@ static void tmate_reconnect(__unused struct tmate_session *session,
 		tmate_fatal("Cannot do reconnections without the websocket server");
 }
 
-static void tmate_snapshot(__unused struct tmate_session *session,
-			   __unused struct tmate_unpacker *uk)
+/* Legacy snapshot integers are unsigned fields, never narrowed before checks. */
+static int
+snapshot_uint(msgpack_object obj, u_int *value)
 {
-	/*
-	 * Snapshot restore is not needed — the server builds its own
-	 * grid from PTY data, and SSE clients get screen dumps directly.
-	 * Skip to avoid format mismatches between client/server.
-	 *
-	 * The former restore_snapshot_pane()/restore_snapshot_grid() helpers
-	 * were removed: they were unreachable (this handler never called them)
-	 * and indexed utf8_data[] by an attacker-controlled flag count, an
-	 * out-of-bounds read waiting to be re-wired.
-	 */
+	if (obj.type != MSGPACK_OBJECT_POSITIVE_INTEGER || obj.via.u64 > UINT_MAX)
+		return (0);
+	*value = obj.via.u64;
+	return (1);
+}
+
+/*
+ * Decode into an independent grid. The legacy wire has no cell byte lengths,
+ * dimensions or line flags. Accept only unambiguous scalar cells and compact
+ * padding sentinels; combined glyphs and multi-column tabs need the negotiated
+ * format. Never guess boundaries and shift subsequent styles onto other cells.
+ */
+static struct grid *
+snapshot_grid(msgpack_object obj, struct grid *current, u_int *cx, u_int *cy,
+    int saved)
+{
+	struct grid *gd = NULL;
+	struct grid_cell gc;
+	msgpack_object *screen, *rows, *row, *styles;
+	const u_char *bytes;
+	size_t offset, length;
+	u_int lines, cells, x, y, packed, padding;
+	enum utf8_state state;
+
+	if (obj.type != MSGPACK_OBJECT_ARRAY || obj.via.array.size != 3)
+		return (NULL);
+	screen = obj.via.array.ptr;
+	if (!snapshot_uint(screen[0], cx) || !snapshot_uint(screen[1], cy) ||
+	    screen[2].type != MSGPACK_OBJECT_ARRAY)
+		return (NULL);
+	/* cx == sx is the legitimate pending-wrap cursor position. */
+	if (!(saved && *cx == UINT_MAX && *cy == UINT_MAX) &&
+	    (*cx > current->sx || *cy >= current->sy))
+		return (NULL);
+	lines = screen[2].via.array.size;
+	if (current->sx == 0 || current->sy == 0 || lines < current->sy ||
+	    lines - current->sy > TMATE_HLIMIT ||
+	    (saved && lines != current->sy))
+		return (NULL);
+	gd = grid_create(current->sx, lines, saved ? 0 : current->hlimit);
+	gd->sy = current->sy;
+	gd->hsize = lines - gd->sy;
+	rows = screen[2].via.array.ptr;
+	for (y = 0; y < lines; y++) {
+		if (rows[y].type != MSGPACK_OBJECT_ARRAY || rows[y].via.array.size != 2)
+			goto invalid;
+		row = rows[y].via.array.ptr;
+		if ((row[0].type != MSGPACK_OBJECT_STR && row[0].type != MSGPACK_OBJECT_BIN) ||
+		    row[1].type != MSGPACK_OBJECT_ARRAY)
+			goto invalid;
+		bytes = (const u_char *)row[0].via.str.ptr;
+		length = row[0].via.str.size;
+		cells = row[1].via.array.size;
+		if (cells > gd->sx)
+			goto invalid;
+		styles = row[1].via.array.ptr;
+		offset = padding = 0;
+		for (x = 0; x < cells; x++) {
+			if (!snapshot_uint(styles[x], &packed) || offset == length)
+				goto invalid;
+			gc = grid_default_cell;
+			gc.flags = (packed >> 24) & ~GRID_FLAG_EXTENDED;
+			gc.attr = (packed >> 16) & 0xff;
+			gc.bg = (packed >> 8) & 0xff;
+			gc.fg = packed & 0xff;
+			if (gc.flags & GRID_FLAG_FG256)
+				gc.fg |= COLOUR_FLAG_256;
+			if (gc.flags & GRID_FLAG_BG256)
+				gc.bg |= COLOUR_FLAG_256;
+			if (gc.flags & GRID_FLAG_PADDING) {
+				if (padding == 0 || bytes[offset++] != '!' ||
+				    (gc.flags & GRID_FLAG_TAB))
+					goto invalid;
+				padding--;
+				grid_set_padding(gd, x, y);
+				continue;
+			}
+			if (padding != 0)
+				goto invalid;
+			if (bytes[offset] < 0x80) {
+				if (bytes[offset] < 0x20 || bytes[offset] == 0x7f)
+					goto invalid;
+				utf8_set(&gc.data, bytes[offset++]);
+			} else {
+				state = utf8_open(&gc.data, bytes[offset++]);
+				while (state == UTF8_MORE && offset < length)
+					state = utf8_append(&gc.data, bytes[offset++]);
+				if (state != UTF8_DONE || gc.data.width == 0)
+					goto invalid;
+			}
+			if (gc.flags & GRID_FLAG_TAB) {
+				/* A one-column tab is the only unambiguous legacy tab. */
+				if (gc.data.size != 1 || gc.data.data[0] != ' ' ||
+				    (x + 1 < cells && styles[x + 1].type == MSGPACK_OBJECT_POSITIVE_INTEGER &&
+				    (styles[x + 1].via.u64 & ((uint64_t)GRID_FLAG_PADDING << 24))))
+					goto invalid;
+				grid_set_tab(&gc, 1);
+			}
+			padding = gc.data.width - 1;
+			if (padding > cells - x - 1)
+				goto invalid;
+			grid_set_cell(gd, x, y, &gc);
+		}
+		if (offset != length || padding != 0)
+			goto invalid;
+	}
+	return (gd);
+invalid:
+	grid_destroy(gd);
+	return (NULL);
+}
+
+static void tmate_snapshot(__unused struct tmate_session *session,
+			   struct tmate_unpacker *uk)
+{
+	msgpack_object *panes, *pane;
+	struct window_pane *wp;
+	struct screen *s;
+	struct grid *base, *saved;
+	u_int i, id, mode, cx, cy, saved_cx, saved_cy;
+
+	if (uk->argc != 1 || uk->argv[0].type != MSGPACK_OBJECT_ARRAY)
+		return;
+	panes = uk->argv[0].via.array.ptr;
+	for (i = 0; i < uk->argv[0].via.array.size; i++) {
+		if (panes[i].type != MSGPACK_OBJECT_ARRAY || panes[i].via.array.size != 4)
+			continue;
+		pane = panes[i].via.array.ptr;
+		if (!snapshot_uint(pane[0], &id) || !snapshot_uint(pane[1], &mode) ||
+		    mode > INT_MAX || (wp = window_pane_find_by_id(id)) == NULL)
+			continue;
+		s = &wp->base;
+		base = snapshot_grid(pane[2], s->grid, &cx, &cy, 0);
+		if (base == NULL)
+			continue;
+		saved = NULL;
+		saved_cx = saved_cy = UINT_MAX;
+		if (pane[3].type != MSGPACK_OBJECT_NIL) {
+			saved = snapshot_grid(pane[3], s->grid, &saved_cx, &saved_cy, 1);
+			if (saved == NULL) {
+				grid_destroy(base);
+				continue;
+			}
+		}
+		/* Both grids are valid before any pane-owned state is replaced. */
+		base->flags = s->saved_grid != NULL ? s->saved_flags : s->grid->flags;
+		s->saved_flags = base->flags;
+		if (saved != NULL)
+			base->flags &= ~GRID_HISTORY;
+		grid_destroy(s->grid);
+		if (s->saved_grid != NULL)
+			grid_destroy(s->saved_grid);
+		s->grid = base;
+		s->saved_grid = saved;
+		s->cx = cx;
+		s->cy = cy;
+		s->saved_cx = saved_cx;
+		s->saved_cy = saved_cy;
+		s->mode = mode;
+		/* Copy/view modes own cloned backing grids; never replace their data. */
+		wp->flags |= PANE_REDRAW;
+	}
 }
 
 /*

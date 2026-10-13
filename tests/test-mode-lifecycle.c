@@ -485,6 +485,87 @@ emit_copy_output(int exit_mode)
 	return (result);
 }
 
+static void
+emit_snapshot_message(void *userdata, struct tmate_unpacker *uk)
+{
+	msgpack_packer *pk = userdata;
+	int i;
+	if (uk->argc == 0 || uk->argv[0].via.i64 != TMATE_OUT_SNAPSHOT)
+		return;
+	msgpack_pack_array(pk, uk->argc);
+	for (i = 0; i < uk->argc; i++)
+		msgpack_pack_object(pk, uk->argv[i]);
+}
+
+/* Filter the actual reconnect stream, preserving the entire snapshot object. */
+static int
+emit_reconnect_snapshot(void)
+{
+	struct window_pane *first = create_pane(), *second = create_pane();
+	struct session *s;
+	struct winlink *wl;
+	struct grid_cell gc = grid_default_cell;
+	struct tmate_decoder decoder;
+	msgpack_sbuffer sb;
+	msgpack_packer pk;
+	int result;
+
+	s = session_create(NULL, "restore-grids", "/", environ_create(),
+	    options_create(global_s_options), NULL);
+	wl = winlink_add(&s->windows, 0);
+	wl->session = s;
+	winlink_set_window(wl, first->window);
+	s->curw = wl;
+	wl = winlink_add(&s->windows, 1);
+	wl->session = s;
+	winlink_set_window(wl, second->window);
+	grid_destroy(first->base.grid);
+	first->base.grid = grid_create(80, 25, 100);
+	first->base.grid->sy = 24;
+	first->base.grid->hsize = 1;
+	utf8_set(&gc.data, 'H');
+	grid_set_cell(first->base.grid, 0, 0, &gc);
+	grid_set_tab(&gc, 1);
+	gc.attr = GRID_ATTR_BRIGHT;
+	grid_set_cell(first->base.grid, 0, 1, &gc);
+	gc = grid_default_cell;
+	utf8_open(&gc.data, 0xe7);
+	utf8_append(&gc.data, 0x95);
+	utf8_append(&gc.data, 0x8c);
+	gc.attr = GRID_ATTR_REVERSE;
+	grid_set_cell(first->base.grid, 1, 1, &gc);
+	grid_set_padding(first->base.grid, 2, 1);
+	first->base.cx = 80;
+	first->base.cy = 3;
+	first->base.saved_grid = grid_create(80, 24, 0);
+	gc = grid_default_cell;
+	utf8_set(&gc.data, 'S');
+	grid_set_cell(first->base.saved_grid, 0, 0, &gc);
+	first->base.saved_cx = 5;
+	first->base.saved_cy = 2;
+	gc = grid_default_cell;
+	utf8_set(&gc.data, 'B');
+	grid_set_cell(second->base.grid, 0, 0, &gc);
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	tmate_send_reconnection_state(&tmate_session);
+	msgpack_sbuffer_init(&sb);
+	msgpack_packer_init(&pk, &sb, msgpack_sbuffer_write);
+	tmate_decoder_init(&decoder, emit_snapshot_message, &pk);
+	decode_reconnect_buffer(&decoder, 1);
+	result = sb.size == 0 || fwrite(sb.data, 1, sb.size, stdout) != sb.size;
+	msgpack_sbuffer_destroy(&sb);
+	tmate_decoder_destroy(&decoder);
+	tmate_encoder_destroy(&tmate_session.encoder);
+	tmate_session.encoder.buffer = NULL;
+	session_destroy(s, 0, __func__);
+	while (cmdq_next(NULL) != 0)
+		;
+	event_loop(EVLOOP_NONBLOCK);
+	destroy_pane(second);
+	destroy_pane(first);
+	return (result);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -505,8 +586,11 @@ main(int argc, char **argv)
 			options_default(global_w_options, oe);
 	}
 	if (argc == 2 && (strcmp(argv[1], "--emit-copy-output") == 0 ||
-	    strcmp(argv[1], "--emit-copy-exit") == 0)) {
-		int result = emit_copy_output(strcmp(argv[1], "--emit-copy-exit") == 0);
+	    strcmp(argv[1], "--emit-copy-exit") == 0 ||
+	    strcmp(argv[1], "--emit-snapshot") == 0)) {
+		int result = strcmp(argv[1], "--emit-snapshot") == 0 ?
+		    emit_reconnect_snapshot() :
+		    emit_copy_output(strcmp(argv[1], "--emit-copy-exit") == 0);
 		options_free(global_w_options);
 		options_free(global_s_options);
 		options_free(global_options);

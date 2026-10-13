@@ -447,6 +447,209 @@ TEST(empty_session_web_snapshot_is_complete)
 	ASSERT_EQ(state.panes, 0);
 }
 
+static int snapshot_bulk;
+
+TEST(host_snapshot_restores_grids_without_mutating_mode_backing)
+{
+	struct window_pane *first = create_pane(), *second = create_pane();
+	struct window_mode_entry *copy;
+	struct screen *backing;
+	struct grid *old_backing;
+	struct args *args = args_create();
+	struct grid_cell gc = grid_default_cell;
+	struct tmate_decoder decoder;
+	char *buf;
+	size_t capacity, count;
+	int ch, before = dispatched;
+
+	utf8_set(&gc.data, 'C');
+	grid_set_cell(first->base.grid, 0, 0, &gc);
+	window_pane_set_mode(first, first, &window_copy_mode, NULL, NULL, args);
+	copy = TAILQ_FIRST(&first->modes);
+	backing = copy->mode->get_screen(copy);
+	old_backing = backing->grid;
+	/* An existing alternate grid must be replaced/cleared without leaking. */
+	first->base.saved_grid = grid_create(80, 24, 0);
+	first->base.saved_flags = GRID_HISTORY;
+	second->base.saved_grid = grid_create(80, 24, 0);
+	second->base.saved_flags = GRID_HISTORY;
+	tmate_decoder_init(&decoder, read_message, NULL);
+	if (snapshot_bulk) {
+		do {
+			tmate_decoder_get_buffer(&decoder, &buf, &capacity);
+			count = fread(buf, 1, capacity, stdin);
+			tmate_decoder_commit(&decoder, count);
+		} while (count != 0);
+	} else {
+		while ((ch = getchar()) != EOF) {
+			tmate_decoder_get_buffer(&decoder, &buf, &capacity);
+			ASSERT(capacity > 0);
+			*buf = ch;
+			tmate_decoder_commit(&decoder, 1);
+		}
+	}
+	ASSERT(!ferror(stdin));
+	ASSERT_EQ(dispatched, before + 1);
+	ASSERT_EQ(first->base.cx, 80);
+	ASSERT_EQ(first->base.cy, 3);
+	ASSERT_EQ(first->base.grid->hsize, 1);
+	ASSERT_EQ(first->base.saved_cx, 5);
+	ASSERT_EQ(first->base.saved_cy, 2);
+	ASSERT(first->base.saved_grid != NULL);
+	ASSERT(!(first->base.grid->flags & GRID_HISTORY));
+	ASSERT(first->base.saved_flags & GRID_HISTORY);
+	grid_get_cell(first->base.grid, 0, 0, &gc);
+	ASSERT_EQ(gc.data.data[0], 'H');
+	grid_get_cell(first->base.grid, 0, 1, &gc);
+	ASSERT(gc.flags & GRID_FLAG_TAB);
+	ASSERT_EQ(gc.data.width, 1);
+	ASSERT_EQ(gc.attr, GRID_ATTR_BRIGHT);
+	grid_get_cell(first->base.grid, 1, 1, &gc);
+	ASSERT_EQ(gc.data.width, 2);
+	ASSERT_EQ(gc.attr, GRID_ATTR_REVERSE);
+	ASSERT(memcmp(gc.data.data, "界", 3) == 0);
+	grid_get_cell(first->base.grid, 2, 1, &gc);
+	ASSERT(gc.flags & GRID_FLAG_PADDING);
+	grid_get_cell(first->base.saved_grid, 0, 0, &gc);
+	ASSERT_EQ(gc.data.data[0], 'S');
+	ASSERT(second->base.saved_grid == NULL);
+	ASSERT(second->base.grid->flags & GRID_HISTORY);
+	grid_get_cell(second->base.grid, 0, 0, &gc);
+	ASSERT_EQ(gc.data.data[0], 'B');
+	ASSERT(TAILQ_FIRST(&first->modes) == copy);
+	ASSERT(backing->grid == old_backing);
+	grid_get_cell(backing->grid, 0, 0, &gc);
+	ASSERT_EQ(gc.data.data[0], 'C');
+	ASSERT(first->screen == copy->screen);
+	ASSERT(first->flags & PANE_REDRAW);
+	window_pane_reset_mode(first);
+	args_free(args);
+	ASSERT(first->screen == &first->base);
+	/* Restored alternate state must work through production screen lifecycle. */
+	screen_alternate_off(&first->base, NULL, 1);
+	ASSERT(first->base.saved_grid == NULL);
+	ASSERT_EQ(first->base.cx, 5);
+	ASSERT_EQ(first->base.cy, 2);
+	ASSERT(first->base.grid->flags & GRID_HISTORY);
+	grid_get_cell(first->base.grid, 0, first->base.grid->hsize, &gc);
+	ASSERT_EQ(gc.data.data[0], 'S');
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	destroy_pane(second);
+	destroy_pane(first);
+}
+
+/* Each malformed candidate is followed by valid output on the same stream. */
+static void
+invalid_snapshot(struct window_pane *wp, int variant)
+{
+	msgpack_sbuffer sb;
+	msgpack_packer pk;
+	struct tmate_decoder decoder;
+	char *buf;
+	size_t capacity, offset;
+	int y, j, cells;
+	int lines = variant == 14 ? 2025 : variant == 4 ? 23 : 24;
+	char oversize[82];
+	const char *text = variant == 6 ? "\xe7\x95" :
+	    variant == 7 ? "界!" : variant == 8 ? "\033" :
+	    variant == 9 ? "e\xcc\x81" : variant == 16 ? "!" :
+	    variant == 17 ? "  !" : variant == 18 ? "\xc0\xaf" :
+	    variant == 19 ? "界" : variant == 23 ? "AB" : "A";
+
+	memset(oversize, 'A', 81);
+	oversize[81] = '\0';
+	if (variant == 15)
+		text = oversize;
+	msgpack_sbuffer_init(&sb);
+	msgpack_packer_init(&pk, &sb, msgpack_sbuffer_write);
+	msgpack_pack_array(&pk, 2);
+	msgpack_pack_int(&pk, TMATE_OUT_SNAPSHOT);
+	msgpack_pack_array(&pk, 1);
+	msgpack_pack_array(&pk, variant == 12 ? 3 : 4);
+	msgpack_pack_int64(&pk, variant == 0 ? (int64_t)UINT_MAX + 1 + wp->id :
+	    variant == 1 ? (int64_t)wp->id - ((int64_t)UINT_MAX + 1) : wp->id);
+	msgpack_pack_uint64(&pk, variant == 13 ? UINT64_MAX : MODE_CURSOR);
+	if (variant == 20)
+		msgpack_pack_nil(&pk); /* invalid base screen type */
+	else {
+		msgpack_pack_array(&pk, 3);
+		msgpack_pack_int64(&pk, variant == 2 ? 81 : variant == 22 ? -1 : 0);
+		msgpack_pack_int(&pk, variant == 3 ? 24 : 0);
+		msgpack_pack_array(&pk, lines);
+		for (y = 0; y < lines; y++) {
+			msgpack_pack_array(&pk, 2);
+			msgpack_pack_str(&pk, y == 0 ? strlen(text) : 0);
+			if (y == 0)
+				msgpack_pack_str_body(&pk, text, strlen(text));
+			cells = y != 0 ? 0 : variant == 15 ? 81 :
+			    variant == 5 || variant == 7 || variant == 17 || variant == 19 ? 2 : 1;
+			msgpack_pack_array(&pk, cells);
+			if (y == 0) {
+				if (variant == 21)
+					msgpack_pack_int(&pk, -1);
+				else
+					msgpack_pack_uint64(&pk, variant == 10 ? UINT64_MAX :
+					    variant == 16 ? 0x04000808 : variant == 17 ? 0x80000808 : 0x00000808);
+				if (variant == 15) {
+					for (j = 1; j < cells; j++)
+						msgpack_pack_uint32(&pk, 0x00000808);
+				}
+				if (variant == 5 || variant == 7 || variant == 17 || variant == 19)
+					msgpack_pack_uint32(&pk, variant == 17 || variant == 19 ? 0x04000808 : 0x00000808);
+			}
+		}
+	}
+	if (variant != 12) {
+		if (variant == 11)
+			msgpack_pack_int(&pk, 0); /* valid base, invalid saved grid */
+		else
+			msgpack_pack_nil(&pk);
+	}
+	msgpack_pack_array(&pk, 3);
+	msgpack_pack_int(&pk, TMATE_OUT_WRITE_COPY_MODE);
+	msgpack_pack_uint32(&pk, wp->id);
+	msgpack_pack_str(&pk, 5);
+	msgpack_pack_str_body(&pk, "after", 5);
+	tmate_decoder_init(&decoder, read_message, NULL);
+	for (offset = 0; offset < sb.size; offset++) {
+		tmate_decoder_get_buffer(&decoder, &buf, &capacity);
+		*buf = sb.data[offset];
+		tmate_decoder_commit(&decoder, 1);
+	}
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	msgpack_sbuffer_destroy(&sb);
+}
+
+TEST(malformed_snapshot_preserves_both_grids_and_message_boundaries)
+{
+	int variant, before;
+	struct window_pane *wp;
+	struct grid *base, *saved;
+	struct grid_cell gc = grid_default_cell;
+
+	for (variant = 0; variant < 24; variant++) {
+		wp = create_pane();
+		utf8_set(&gc.data, 'P');
+		grid_set_cell(wp->base.grid, 0, 0, &gc);
+		wp->base.cx = 4;
+		wp->base.cy = 3;
+		wp->base.saved_grid = grid_create(80, 24, 0);
+		base = wp->base.grid;
+		saved = wp->base.saved_grid;
+		before = dispatched;
+		invalid_snapshot(wp, variant);
+		ASSERT_EQ(dispatched, before + 2);
+		ASSERT(wp->base.grid == base);
+		ASSERT(wp->base.saved_grid == saved);
+		ASSERT_EQ(wp->base.cx, 4);
+		ASSERT_EQ(wp->base.cy, 3);
+		grid_get_cell(base, 0, 0, &gc);
+		ASSERT_EQ(gc.data.data[0], 'P');
+		ASSERT(line_equals(wp, 0, "after"));
+		destroy_pane(wp);
+	}
+}
+
 static int host_exit;
 
 TEST(host_encoder_output_routes_without_feedback)
@@ -503,11 +706,16 @@ main(int argc, char **argv)
 			options_default(global_w_options, oe);
 	}
 	TEST_SUITE_BEGIN("Production relay copy output");
-	if (argc == 2 && (strcmp(argv[1], "--host-output") == 0 ||
+	if (argc == 2 && (strcmp(argv[1], "--host-snapshot") == 0 ||
+	    strcmp(argv[1], "--host-snapshot-bulk") == 0)) {
+		snapshot_bulk = strcmp(argv[1], "--host-snapshot-bulk") == 0;
+		RUN_TEST(host_snapshot_restores_grids_without_mutating_mode_backing);
+	} else if (argc == 2 && (strcmp(argv[1], "--host-output") == 0 ||
 	    strcmp(argv[1], "--host-exit") == 0)) {
 		host_exit = strcmp(argv[1], "--host-exit") == 0;
 		RUN_TEST(host_encoder_output_routes_without_feedback);
 	} else {
+		RUN_TEST(malformed_snapshot_preserves_both_grids_and_message_boundaries);
 		RUN_TEST(web_snapshot_fields_and_history);
 		RUN_TEST(fragmented_web_snapshot_fields_without_history);
 		RUN_TEST(empty_session_web_snapshot_is_complete);
