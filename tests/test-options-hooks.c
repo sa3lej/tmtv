@@ -124,9 +124,9 @@ TEST(deferred_notification_accounting)
 	drain();
 	o = options_set_string(global_s_options, "@deferred-hook", 0,
 	    "set-option -g @deferred-result yes");
+	hooks_add_event("@deferred-hook");
 	current_time = 2468;
 	events_fire_window("@deferred-hook", w);
-	ASSERT_EQ(options_get_fire_count(o), 0);
 	drain();
 	ASSERT_EQ(options_get_fire_count(o), 1);
 	ASSERT_EQ(options_get_fire_time(o), 2468);

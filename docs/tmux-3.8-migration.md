@@ -589,3 +589,40 @@ I/O, floating panes/protocol, full core/header reconciliation, supported
 platforms, stale wiring reconciliation and E2E viewer validation remain open.
 Both runtimes still report tmux 3.6a. This work is local only; remote pushes,
 tags, release and deployment remain held.
+
+## Guard-aware control transport and window sizes
+
+Control notifications now use a dedicated production writer and never
+interleave inside queued command reply guards. The transport tracks guard
+depth, defers notifications until the outermost block closes, and releases them
+in order. Replies share one bounded buffer: a disconnected control client is
+marked and discarded at the pinned 64 MiB limit, with `discard-all` used on
+forced client exit. Pane and reply output are optimized with contiguous write
+ranges.
+
+The 3.8 `refresh-client -C @window:WxH` and clear syntax now owns per-window
+sizes in control transport, and resize calculations consume those explicit
+sizes through the real production path. Respawned panes rebuild buffers by
+resetting pane, control offset and queued offsets; existing control clients
+receive the reset before further output. Command parser guards and normal
+client exit paths route through the same transport state.
+
+Eight complete-host control subscription cases cover nested-guard preservation
+and ordered flushing, stop safety, explicit per-window set/get/clear,
+64 MiB reply backpressure with discard and exit message, invalid subscription
+rejection, pending-timer safety after stop, and single-pane socket handling.
+Four complete-host option-hook cases cover callback hook accounting, arrayed
+built-in hooks and `-E` custom event execution. The fresh Linux SIXEL host and
+relay builds plus full existing suite pass 216 cases, including seven Python
+cases. This stage's eight control cases also passed a fresh ASan/UBSan and leak
+detection build; normal production and full-suite test binaries contain no
+sanitizer references. The new diagnostic option-hook registration assertion
+matches production behavior because direct custom event hooks require an
+explicit sink.
+
+No authenticated relay/SSH/web viewer, read-only isolation, reconnect,
+recording, clipboard, SIXEL, synchronized rendering or floating-pane E2E is
+claimed for this stage. Monitor display scaling and expanded built-in hook hooks,
+broader 3.8 core/header reconciliation, negotiated protocol and macOS remain
+open. Both runtimes still report tmux 3.6a. This work remains local; remote
+push, tags, release, deployment and final release approval are held.

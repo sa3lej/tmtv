@@ -2,6 +2,7 @@
 #include "../tmux.h"
 #include "test-harness.h"
 #include <sys/socket.h>
+#include <string.h>
 #include <unistd.h>
 
 static struct event_base *base;
@@ -110,7 +111,7 @@ stop(struct fixture *f)
 static char *
 output(struct fixture *f)
 {
-	static char buffer[8192];
+	static char buffer[32768];
 	ssize_t n;
 	size_t used = 0;
 
@@ -120,6 +121,25 @@ output(struct fixture *f)
 		used += n;
 	buffer[used] = '\0';
 	return (buffer);
+}
+
+static void
+run(struct fixture *f, const char *command)
+{
+	struct cmd_parse_result *pr;
+	struct cmdq_item *item;
+	char *text;
+
+	xasprintf(&text, "%s", command);
+	pr = cmd_parse_from_string(text, NULL);
+	free(text);
+	if (pr->status != CMD_PARSE_SUCCESS)
+		fatalx("control command parse failed");
+	item = cmdq_get_command(pr->cmdlist, NULL);
+	cmd_list_free(pr->cmdlist);
+	cmdq_append(&f->c, item);
+	while (cmdq_next(&f->c) != 0)
+		;
 }
 
 static void
@@ -226,6 +246,94 @@ TEST(pane_window_scopes_and_session_isolation)
 	drain();
 }
 
+TEST(nested_guards_flush_after_outer_block)
+{
+	struct window *w;
+	struct window_pane *wp;
+	struct session *s = new_session(&w, &wp);
+	struct fixture f;
+	char *actual;
+
+	start(&f, s);
+	control_write_guard(&f.c, "begin", 1, 1, 1);
+	control_write_guard(&f.c, "begin", 1, 2, 1);
+	control_notify_write(&f.c, "%%deferred-notification");
+	control_write_guard(&f.c, "end", 1, 2, 1);
+	actual = output(&f);
+	ASSERT(strstr(actual, "%deferred-notification") == NULL);
+	control_write_guard(&f.c, "end", 1, 1, 1);
+	actual = output(&f);
+	ASSERT(strstr(actual, "%deferred-notification") != NULL);
+	ASSERT(strstr(actual, "%deferred-notification") >
+	    strstr(actual, "%end"));
+	stop(&f);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
+TEST(control_window_size_set_get_and_clear)
+{
+	struct window *w;
+	struct window_pane *wp;
+	struct session *s = new_session(&w, &wp);
+	struct fixture f;
+	u_int sx, sy;
+
+	start(&f, s);
+	control_set_window_size(&f.c, w->id, 40, 20);
+	ASSERT_EQ(control_get_window_size(&f.c, w->id, &sx, &sy), 1);
+	ASSERT_EQ(sx, 40);
+	ASSERT_EQ(sy, 20);
+	control_clear_window_size(&f.c, w->id);
+	ASSERT_EQ(control_get_window_size(&f.c, w->id, &sx, &sy), 0);
+	control_clear_window_size(&f.c, w->id);
+	stop(&f);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
+TEST(stopped_outer_guard_releases_deferred_line)
+{
+	struct window *w;
+	struct window_pane *wp;
+	struct session *s = new_session(&w, &wp);
+	struct fixture f;
+
+	start(&f, s);
+	control_write_guard(&f.c, "begin", 1, 1, 1);
+	control_notify_write(&f.c, "%%stop-deferred");
+	stop(&f);
+	(void)output(&f);
+	ASSERT(f.c.control_state == NULL);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
+TEST(reply_backpressure_marks_and_discards_client)
+{
+	struct window *w;
+	struct window_pane *wp;
+	struct session *s = new_session(&w, &wp);
+	struct fixture f;
+	u_int repeat;
+
+	start(&f, s);
+	/* 256 byte lines exceed the 64 MiB pinned reply limit, while keeping
+	 * the test bounded. */
+	for (repeat = 0; repeat < 400000; repeat++) {
+		control_write(&f.c, "%0255d", 1);
+		if (f.c.flags & CLIENT_CONTROL_DISCARD)
+			break;
+	}
+	ASSERT(f.c.flags & CLIENT_CONTROL_DISCARD);
+	ASSERT(f.c.flags & CLIENT_EXIT);
+	control_discard_all(&f.c);
+	stop(&f);
+	free(f.c.exit_message);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
 TEST(parser_rejects_unknown_scope_and_stop_cancels_pending_timer)
 {
 	struct window *w;
@@ -296,7 +404,11 @@ main(void)
 	TEST_SUITE_BEGIN("Production control subscriptions");
 	RUN_TEST(session_output_changes_replacement_and_removal);
 	RUN_TEST(pane_window_scopes_and_session_isolation);
-	RUN_TEST(parser_rejects_unknown_scope_and_stop_cancels_pending_timer);
+	RUN_TEST(nested_guards_flush_after_outer_block);
+	RUN_TEST(control_window_size_set_get_and_clear);
+	RUN_TEST(stopped_outer_guard_releases_deferred_line);
+	RUN_TEST(reply_backpressure_marks_and_discards_client);
+RUN_TEST(parser_rejects_unknown_scope_and_stop_cancels_pending_timer);
 	RUN_TEST(single_pane_socket_command_and_closed_pane);
 	drain();
 	options_free(global_w_options);

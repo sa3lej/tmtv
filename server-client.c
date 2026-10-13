@@ -50,7 +50,7 @@ static void	server_client_check_window_resize(struct window *);
 static key_code	server_client_check_mouse(struct client *, struct key_event *);
 static void	server_client_repeat_timer(int, short, void *);
 static void	server_client_click_timer(int, short, void *);
-static void	server_client_check_exit(struct client *);
+static void	server_client_check_exit(struct client *, int);
 static void	server_client_check_redraw(struct client *);
 static void	server_client_check_modes(struct client *);
 static void	server_client_set_title(struct client *);
@@ -2686,7 +2686,7 @@ server_client_loop(void)
 
 	/* Check clients. */
 	TAILQ_FOREACH(c, &clients, entry) {
-		server_client_check_exit(c);
+		server_client_check_exit(c, 0);
 		if (c->session != NULL) {
 			server_client_check_modes(c);
 			server_client_check_redraw(c);
@@ -3092,9 +3092,9 @@ server_client_click_timer(__unused int fd, __unused short events, void *data)
 	c->flags &= ~(CLIENT_DOUBLECLICK|CLIENT_TRIPLECLICK);
 }
 
-/* Check if client should be exited. */
+/* Check if client should be exited, abandoning buffered output if forced. */
 static void
-server_client_check_exit(struct client *c)
+server_client_check_exit(struct client *c, int force)
 {
 	struct client_file	*cf;
 	const char		*name = c->exit_session;
@@ -3107,12 +3107,16 @@ server_client_check_exit(struct client *c)
 		return;
 
 	if (c->flags & CLIENT_CONTROL) {
-		control_discard(c);
-		if (!control_all_done(c))
-			return;
+		if (force)
+			control_discard_all(c);
+		else {
+			control_discard(c);
+			if (!control_all_done(c))
+				return;
+		}
 	}
 	RB_FOREACH(cf, client_files, &c->files) {
-		if (EVBUFFER_LENGTH(cf->buffer) != 0)
+		if (!force && EVBUFFER_LENGTH(cf->buffer) != 0)
 			return;
 	}
 	c->flags |= CLIENT_EXITED;

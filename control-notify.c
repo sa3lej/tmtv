@@ -30,28 +30,6 @@
 	 (~(c)->flags & CLIENT_EXIT) && \
 	 (c)->control_state != NULL)
 
-/*
-* The guard-aware control transport is a later stage; notifications use the
-* existing control writer so command reply guards continue to have the current
-* tmtv semantics and are not accidentally interleaved.
-*/
-static void printflike(2, 3)
-control_notify_write(struct client *c, const char *fmt, ...)
-{
-	char	*line;
-	int	unused;
-	va_list	ap;
-
-	va_start(ap, fmt);
-	unused = xvasprintf(&line, fmt, ap);
-	va_end(ap);
-	if (line != NULL) {
-		control_write(c, "%s", line);
-		free(line);
-	}
-	(void)unused;
-}
-
 /* Notify control clients that pane mode changed. */
 static void
 control_pane_mode_changed_cb(__unused const char *name,

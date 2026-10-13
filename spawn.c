@@ -219,6 +219,7 @@ spawn_pane(struct spawn_context *sc, char **cause)
 	struct winsize		  ws;
 	sigset_t		  set, oldset;
 	key_code		  key;
+	struct client		 *loop;
 
 	spawn_log(__func__, sc);
 
@@ -253,14 +254,30 @@ spawn_pane(struct spawn_context *sc, char **cause)
 			free(cwd);
 			return (NULL);
 		}
-		if (sc->wp0->fd != -1) {
+		if (sc->wp0->event != NULL) {
 			bufferevent_free(sc->wp0->event);
+			sc->wp0->event = NULL;
+		}
+		if (sc->wp0->fd != -1) {
 			close(sc->wp0->fd);
+			sc->wp0->fd = -1;
 		}
 		window_pane_reset_mode_all(sc->wp0);
 		screen_reinit(&sc->wp0->base);
 		input_free(sc->wp0->ictx);
 		sc->wp0->ictx = NULL;
+		/*
+		 * The old buffer is gone and the new one starts empty, so
+		 * offsets into the old buffer no longer mean anything. Reset
+		 * them, and drop output control clients still had queued.
+		 */
+		sc->wp0->offset.used = 0;
+		sc->wp0->base_offset = 0;
+		sc->wp0->pipe_offset.used = 0;
+		TAILQ_FOREACH(loop, &clients, entry) {
+			if (loop->flags & CLIENT_CONTROL)
+				control_reset_pane(loop, sc->wp0);
+		}
 		new_wp = sc->wp0;
 		new_wp->flags &= ~(PANE_STATUSREADY|PANE_STATUSDRAWN);
 	} else if (sc->lc == NULL) {

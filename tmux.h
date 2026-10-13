@@ -2042,6 +2042,7 @@ struct client {
 #define CLIENT_TMATE_NOTIFIED_JOIN 0x10000000000ULL
 #define CLIENT_TMATE_VPTY 0x20000000000ULL
 #endif
+#define CLIENT_CONTROL_DISCARD 0x40000000000ULL
 #define CLIENT_ALLREDRAWFLAGS		\
 	(CLIENT_REDRAWWINDOW|		\
 	 CLIENT_REDRAWSTATUS|		\
@@ -3592,6 +3593,7 @@ time_t	monitor_get_fire_time(struct monitor_set *, const char *);
 
 /* control.c */
 void	control_discard(struct client *);
+void	control_discard_all(struct client *);
 void	control_start(struct client *);
 void	control_ready(struct client *);
 void	control_stop(struct client *);
@@ -3599,10 +3601,16 @@ void	control_set_pane_on(struct client *, struct window_pane *);
 void	control_set_pane_off(struct client *, struct window_pane *);
 void	control_continue_pane(struct client *, struct window_pane *);
 void	control_pause_pane(struct client *, struct window_pane *);
+void	control_reset_pane(struct client *, struct window_pane *);
+void	control_set_window_size(struct client *, u_int, u_int, u_int);
+int	control_get_window_size(struct client *, u_int, u_int *, u_int *);
+void	control_clear_window_size(struct client *, u_int);
 struct window_pane_offset *control_pane_offset(struct client *,
 	   struct window_pane *, int *);
 void	control_reset_offsets(struct client *);
 void printflike(2, 3) control_write(struct client *, const char *, ...);
+void printflike(2, 3) control_notify_write(struct client *, const char *, ...);
+void	control_write_guard(struct client *, const char *, long, u_int, int);
 void	control_write_output(struct client *, struct window_pane *);
 int	control_all_done(struct client *);
 void	control_add_sub(struct client *, const char *, enum monitor_type,
