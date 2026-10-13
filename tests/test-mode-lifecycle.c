@@ -291,6 +291,143 @@ TEST(fragmented_empty_session_reconnect_keeps_message_boundaries)
 	check_empty_session_reconnect(1);
 }
 
+/* Inspect actual reconnect bytes, including both base and saved grids. */
+struct snapshot_cells {
+	int snapshots, layouts, after, id, mode;
+	int cx[2], cy[2], lines[2], cells[2];
+	uint64_t attrs[2][2];
+	char text[2][32];
+	size_t length[2];
+};
+
+static void
+read_snapshot_cells(void *userdata, struct tmate_unpacker *uk)
+{
+	struct snapshot_cells *state = userdata;
+	struct tmate_unpacker panes, pane, screen, rows, row, attrs;
+	const char *bytes;
+	size_t length;
+	int opcode = unpack_int(uk), i, j;
+
+	if (opcode == TMATE_OUT_SYNC_LAYOUT)
+		state->layouts++;
+	if (opcode == TMATE_OUT_WRITE_COPY_MODE)
+		state->after++;
+	if (opcode != TMATE_OUT_SNAPSHOT)
+		return;
+	state->snapshots++;
+	unpack_array(uk, &panes);
+	unpack_array(&panes, &pane);
+	state->id = unpack_int(&pane);
+	state->mode = unpack_int(&pane);
+	for (i = 0; i < 2; i++) {
+		unpack_array(&pane, &screen);
+		state->cx[i] = unpack_int(&screen);
+		state->cy[i] = unpack_int(&screen);
+		unpack_array(&screen, &rows);
+		state->lines[i] = rows.argc;
+		unpack_array(&rows, &row);
+		unpack_buffer(&row, &bytes, &length);
+		state->length[i] = length;
+		if (length <= sizeof state->text[i])
+			memcpy(state->text[i], bytes, length);
+		unpack_array(&row, &attrs);
+		state->cells[i] = attrs.argc;
+		for (j = 0; j < 2 && attrs.argc != 0; j++)
+			state->attrs[i][j] = unpack_int(&attrs);
+	}
+}
+
+static void
+check_snapshot_cell_fields(int fragmented)
+{
+	struct snapshot_cells state = { 0 };
+	struct tmate_decoder decoder;
+	struct window_pane *wp = create_pane();
+	struct session *s;
+	struct winlink *wl;
+	struct grid_cell gc = grid_default_cell;
+	u_int id = wp->id, mode = wp->base.mode;
+
+	s = session_create(NULL, "snapshot-fields", "/", environ_create(),
+	    options_create(global_s_options), NULL);
+	wl = winlink_add(&s->windows, 0);
+	wl->session = s;
+	winlink_set_window(wl, wp->window);
+	s->curw = wl;
+	window_set_active_pane(wp->window, wp, 0);
+	window_set_name(wp->window, "snapshot-fields");
+	/* TAB sets the high flag bit; modern attributes exceed one wire byte. */
+	grid_set_tab(&gc, 1);
+	gc.attr = GRID_ATTR_OVERLINE | GRID_ATTR_STRIKETHROUGH | GRID_ATTR_BRIGHT;
+	gc.fg = COLOUR_FLAG_RGB | 0x123456;
+	gc.bg = COLOUR_FLAG_256 | 0xab;
+	grid_set_cell(wp->base.grid, 0, 0, &gc);
+	gc = grid_default_cell;
+	utf8_set(&gc.data, 'X');
+	gc.attr = GRID_ATTR_UNDERSCORE_5 | GRID_ATTR_ITALICS;
+	grid_set_cell(wp->base.grid, 1, 0, &gc);
+	wp->base.cx = 7;
+	wp->base.cy = 3;
+	wp->base.saved_grid = grid_create(wp->sx, wp->sy, 100);
+	gc = grid_default_cell;
+	utf8_open(&gc.data, 0xe7);
+	utf8_append(&gc.data, 0x95);
+	utf8_append(&gc.data, 0x8c); /* wide UTF-8 character 界 */
+	gc.attr = GRID_ATTR_STRIKETHROUGH | GRID_ATTR_REVERSE;
+	grid_set_cell(wp->base.saved_grid, 0, 0, &gc);
+	grid_set_padding(wp->base.saved_grid, 1, 0);
+	wp->base.saved_cx = 5;
+	wp->base.saved_cy = 2;
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	tmate_send_reconnection_state(&tmate_session);
+	tmate_write_copy_mode(&tmate_session, wp, "after snapshot");
+	tmate_decoder_init(&decoder, read_snapshot_cells, &state);
+	decode_reconnect_buffer(&decoder, fragmented);
+	tmate_decoder_destroy(&decoder);
+	tmate_encoder_destroy(&tmate_session.encoder);
+	tmate_session.encoder.buffer = NULL;
+	session_destroy(s, 0, __func__);
+	while (cmdq_next(NULL) != 0)
+		;
+	event_loop(EVLOOP_NONBLOCK);
+	destroy_pane(wp);
+
+	ASSERT_EQ(state.layouts, 1);
+	ASSERT_EQ(state.snapshots, 1);
+	ASSERT_EQ(state.after, 1);
+	ASSERT_EQ(state.id, id);
+	ASSERT_EQ(state.mode, mode);
+	ASSERT_EQ(state.cx[0], 7);
+	ASSERT_EQ(state.cy[0], 3);
+	ASSERT_EQ(state.cx[1], 5);
+	ASSERT_EQ(state.cy[1], 2);
+	ASSERT_EQ(state.lines[0], 24);
+	ASSERT_EQ(state.lines[1], 24);
+	ASSERT(state.cells[0] >= 2);
+	ASSERT(state.cells[1] >= 2);
+	ASSERT_EQ(state.length[0], state.cells[0]);
+	ASSERT(memcmp(state.text[0], " X", 2) == 0);
+	ASSERT_EQ(state.length[1], state.cells[1] + 2);
+	/* Legacy padding contributes its sentinel byte, flagged separately. */
+	ASSERT(memcmp(state.text[1], "界!", 4) == 0);
+	/* Fixed legacy bytes, independent of the encoder's packing expression. */
+	ASSERT_EQ(state.attrs[0][0], UINT32_C(0x8001ab56));
+	ASSERT_EQ(state.attrs[0][1], UINT32_C(0x00400808));
+	ASSERT_EQ(state.attrs[1][0], UINT32_C(0x00100808));
+	ASSERT_EQ(state.attrs[1][1], UINT32_C(0x04000808));
+}
+
+TEST(reconnect_snapshot_keeps_cell_fields_separate)
+{
+	check_snapshot_cell_fields(0);
+}
+
+TEST(fragmented_reconnect_snapshot_keeps_cell_fields_separate)
+{
+	check_snapshot_cell_fields(1);
+}
+
 static int
 output_equals(struct window_pane *wp, u_int line, const char *expected)
 {
@@ -385,6 +522,8 @@ main(int argc, char **argv)
 	RUN_TEST(host_exit_only_emits_for_last_copy_mode);
 	RUN_TEST(empty_session_reconnect_keeps_message_boundaries);
 	RUN_TEST(fragmented_empty_session_reconnect_keeps_message_boundaries);
+	RUN_TEST(reconnect_snapshot_keeps_cell_fields_separate);
+	RUN_TEST(fragmented_reconnect_snapshot_keeps_cell_fields_separate);
 	options_free(global_w_options);
 	options_free(global_s_options);
 	options_free(global_options);

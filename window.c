@@ -377,6 +377,9 @@ window_destroy(struct window *w)
 	free(w->fill_character);
 
 	free(w->name);
+#ifdef TMATE
+	free(w->tmate_last_sync_name);
+#endif
 	free(w);
 }
 

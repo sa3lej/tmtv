@@ -514,12 +514,15 @@ static void do_snapshot_grid(struct tmate_encoder *__enc,
 			/*
 			 * Pack as single int matching server decoder format:
 			 * (flags << 24) | (attr << 16) | (bg << 8) | fg
+			 * Each field is one byte. Modern attributes cannot be
+			 * represented here and must not spill into the flags byte.
+			 * Shift unsigned values so GRID_FLAG_TAB is well defined.
 			 * Truncates fg/bg to 8 bits (palette colors).
 			 */
-			pack(unsigned_int, ((gc.flags << 24) |
-					    (gc.attr  << 16) |
-					    ((gc.bg & 0xFF) << 8) |
-					    (gc.fg & 0xFF)));
+			pack(unsigned_int, (((uint32_t)gc.flags << 24) |
+					    ((uint32_t)(gc.attr & 0xFF) << 16) |
+					    ((uint32_t)(gc.bg & 0xFF) << 8) |
+					    (uint32_t)(gc.fg & 0xFF)));
 		}
 	}
 
