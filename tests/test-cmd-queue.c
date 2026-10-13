@@ -128,11 +128,126 @@ TEST(disconnect_during_drain_cancels_remaining_commands)
 	ASSERT(options_get_only(global_s_options, "@queue-after") == NULL);
 }
 
+TEST(optional_argument_preserves_following_flags)
+{
+	struct cmd_parse_result *pr;
+	struct args *args;
+	const char *texts[] = {
+		"refresh-client -l -S",
+		"refresh-client -l -- target",
+		"refresh-client -l -2",
+		"refresh-client -lvalue -S"
+	};
+	u_int i;
+
+	for (i = 0; i < nitems(texts); i++) {
+		pr = cmd_parse_from_string(texts[i], NULL);
+		ASSERT_EQ(pr->status, CMD_PARSE_SUCCESS);
+		args = cmd_get_args(cmd_list_first(pr->cmdlist));
+		ASSERT(args_has(args, 'l'));
+		if (i == 0) {
+			ASSERT(args_get(args, 'l') == NULL);
+			ASSERT(args_has(args, 'S'));
+		} else if (i == 1) {
+			ASSERT(args_get(args, 'l') == NULL);
+			ASSERT_EQ(args_count(args), 1);
+			ASSERT_STR_EQ(args_string(args, 0), "target");
+		} else if (i == 2)
+			ASSERT_STR_EQ(args_get(args, 'l'), "-2");
+		else {
+			ASSERT_STR_EQ(args_get(args, 'l'), "value");
+			ASSERT(args_has(args, 'S'));
+		}
+		cmd_list_free(pr->cmdlist);
+	}
+}
+
+TEST(prepared_command_block_returns_owned_reference)
+{
+	struct cmdq_item *item;
+	struct cmd *cmd;
+	struct args_command_state *state;
+	struct cmd_list *original, *result;
+	char *error = NULL;
+	int references;
+
+	item = command("run-shell -C { set-option -g @prepared yes }");
+	cmd = cmdq_get_cmd(item);
+	original = args_value(cmd_get_args(cmd), 0)->cmdlist;
+	references = original->references;
+	state = args_make_commands_prepare(cmd, item, 0, NULL, 0, 0);
+	ASSERT_EQ(original->references, references + 1);
+	result = args_make_commands(state, 0, NULL, &error);
+	ASSERT(result == original);
+	ASSERT(error == NULL);
+	ASSERT_EQ(original->references, references + 2);
+	args_make_commands_free(state);
+	ASSERT_EQ(original->references, references + 1);
+	cmd_list_free(result);
+	ASSERT_EQ(original->references, references);
+	/* Drain through production queue so original command ownership is freed. */
+	cmdq_append(NULL, item);
+	while (cmdq_next(NULL) != 0)
+		;
+	event_loop(EVLOOP_NONBLOCK);
+	while (cmdq_next(NULL) != 0)
+		;
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@prepared"), "yes");
+}
+
+TEST(immediate_string_command_has_single_owner)
+{
+	struct cmdq_item *item;
+	struct cmd_list *result;
+
+	item = command("if-shell -F 1 'set-option -g @immediate yes'");
+	result = args_make_commands_now(cmdq_get_cmd(item), item, 1, 0);
+	ASSERT_NOT_NULL(result);
+	ASSERT_EQ(result->references, 1);
+	cmd_list_free(result);
+	cmdq_append(NULL, item);
+	while (cmdq_next(NULL) != 0)
+		;
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@immediate"), "yes");
+	cmdq_append(NULL, command("if-shell -F 1 { set-option -g @immediate-block yes }"));
+	while (cmdq_next(NULL) != 0)
+		;
+	ASSERT_STR_EQ(options_get_string(global_s_options, "@immediate-block"), "yes");
+}
+
+TEST(percentage_growth_respects_output_bounds)
+{
+	char *cause = NULL;
+	struct cmdq_item *item;
+
+	ASSERT_EQ(args_string_percentage("250%", 0, 1000, 80, &cause), 200);
+	ASSERT(cause == NULL);
+	ASSERT_EQ(args_string_percentage("1000%", 0, 1000, 80, &cause), 800);
+	ASSERT(cause == NULL);
+	ASSERT_EQ(args_string_percentage("1001%", 0, 1000, 80, &cause), 0);
+	ASSERT_NOT_NULL(cause);
+	free(cause);
+	ASSERT_EQ(args_string_percentage("250%", 0, 100, 80, &cause), 0);
+	ASSERT_STR_EQ(cause, "too large");
+	free(cause);
+	item = command("set-option -g @percentage yes");
+	ASSERT_EQ(args_string_percentage_and_expand("#{e|*:125,2}%", 0,
+	    1000, 80, item, &cause), 200);
+	ASSERT(cause == NULL);
+	cmdq_append(NULL, item);
+	while (cmdq_next(NULL) != 0)
+		;
+}
+
 int
 main(void)
 {
 	setup();
-	TEST_SUITE_BEGIN("Production command queue disconnect handling");
+	TEST_SUITE_BEGIN("Production command queue and arguments");
+	RUN_TEST(optional_argument_preserves_following_flags);
+	RUN_TEST(prepared_command_block_returns_owned_reference);
+	RUN_TEST(immediate_string_command_has_single_owner);
+	RUN_TEST(percentage_growth_respects_output_bounds);
 	RUN_TEST(live_client_and_global_commands_execute);
 	RUN_TEST(dead_client_skips_grouped_commands_but_runs_cleanup);
 	RUN_TEST(disconnect_during_drain_cancels_remaining_commands);
