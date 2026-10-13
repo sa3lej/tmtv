@@ -289,7 +289,11 @@ static void tmate_sync_window_panes(struct window *w,
 			layout_free(w);
 
 		if (pane_count == 1) {
-			layout_init(w, TAILQ_FIRST(&w->panes));
+			struct layout_cell *lc;
+			wp = TAILQ_FIRST(&w->panes);
+			lc = w->layout_root = layout_create_cell(NULL);
+			layout_set_size(lc, wp->sx, wp->sy, wp->xoff, wp->yoff);
+			layout_make_leaf(lc, wp);
 		} else if (pane_count > 1) {
 			struct layout_cell *root, *lc;
 			root = w->layout_root = layout_create_cell(NULL);
@@ -412,13 +416,86 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 	}
 }
 
+/* Check the complete layout before creating, resizing or removing any pane. */
+static int snapshot_uint(msgpack_object, u_int *);
+
+static int
+layout_active_id(msgpack_object obj)
+{
+	return ((obj.type == MSGPACK_OBJECT_NEGATIVE_INTEGER && obj.via.i64 == -1) ||
+	    (obj.type == MSGPACK_OBJECT_POSITIVE_INTEGER && obj.via.u64 <= INT_MAX));
+}
+
+static int
+layout_valid(const struct tmate_unpacker *uk)
+{
+	msgpack_object *windows, *window, *panes, *pane;
+	u_int sx, sy, value[5], ids[TMATE_MAX_PANES], indexes[512];
+	u_int i, j, k, n, count = 0;
+
+	if (uk->argc != 4 || !snapshot_uint(uk->argv[0], &sx) ||
+	    !snapshot_uint(uk->argv[1], &sy) || sx == 0 || sy == 0 ||
+	    sx > WINDOW_MAXIMUM || sy > WINDOW_MAXIMUM ||
+	    uk->argv[2].type != MSGPACK_OBJECT_ARRAY ||
+	    !layout_active_id(uk->argv[3]))
+		return (0);
+	n = uk->argv[2].via.array.size;
+	if (n == 0 || n > nitems(indexes))
+		return (0);
+	windows = uk->argv[2].via.array.ptr;
+	for (i = 0; i < n; i++) {
+		if (windows[i].type != MSGPACK_OBJECT_ARRAY ||
+		    windows[i].via.array.size != 4)
+			return (0);
+		window = windows[i].via.array.ptr;
+		if (!snapshot_uint(window[0], &indexes[i]) || indexes[i] > INT_MAX ||
+		    (window[1].type != MSGPACK_OBJECT_STR && window[1].type != MSGPACK_OBJECT_BIN) ||
+		    window[2].type != MSGPACK_OBJECT_ARRAY || !layout_active_id(window[3]))
+			return (0);
+		for (j = 0; j < i; j++) {
+			if (indexes[i] == indexes[j])
+				return (0);
+		}
+		if (window[2].via.array.size == 0 ||
+		    window[2].via.array.size > TMATE_MAX_PANES - count)
+			return (0);
+		panes = window[2].via.array.ptr;
+		for (j = 0; j < window[2].via.array.size; j++) {
+			if (panes[j].type != MSGPACK_OBJECT_ARRAY || panes[j].via.array.size != 5)
+				return (0);
+			pane = panes[j].via.array.ptr;
+			for (k = 0; k < 5; k++) {
+				if (!snapshot_uint(pane[k], &value[k]))
+					return (0);
+			}
+			if (value[0] > INT_MAX || value[1] == 0 || value[2] == 0 ||
+			    value[1] > WINDOW_MAXIMUM || value[2] > WINDOW_MAXIMUM ||
+			    value[3] > WINDOW_MAXIMUM - value[1] ||
+			    value[4] > WINDOW_MAXIMUM - value[2])
+				return (0);
+			for (k = 0; k < count; k++) {
+				if (ids[k] == value[0])
+					return (0);
+			}
+			ids[count++] = value[0];
+		}
+	}
+	return (1);
+}
+
 static void tmate_sync_layout(__unused struct tmate_session *session,
 			      struct tmate_unpacker *uk)
 {
 	struct session *s;
 
-	int sx = unpack_int(uk);
-	int sy = unpack_int(uk);
+	int sx, sy;
+
+	if (!layout_valid(uk)) {
+		tmate_debug("Ignoring invalid layout");
+		return;
+	}
+	sx = unpack_int(uk);
+	sy = unpack_int(uk);
 
 	s = RB_MIN(sessions, &sessions);
 	if (!s) {

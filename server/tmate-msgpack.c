@@ -277,7 +277,8 @@ char *unpack_string(struct tmate_unpacker *uk)
 	unpack_buffer(uk, &buf, &len);
 
 	alloc_buf = xmalloc(len + 1);
-	memcpy(alloc_buf, buf, len);
+	if (len != 0)
+		memcpy(alloc_buf, buf, len);
 	alloc_buf[len] = '\0';
 
 	return alloc_buf;

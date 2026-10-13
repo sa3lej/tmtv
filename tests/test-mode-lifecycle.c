@@ -293,7 +293,7 @@ TEST(fragmented_empty_session_reconnect_keeps_message_boundaries)
 
 /* Inspect actual reconnect bytes, including both base and saved grids. */
 struct snapshot_cells {
-	int snapshots, layouts, after, id, mode;
+	int snapshots, layouts, after, id, mode, empty_names;
 	int cx[2], cy[2], lines[2], cells[2];
 	uint64_t attrs[2][2];
 	char text[2][32];
@@ -309,8 +309,19 @@ read_snapshot_cells(void *userdata, struct tmate_unpacker *uk)
 	size_t length;
 	int opcode = unpack_int(uk), i, j;
 
-	if (opcode == TMATE_OUT_SYNC_LAYOUT)
+	if (opcode == TMATE_OUT_SYNC_LAYOUT) {
+		char *name;
 		state->layouts++;
+		unpack_int(uk);
+		unpack_int(uk);
+		unpack_array(uk, &panes);
+		unpack_array(&panes, &pane);
+		unpack_int(&pane);
+		name = unpack_string(&pane);
+		state->empty_names += *name == '\0';
+		free(name);
+		return;
+	}
 	if (opcode == TMATE_OUT_WRITE_COPY_MODE)
 		state->after++;
 	if (opcode != TMATE_OUT_SNAPSHOT)
@@ -339,7 +350,7 @@ read_snapshot_cells(void *userdata, struct tmate_unpacker *uk)
 }
 
 static void
-check_snapshot_cell_fields(int fragmented)
+check_snapshot_cell_fields(int fragmented, int empty_name)
 {
 	struct snapshot_cells state = { 0 };
 	struct tmate_decoder decoder;
@@ -356,7 +367,7 @@ check_snapshot_cell_fields(int fragmented)
 	winlink_set_window(wl, wp->window);
 	s->curw = wl;
 	window_set_active_pane(wp->window, wp, 0);
-	window_set_name(wp->window, "snapshot-fields");
+	window_set_name(wp->window, empty_name ? "" : "snapshot-fields");
 	/* TAB sets the high flag bit; modern attributes exceed one wire byte. */
 	grid_set_tab(&gc, 1);
 	gc.attr = GRID_ATTR_OVERLINE | GRID_ATTR_STRIKETHROUGH | GRID_ATTR_BRIGHT;
@@ -394,6 +405,7 @@ check_snapshot_cell_fields(int fragmented)
 	destroy_pane(wp);
 
 	ASSERT_EQ(state.layouts, 1);
+	ASSERT_EQ(state.empty_names, empty_name);
 	ASSERT_EQ(state.snapshots, 1);
 	ASSERT_EQ(state.after, 1);
 	ASSERT_EQ(state.id, id);
@@ -420,12 +432,17 @@ check_snapshot_cell_fields(int fragmented)
 
 TEST(reconnect_snapshot_keeps_cell_fields_separate)
 {
-	check_snapshot_cell_fields(0);
+	check_snapshot_cell_fields(0, 0);
 }
 
 TEST(fragmented_reconnect_snapshot_keeps_cell_fields_separate)
 {
-	check_snapshot_cell_fields(1);
+	check_snapshot_cell_fields(1, 0);
+}
+
+TEST(fragmented_reconnect_empty_window_name_unpacks)
+{
+	check_snapshot_cell_fields(1, 1);
 }
 
 static int
@@ -485,12 +502,16 @@ emit_copy_output(int exit_mode)
 	return (result);
 }
 
+static int emit_layout;
+
 static void
 emit_snapshot_message(void *userdata, struct tmate_unpacker *uk)
 {
 	msgpack_packer *pk = userdata;
 	int i;
-	if (uk->argc == 0 || uk->argv[0].via.i64 != TMATE_OUT_SNAPSHOT)
+	if (uk->argc == 0 || (uk->argv[0].via.i64 != TMATE_OUT_SNAPSHOT &&
+	    (!emit_layout || (uk->argv[0].via.i64 != TMATE_OUT_SYNC_LAYOUT &&
+	    uk->argv[0].via.i64 != TMATE_OUT_PTY_DATA))))
 		return;
 	msgpack_pack_array(pk, uk->argc);
 	for (i = 0; i < uk->argc; i++)
@@ -519,9 +540,18 @@ emit_reconnect_snapshot(void)
 	wl = winlink_add(&s->windows, 1);
 	wl->session = s;
 	winlink_set_window(wl, second->window);
+	if (emit_layout) {
+		window_resize(first->window, 67, 19, -1, -1);
+		window_pane_resize(first, 67, 19);
+		window_pane_resize(second, 43, 12);
+		second->xoff = 7;
+		second->yoff = 4;
+	}
+	window_set_active_pane(first->window, first, 0);
+	window_set_active_pane(second->window, second, 0);
 	grid_destroy(first->base.grid);
-	first->base.grid = grid_create(80, 25, 100);
-	first->base.grid->sy = 24;
+	first->base.grid = grid_create(first->sx, first->sy + 1, 100);
+	first->base.grid->sy = first->sy;
 	first->base.grid->hsize = 1;
 	utf8_set(&gc.data, 'H');
 	grid_set_cell(first->base.grid, 0, 0, &gc);
@@ -535,9 +565,9 @@ emit_reconnect_snapshot(void)
 	gc.attr = GRID_ATTR_REVERSE;
 	grid_set_cell(first->base.grid, 1, 1, &gc);
 	grid_set_padding(first->base.grid, 2, 1);
-	first->base.cx = 80;
+	first->base.cx = first->sx;
 	first->base.cy = 3;
-	first->base.saved_grid = grid_create(80, 24, 0);
+	first->base.saved_grid = grid_create(first->sx, first->sy, 0);
 	gc = grid_default_cell;
 	utf8_set(&gc.data, 'S');
 	grid_set_cell(first->base.saved_grid, 0, 0, &gc);
@@ -548,6 +578,10 @@ emit_reconnect_snapshot(void)
 	grid_set_cell(second->base.grid, 0, 0, &gc);
 	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
 	tmate_send_reconnection_state(&tmate_session);
+	if (emit_layout) {
+		tmate_pty_data(&tmate_session, first, "\033[10;4HZ", 8);
+		tmate_pty_data(&tmate_session, second, "\033[2;3HY", 7);
+	}
 	msgpack_sbuffer_init(&sb);
 	msgpack_packer_init(&pk, &sb, msgpack_sbuffer_write);
 	tmate_decoder_init(&decoder, emit_snapshot_message, &pk);
@@ -587,8 +621,10 @@ main(int argc, char **argv)
 	}
 	if (argc == 2 && (strcmp(argv[1], "--emit-copy-output") == 0 ||
 	    strcmp(argv[1], "--emit-copy-exit") == 0 ||
-	    strcmp(argv[1], "--emit-snapshot") == 0)) {
-		int result = strcmp(argv[1], "--emit-snapshot") == 0 ?
+	    strcmp(argv[1], "--emit-snapshot") == 0 ||
+	    strcmp(argv[1], "--emit-layout-snapshot") == 0)) {
+		emit_layout = strcmp(argv[1], "--emit-layout-snapshot") == 0;
+		int result = (emit_layout || strcmp(argv[1], "--emit-snapshot") == 0) ?
 		    emit_reconnect_snapshot() :
 		    emit_copy_output(strcmp(argv[1], "--emit-copy-exit") == 0);
 		options_free(global_w_options);
@@ -608,6 +644,7 @@ main(int argc, char **argv)
 	RUN_TEST(fragmented_empty_session_reconnect_keeps_message_boundaries);
 	RUN_TEST(reconnect_snapshot_keeps_cell_fields_separate);
 	RUN_TEST(fragmented_reconnect_snapshot_keeps_cell_fields_separate);
+	RUN_TEST(fragmented_reconnect_empty_window_name_unpacks);
 	options_free(global_w_options);
 	options_free(global_s_options);
 	options_free(global_options);

@@ -186,4 +186,7 @@ relay-copy-output:
 	    ./test-relay-copy-output --host-exit < "$$wire"; \
 	    ./test-mode-lifecycle --emit-snapshot > "$$wire"; \
 	    ./test-relay-copy-output --host-snapshot < "$$wire"; \
-	    ./test-relay-copy-output --host-snapshot-bulk < "$$wire"
+	    ./test-relay-copy-output --host-snapshot-bulk < "$$wire"; \
+	    ./test-mode-lifecycle --emit-layout-snapshot > "$$wire"; \
+	    ./test-relay-copy-output --host-layout-snapshot < "$$wire"; \
+	    ./test-relay-copy-output --host-layout-snapshot-bulk < "$$wire"
