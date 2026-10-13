@@ -24,7 +24,7 @@ GC_SECTIONS := $(shell if [ "$$(uname -s)" = Darwin ]; then echo -Wl,-dead_strip
 
 .PHONY: all unit server-unit functional hooks session-cleanup prompt-history child-environment integration clean
 
-all: mode-lifecycle unit server-unit functional hooks session-cleanup prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
+all: relay-copy-output mode-lifecycle unit server-unit functional hooks session-cleanup prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
 
 unit: $(UNIT_TESTS)
 	@echo ""
@@ -174,3 +174,8 @@ control-subscriptions:
 mode-lifecycle:
 	$(MAKE) -C .. tests/test-mode-lifecycle
 	./test-mode-lifecycle
+
+.PHONY: relay-copy-output
+relay-copy-output:
+	$(MAKE) -C .. tests/test-relay-copy-output
+	./test-relay-copy-output

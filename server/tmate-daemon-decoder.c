@@ -790,11 +790,16 @@ static void tmate_write_copy_mode(__unused struct tmate_session *session,
 
 	str = unpack_string(uk);
 
-	/* Relay output has no originating local command queue item. */
-	if (TAILQ_EMPTY(&wp->modes))
-		window_pane_set_mode(wp, NULL, &window_copy_mode, NULL, NULL, NULL);
-
-	window_copy_add(wp, 0, "%s", str);
+	/*
+	 * Wire output needs its own backing screen, as with command output.
+	 * Bring view mode to the front even when another mode is active; never
+	 * pass another mode's private data to window_copy_add. Repeated output
+	 * reuses the existing view mode and preserves its accumulated lines.
+	 */
+	window_pane_set_mode(wp, NULL, &window_view_mode, NULL, NULL, NULL);
+	if (TAILQ_FIRST(&wp->modes) != NULL &&
+	    TAILQ_FIRST(&wp->modes)->mode == &window_view_mode)
+		window_copy_add(wp, 0, "%s", str);
 	free(str);
 }
 

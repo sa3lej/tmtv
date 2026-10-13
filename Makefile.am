@@ -526,3 +526,19 @@ tests/test-mode-lifecycle: tests/test-mode-lifecycle.o tests/test-window-tmux.o 
 
 CLEANFILES += tests/test-mode-lifecycle tests/test-mode-lifecycle.o
 EXTRA_DIST += tests/test-mode-lifecycle.c
+
+# Link the complete relay, including its actual MessagePack dispatcher.
+tests/test-relay-tmux.o: tmux.c tmux.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(tmtv_server_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -Dmain=tmtv_program_main -c $(srcdir)/tmux.c -o $@
+
+tests/test-relay-copy-output.o: tests/test-relay-copy-output.c tmux.h server/tmate.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(tmtv_server_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-relay-copy-output.c -o $@
+
+tests/test-relay-main.o: server/tmate-main.c tmux.h server/tmate.h
+	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(tmtv_server_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -Dmain=tmtv_relay_main -c $(srcdir)/server/tmate-main.c -o $@
+
+tests/test-relay-copy-output: tests/test-relay-copy-output.o tests/test-relay-tmux.o tests/test-relay-main.o $(tmtv_server_OBJECTS) $(tmtv_server_DEPENDENCIES)
+	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-relay-copy-output.o tests/test-relay-tmux.o tests/test-relay-main.o $(filter-out tmtv_server-tmux.o server/tmtv_server-tmate-main.o,$(tmtv_server_OBJECTS)) $(tmtv_server_LDADD) $(LIBS)
+
+CLEANFILES += tests/test-relay-copy-output tests/test-relay-copy-output.o tests/test-relay-tmux.o tests/test-relay-main.o
+EXTRA_DIST += tests/test-relay-copy-output.c
