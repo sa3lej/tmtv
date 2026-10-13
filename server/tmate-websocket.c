@@ -80,6 +80,25 @@ static void sse_enable_tcp_keepalive(int fd)
 #endif
 }
 
+static bool sse_write_all(int fd, const char *buf, size_t len)
+{
+	size_t offset = 0;
+
+	while (offset < len) {
+		ssize_t result = write(fd, buf + offset, len - offset);
+		if (result < 0) {
+			if (errno == EINTR)
+				continue;
+			return false;
+		}
+		if (result == 0)
+			return false;
+		offset += result;
+	}
+
+	return true;
+}
+
 /* Forward declarations */
 static void sse_send_data(struct bufferevent *bev,
 			  const unsigned char *data, size_t len);
@@ -1755,6 +1774,7 @@ void tmate_disconnect_ws_clients(struct tmate_session *session)
 void tmate_send_fin_to_ws_clients(struct tmate_session *session)
 {
 	struct ws_client *wc;
+	struct ws_client *tmp;
 	int fd;
 	msgpack_sbuffer sbuf;
 	msgpack_packer pk;
@@ -1785,12 +1805,14 @@ void tmate_send_fin_to_ws_clients(struct tmate_session *session)
 	/* Write directly to each client's socket fd — bypasses
 	 * bufferevent entirely so the data reaches the kernel
 	 * send buffer before SIGTERM kills the process. */
-	TAILQ_FOREACH(wc, &session->ws_clients, entry) {
+	TAILQ_FOREACH_SAFE(wc, &session->ws_clients, entry, tmp) {
 		if (!wc->handshake_done || wc->is_post)
 			continue;
 		fd = bufferevent_getfd(wc->bev);
-		if (fd >= 0)
-			write(fd, sse_buf, sse_len);
+		if (fd < 0 || !sse_write_all(fd, sse_buf, sse_len)) {
+			tmate_info("SSE FIN write failed; disconnecting client");
+			ws_client_free(wc);
+		}
 	}
 }
 
@@ -2441,7 +2463,8 @@ void tmate_websocket_accept_fd(struct tmate_session *session, int fd)
 			"Content-Length: 0\r\n"
 			"Connection: close\r\n"
 			"\r\n";
-		(void)write(fd, forbidden, strlen(forbidden));
+		if (!sse_write_all(fd, forbidden, strlen(forbidden)))
+			tmate_info("SSE forbidden response write failed");
 		close(fd);
 		tmate_debug("SSE connection rejected via IPC: web sharing disabled");
 		return;

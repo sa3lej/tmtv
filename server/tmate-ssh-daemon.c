@@ -549,6 +549,7 @@ void tmate_spawn_daemon(struct tmate_session *session)
 				int sfd, dfd;
 				char buf[4096];
 				ssize_t n;
+				size_t written;
 
 				mkdir(TMATE_WORKDIR "/jail/usr", 0755);
 				mkdir(TMATE_WORKDIR "/jail/usr/share", 0755);
@@ -567,8 +568,26 @@ void tmate_spawn_daemon(struct tmate_session *session)
 					close(sfd);
 					continue;
 				}
-				while ((n = read(sfd, buf, sizeof(buf))) > 0)
-					(void)write(dfd, buf, n);
+				while ((n = read(sfd, buf, sizeof(buf))) > 0) {
+					written = 0;
+					while (written < (size_t)n) {
+						ssize_t result = write(dfd, buf + written,
+								       (size_t)n - written);
+						if (result < 0) {
+							if (errno == EINTR)
+								continue;
+							break;
+						}
+						if (result == 0)
+							break;
+						written += result;
+					}
+					if (written != (size_t)n) {
+						tmate_info("terminfo copy truncated: %s", dst);
+						unlink(dst);
+						break;
+					}
+				}
 				close(sfd);
 				close(dfd);
 			}
