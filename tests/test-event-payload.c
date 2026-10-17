@@ -210,6 +210,48 @@ TEST(removed_target_pane_recovers_to_live_pane)
 	drain();
 }
 
+TEST(partial_session_target_waits_for_active_window)
+{
+	struct session *s;
+	struct window *w;
+	struct window_pane *wp;
+	struct winlink *wl;
+	struct event_payload *ep = event_payload_create();
+	struct cmd_find_state target, found;
+
+	s = session_create(NULL, "partial-target", "/", environ_create(),
+	    options_create(global_s_options), NULL);
+	cmd_find_clear_state(&target, 0);
+	target.s = s;
+	event_payload_set_target(ep, &target);
+	cmd_find_clear_state(&found, CMD_FIND_QUIET);
+	ASSERT_EQ(event_payload_get_target(ep, &found), 0);
+	ASSERT(cmd_find_empty_state(&found));
+	ASSERT_EQ(found.flags, CMD_FIND_QUIET);
+	ASSERT_EQ(cmd_find_from_nothing(&found, CMD_FIND_QUIET), -1);
+	ASSERT(cmd_find_empty_state(&found));
+
+	/* The real relay links its first window before adding any panes. */
+	w = window_create(80, 24, 0, 0);
+	wl = winlink_add(&s->windows, 0);
+	ASSERT_NOT_NULL(wl);
+	wl->session = s;
+	winlink_set_window(wl, w);
+	ASSERT(s->curw == NULL);
+	ASSERT_EQ(event_payload_get_target(ep, &found), 0);
+	s->curw = wl;
+	ASSERT_EQ(cmd_find_from_nothing(&found, 0), -1);
+
+	wp = window_add_pane(w, NULL, 100, 0);
+	window_set_active_pane(w, wp, 0);
+	ASSERT_EQ(event_payload_get_target(ep, &found), 1);
+	ASSERT(cmd_find_valid_state(&found));
+	ASSERT(found.s == s && found.wl == wl && found.wp == wp);
+	event_payload_free(ep);
+	session_destroy(s, 0, __func__);
+	drain();
+}
+
 int
 main(void)
 {
@@ -219,6 +261,7 @@ main(void)
 	RUN_TEST(pane_item_survives_whole_window_and_releases_on_replacement);
 	RUN_TEST(target_retention_replacement_and_dead_session_recovery);
 	RUN_TEST(removed_target_pane_recovers_to_live_pane);
+	RUN_TEST(partial_session_target_waits_for_active_window);
 	drain();
 	options_free(global_w_options);
 	options_free(global_s_options);

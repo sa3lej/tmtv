@@ -20,9 +20,16 @@ LIBEVENT_CFLAGS := $(shell pkg-config --cflags libevent 2>/dev/null)
 UNIT_TESTS = test-msgpack test-version-compare test-tmate-env test-find-session test-input-socket test-hardening test-compat test-json test-proc
 SERVER_TESTS = test-server-header test-session-tmate-ptr test-sse-mux test-server-format test-pty-pending test-resume
 TMTV ?= ../tmtv
+PYTHON ?= python3
 GC_SECTIONS := $(shell if [ "$$(uname -s)" = Darwin ]; then echo -Wl,-dead_strip; else echo -Wl,--gc-sections; fi)
 
 .PHONY: all unit server-unit functional hooks session-cleanup prompt-history child-environment integration clean
+
+# Explicit opt-in: disposable offline Docker relay, never the installed service.
+.PHONY: relay-e2e
+relay-e2e:
+	$(MAKE) -C .. tmtv tmtv-server
+	$(PYTHON) run-relay-e2e.py $(E2E_ARGS)
 
 all: relay-copy-output mode-lifecycle unit server-unit functional hooks session-cleanup prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
 

@@ -723,6 +723,11 @@ void
 cmd_find_from_session(struct cmd_find_state *fs, struct session *s, int flags)
 {
 	cmd_find_clear_state(fs, flags);
+	/* Lifecycle hooks may fire while the first window/pane is still being
+	 * attached, or after the last active target has been removed. */
+	if (s == NULL || s->curw == NULL || s->curw->window == NULL ||
+	    s->curw->window->active == NULL)
+		return;
 
 	fs->s = s;
 	fs->wl = fs->s->curw;
@@ -821,7 +826,8 @@ cmd_find_from_nothing(struct cmd_find_state *fs, int flags)
 	cmd_find_clear_state(fs, flags);
 
 	fs->s = cmd_find_best_session(NULL, 0, flags);
-	if (fs->s == NULL) {
+	if (fs->s == NULL || fs->s->curw == NULL ||
+	    fs->s->curw->window == NULL || fs->s->curw->window->active == NULL) {
 		cmd_find_clear_state(fs, flags);
 		return (-1);
 	}

@@ -1993,7 +1993,10 @@ web_input_forward_to_ssh_client(int pane_id, key_code key)
 
 		/* Inject through tmux key handler for binding support */
 		struct key_event *event = xcalloc(1, sizeof *event);
-		event->key = web_input_normalize_key(key);
+		/* Like send-keys, these are already decoded synthetic keys, not
+		 * raw tty bytes. Otherwise assume-paste diverts a rapid batch to
+		 * event->buf (absent here) and silently drops all but its prefix. */
+		event->key = web_input_normalize_key(key) | KEYC_SENT;
 		if (!server_client_handle_key(c, event)) {
 			free(event->buf);
 			free(event);

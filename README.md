@@ -523,7 +523,35 @@ Run locally — no server required:
 cd tests && make all
 ```
 
-#### Integration tests
+#### Isolated authenticated relay regression (Linux)
+
+This opt-in target packages the freshly built native host/relay and their runtime
+libraries into a disposable Docker image. It uses generated SSH host keys, an
+offline network namespace, no published ports, and its own temporary Docker volume;
+the container, image and volume are removed on exit. The relay uses its production
+chroot and privilege drop. Docker must permit `SYS_ADMIN` and the namespace syscalls
+used by the jail; no Docker socket or host directories are mounted inside it.
+
+```sh
+python3 -m venv /tmp/tmtv-e2e-venv
+/tmp/tmtv-e2e-venv/bin/pip install -r tests/requirements-relay-e2e.txt
+make -C tests relay-e2e PYTHON=/tmp/tmtv-e2e-venv/bin/python
+```
+
+The seven checks cover host registration, valid/invalid web and SSH tokens, SSH and SSE
+terminal decoding, bidirectional RW input, SSH/web RO input isolation, the web CSRF
+gate, and late viewers reconstructing the current screen. A successful write must
+produce a real host-side effect, not merely HTTP 200 or an echoed command. The
+terminal stream is parsed with pyte. This is transport validation, not browser DOM,
+full host-transport reconnect, copy/view-mode, SIXEL or cross-platform coverage.
+Those need the broader integration suite. This target does not run in `make all`
+and requires no existing server, credentials, DNS, TLS or deployment.
+
+Optional `E2E_ARGS='--artifacts /private/log/path'` retains fixture logs, excluding
+generated private keys. `--trace` and `--gdb` capture synthetic startup failures when
+the corresponding host tool is installed; these modes add container `SYS_PTRACE`.
+
+#### Integration tests against an installed server
 
 Run against a live tmtv-server (180+ tests covering SSH, SSE, web viewer, pane operations, viewer counts, web input, SIXEL, clipboard, flood resilience, and more).
 

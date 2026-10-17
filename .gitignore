@@ -28,6 +28,8 @@ action-tmtv/
 !tests/Makefile
 tests/test-msgpack
 tests/test-*
+!tests/test-relay-e2e.py
+tests/__pycache__/
 !tests/test-*.c
 !tests/test-*.h
 !tests/test-*.sh
