@@ -250,7 +250,7 @@ server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
 		c = server_client_create(fd);
 	else
 		options_set_number(global_options, "exit-empty", 0);
-#ifdef TMATE
+#if defined(TMATE) && !defined(TMATE_SERVER_BUILD)
 	/*
 	 * Let the tmtv server exit when the last session is destroyed.
 	 * Original tmate kept the server alive (exit-empty off) to reuse
@@ -260,6 +260,9 @@ server_start(struct tmuxproc *client, uint64_t flags, struct event_base *base,
 	 */
 	options_set_number(global_options, "exit-empty", 1);
 #endif
+	/* Relay CLIENT_NOFORK keeps exit-empty disabled while the authenticated
+	 * host is still sending its first layout. SSH loss/FIN and the relay
+	 * lifetime timers own teardown, even before a tmux session exists. */
 
 	if (lockfd >= 0) {
 		unlink(lockfile);

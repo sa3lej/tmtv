@@ -194,6 +194,9 @@ relay-copy-output:
 	    ./test-mode-lifecycle --emit-copy-state > "$$wire"; \
 	    ./test-relay-copy-output --host-copy-state < "$$wire"; \
 	    ./test-relay-copy-output --host-copy-state-bulk < "$$wire"; \
+	    ./test-mode-lifecycle --emit-frozen-copy > "$$wire"; \
+	    ./test-relay-copy-output --host-frozen-copy < "$$wire"; \
+	    ./test-relay-copy-output --host-frozen-copy-bulk < "$$wire"; \
 	    ./test-mode-lifecycle --emit-snapshot > "$$wire"; \
 	    ./test-relay-copy-output --host-snapshot < "$$wire"; \
 	    ./test-relay-copy-output --host-snapshot-bulk < "$$wire"; \

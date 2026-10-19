@@ -17,6 +17,7 @@ import socket
 import struct
 import subprocess
 import termios
+import threading
 import time
 
 import msgpack
@@ -26,6 +27,72 @@ ROOT = Path("/tmp/e2e")
 SOCKET = str(ROOT / "host.sock")
 PORT = 2222
 WEB = 4002
+HOST_PORT = 2223
+
+
+class HostTransport:
+    """Opaque TCP fault injector; viewers connect directly to the real relay."""
+    def __init__(self):
+        self.listener = socket.socket()
+        self.listener.bind(("127.0.0.1", HOST_PORT))
+        self.listener.listen(4)
+        self.listener.settimeout(.1)
+        self.lock = threading.Lock()
+        self.connections = ()
+        self.generation = 0
+        self.paused = False
+        self.stopping = False
+        self.error = None
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+
+    def run(self):
+        try:
+            while not self.stopping:
+                try:
+                    client, _ = self.listener.accept()
+                except socket.timeout:
+                    continue
+                with client:
+                    if self.paused:
+                        continue
+                    with socket.create_connection(("127.0.0.1", PORT), 3) as upstream:
+                        with self.lock:
+                            self.connections = (client, upstream)
+                            self.generation += 1
+                        try:
+                            # The relay must survive a delayed first host frame,
+                            # including larger reconnect snapshots.
+                            time.sleep(.15)
+                            while not self.stopping and not self.paused:
+                                ready, _, _ = select.select([client, upstream], [], [], .1)
+                                for source in ready:
+                                    data = source.recv(65536)
+                                    if not data:
+                                        raise EOFError
+                                    (upstream if source is client else client).sendall(data)
+                        except (EOFError, ConnectionError):
+                            pass
+                        finally:
+                            with self.lock:
+                                self.connections = ()
+        except BaseException as error:
+            if not self.stopping:
+                self.error = repr(error)
+
+    def cut(self):
+        self.paused = True
+        with self.lock:
+            assert self.connections and self.error is None
+            for connection in self.connections:
+                connection.shutdown(socket.SHUT_RDWR)
+        wait_for(lambda: not self.connections, "host TCP transport closes")
+
+    def close(self):
+        self.stopping = True
+        self.thread.join(timeout=5)
+        self.listener.close()
+        assert not self.thread.is_alive(), "host TCP proxy did not stop"
 
 
 def wait_for(predicate, label, seconds=15):
@@ -64,9 +131,11 @@ class Screen(pyte.Screen):
 
 
 class Viewer:
-    def __init__(self, token, web=False):
+    def __init__(self, token, web=False, local=False):
         self.web = web
-        self.screen = Screen(100, 30)
+        # SSE's composed virtual PTY includes the host's 30 rows plus its
+        # relay status row. SSH declares a 30-row physical terminal below.
+        self.screen = Screen(100, 31 if web else 30)
         self.terminal = pyte.Stream(self.screen)
         self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
         self.proc = None
@@ -84,10 +153,11 @@ class Viewer:
         else:
             self.fd, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
-            self.proc = subprocess.Popen(["ssh", "-F", "/dev/null", "-tt", "-p", str(PORT),
+            argv = ["tmtv", "-S", SOCKET, "attach-session", "-t", "main"] if local else ["ssh", "-F", "/dev/null", "-tt", "-p", str(PORT),
                 "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + str(ROOT / "known_hosts"),
                 "-o", "BatchMode=yes", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=3",
-                token + "@127.0.0.1"], stdin=slave, stdout=slave, stderr=slave)
+                token + "@127.0.0.1"]
+            self.proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave)
             os.close(slave)
 
     def feed(self, data):
@@ -158,13 +228,14 @@ def main():
     fp = command(["ssh-keygen", "-lf", str(keys / "ssh_host_ed25519_key.pub"), "-E", "sha256"]).split()[1]
     conf = ROOT / "tmtv.conf"
     conf.write_text(f'''set -g tmtv-server-host 127.0.0.1
-set -g tmtv-server-port {PORT}
+set -g tmtv-server-port {HOST_PORT}
 set -g tmtv-server-ed25519-fingerprint "{fp}"
 set -g tmtv-session-name e2e
 set -g tmtv-web-sharing on
 set -g tmtv-web-input on
 set -g status off
 set -g default-shell /bin/sh
+set -g invalid-option-E2E_VIEW yes
 ''')
     relay_log = open(ROOT / "relay.log", "w")
     relay_args = ["tmtv-server", "-vv", "-b", "127.0.0.1", "-h", "localhost", "-k", str(keys),
@@ -175,7 +246,9 @@ set -g default-shell /bin/sh
         relay_args = ["gdb", "-nx", "-batch", "-ex", "set debuginfod enabled off", "-ex", "set follow-fork-mode child",
                       "-ex", "handle SIGPIPE nostop noprint pass", "-ex", "run", "-ex", "thread apply all bt", "--args", *relay_args]
     relay = subprocess.Popen(relay_args, cwd=ROOT, stdout=relay_log, stderr=relay_log)
+    transport = HostTransport()
     viewers = []
+    local_viewers = []
     try:
         def healthy():
             try:
@@ -237,8 +310,110 @@ set -g default-shell /bin/sh
         assert not (ROOT / "ssh-ro-forbidden").exists()
         assert not (ROOT / "web-ro-forbidden").exists()
         print("PASS SSH/SSE RO input isolation and web CSRF gate; RW control remains usable", flush=True)
+
+        # Observe real mode commands through decoded viewer terminals, not just
+        # host state or echoed input. Enter without a selection, then move/select.
+        host("copy-mode")
+        host("send-keys", "-X", "history-top")
+        host("send-keys", "-X", "cursor-down")
+        host("send-keys", "-X", "cursor-right")
+        def copy_cursor():
+            return tuple(map(int, host("display-message", "-p", "#{copy_cursor_x},#{copy_cursor_y}").split(",")))
+        def cursor_matches(viewer):
+            viewer.pump()
+            return (viewer.screen.cursor.x, viewer.screen.cursor.y) == copy_cursor()
+
+        def reconnect_host(check, label):
+            # Only the encrypted host TCP connection is cut. Existing viewers
+            # observe that loss; fresh viewers then use the exact original links.
+            aliases = {p.name: os.readlink(p) for p in sessions.iterdir() if p.is_symlink()}
+            old_target = aliases[rw]
+            old_generation = transport.generation
+            before = host("display-message", "-p", "#{pane_mode}|#{copy_cursor_x},#{copy_cursor_y}|#{selection_present}|#{scroll_position}")
+            transport.cut()
+            transport.paused = False
+            wait_for(lambda: transport.generation > old_generation and (sessions / rw).is_symlink()
+                     and os.readlink(sessions / rw) != old_target and request("HEAD", "/" + rw)[0] == 200,
+                     "host reconnect reclaims stable named token", seconds=45)
+            assert transport.error is None, transport.error
+            assert host("display-message", "-p", "#{pane_mode}|#{copy_cursor_x},#{copy_cursor_y}|#{selection_present}|#{scroll_position}") == before
+            target = os.readlink(sessions / rw)
+            for name in aliases:
+                assert (sessions / name).is_symlink() and os.readlink(sessions / name) == target, "alias lost: " + name
+            for viewer in viewers:
+                viewer.close()
+            viewers.clear()
+            for token in (rw, ro):
+                for web in (False, True):
+                    viewer = Viewer(token, web=web)
+                    viewers.append(viewer)
+                    wait_for(lambda: check(viewer), label)
+            assert viewers[1].readonly is False and viewers[1].input_enabled is True
+            assert viewers[3].readonly is True and viewers[3].input_enabled is False
+
+        for viewer in viewers:
+            wait_for(lambda: cursor_matches(viewer), "copy cursor reaches viewer without selection")
+        print("PASS copy-mode entry and cursor movement reach SSH/SSE viewers without a selection", flush=True)
+        reconnect_host(cursor_matches, "reconnected viewer restores unselected copy cursor")
+        print("PASS real host TCP reconnect restores unselected copy state through unchanged links", flush=True)
+        host("send-keys", "-X", "begin-selection")
+        host("send-keys", "-X", "cursor-right")
+        host("send-keys", "-X", "cursor-right")
+        expected_cursor = copy_cursor()
+        def selection_matches(viewer):
+            viewer.pump()
+            x, y = expected_cursor
+            selected = viewer.screen.buffer[y][x - 1]
+            normal = viewer.screen.buffer[y][x + 1]
+            return viewer.screen.display[y].startswith("BASE_READY") and (selected.fg, selected.bg, selected.reverse) != (normal.fg, normal.bg, normal.reverse)
+        for viewer in viewers:
+            wait_for(lambda: selection_matches(viewer), "copy selection reaches viewer")
+        # Freeze copy backing, then change the live shell grid independently.
+        # Reconnect must restore both grids, not clone the new live output.
+        pane_tty = host("display-message", "-p", "#{pane_tty}")
+        host("run-shell", "printf '\\033[2J\\033[HLIVE_WHILE_COPY\\n' > " + pane_tty)
+        wait_for(lambda: "LIVE_WHILE_COPY" in host("capture-pane", "-p"), "live base changes underneath frozen copy mode")
+        reconnect_host(selection_matches, "reconnected viewer restores copy selection")
+        print("PASS real host TCP reconnect retains links and restores active copy selection/cursor", flush=True)
+        host("send-keys", "-X", "cancel")
+        host("send-keys", "-l", "printf 'COPY_EXIT_RESTORED\\n'")
+        host("send-keys", "Enter")
+        for viewer in viewers:
+            viewer.sees("LIVE_WHILE_COPY")
+            viewer.sees("COPY_EXIT_RESTORED")
+        ssh_rw, web_rw = viewers[0], viewers[1]
+        ssh_ro, web_ro = viewers[2], viewers[3]
+        ssh_ro.send(b"echo BAD > /tmp/e2e/reconnect-ro-forbidden\r")
+        assert request("POST", "/" + ro + "/input", b"echo BAD > /tmp/e2e/reconnect-web-ro-forbidden\r",
+                       {"X-Tmtv-Input": "1", "X-Tmtv-Viewer-Id": str(web_rw.viewer_id)})[0] == 403
+        ssh_rw.send(b"echo yes > /tmp/e2e/reconnect-rw\r")
+        wait_for(lambda: (ROOT / "reconnect-rw").exists(), "RW input after reconnect and copy exit")
+        assert not (ROOT / "reconnect-ro-forbidden").exists()
+        assert not (ROOT / "reconnect-web-ro-forbidden").exists()
+        print("PASS copy exit restores live output and reconnect preserves RO/RW isolation", flush=True)
+
+        # Startup configuration errors use the production literal view-output
+        # path when the first local client attaches. No synthetic wire frames.
+        local_viewers.append(Viewer(None, local=True))
+        wait_for(lambda: host("display-message", "-p", "#{pane_mode}") == "view-mode", "host enters literal view mode")
+        for viewer in viewers:
+            viewer.sees("invalid-option-E2E_VIEW")
+        def view_matches(viewer):
+            return "invalid-option-E2E_VIEW" in viewer.text()
+        reconnect_host(view_matches, "view backing survives actual host reconnect")
+        assert host("display-message", "-p", "#{pane_mode}") == "view-mode"
+        print("PASS literal view backing and mode survive real reconnect for SSH/SSE RW/RO viewers", flush=True)
+        host("send-keys", "-X", "cancel")
+        host("send-keys", "-l", "printf 'VIEW_EXIT_RESTORED\\n'")
+        host("send-keys", "Enter")
+        for viewer in viewers:
+            viewer.sees("VIEW_EXIT_RESTORED")
+        print("PASS view exit returns all viewers to the preserved live shell", flush=True)
         for viewer in viewers:
             viewer.close()
+        for viewer in local_viewers:
+            viewer.close()
+        local_viewers.clear()
         viewers.clear()
         host("send-keys", "-l", "printf '\\033[2J\\033[HLATE_VIEWER_READY\\n'")
         host("send-keys", "Enter")
@@ -248,12 +423,14 @@ set -g default-shell /bin/sh
             viewers.append(viewer)
             viewer.sees("LATE_VIEWER_READY")
         print("PASS fresh SSH/SSE RO viewers reconstruct the current screen", flush=True)
-        print("7 end-to-end checks passed; browser DOM, host transport reconnect, copy/view mode and SIXEL remain separate coverage.", flush=True)
+        print("13 end-to-end checks passed; browser DOM, parsed view styles, full-fidelity SIXEL and platforms remain separate coverage.", flush=True)
     except BaseException:
         with open(ROOT / "diagnostics.log", "w") as out:
             out.write("session entries: " + repr([p.name for p in Path('/tmp/tmtv/sessions').iterdir()]) + "\n")
+            out.write("host mode: " + host("display-message", "-p", "#{pane_mode}|#{copy_cursor_x},#{copy_cursor_y}|#{selection_present}|#{scroll_position}") + "\n")
             out.write("host screen:\n" + host("capture-pane", "-p") + "\n")
             for viewer in viewers:
+                out.write("viewer cursor: " + repr((viewer.screen.cursor.x, viewer.screen.cursor.y)) + "\n")
                 out.write("viewer screen:\n" + viewer.text() + "\n")
             out.write(subprocess.run(["tmtv", "-S", SOCKET, "show-messages"], capture_output=True, text=True, timeout=3).stdout)
             for path in ROOT.glob("*.log"):
@@ -263,6 +440,8 @@ set -g default-shell /bin/sh
     finally:
         for viewer in viewers:
             viewer.close()
+        for viewer in local_viewers:
+            viewer.close()
         subprocess.run(["tmtv", "-S", SOCKET, "kill-server"], capture_output=True, timeout=5)
         relay.terminate()
         try:
@@ -271,6 +450,7 @@ set -g default-shell /bin/sh
             relay.kill()
             relay.wait()
         relay_log.close()
+        transport.close()
 
 
 if __name__ == "__main__":

@@ -3228,8 +3228,16 @@ window_copy_command(struct window_mode_entry *wme, struct client *c,
 
 	if (action == WINDOW_COPY_CMD_CANCEL)
 		window_pane_reset_mode(wp);
-	else if (action == WINDOW_COPY_CMD_REDRAW)
-		window_copy_redraw_screen(wme);
+	else {
+		if (action == WINDOW_COPY_CMD_REDRAW)
+			window_copy_redraw_screen(wme);
+#ifndef TMATE_SERVER_BUILD
+		/* Forward the completed command state, never an intermediate cursor
+		 * or selection. Cancellation already syncs through reset_mode. */
+		if (tmate_session.encoder.buffer != NULL)
+			tmate_sync_copy_mode(&tmate_session, wp);
+#endif
+	}
 }
 
 static void
@@ -5163,13 +5171,21 @@ int
 window_copy_state_is_valid(struct window_pane *wp,
     const struct window_copy_state *state)
 {
+	struct window_mode_entry *wme;
 	u_int	sx = screen_size_x(&wp->base);
 	u_int	sy = screen_size_y(&wp->base);
 	u_int	hsize = screen_hsize(&wp->base);
 
 	if (state->view_mode != 0 && state->view_mode != 1)
 		return (0);
-	if (state->oy > hsize || (state->view_mode == 1 && state->oy != 0))
+	if (state->view_mode == 1) {
+		wme = TAILQ_FIRST(&wp->modes);
+		if (wme != NULL && wme->mode == &window_view_mode)
+			hsize = screen_hsize(wme->mode->get_screen(wme));
+		else
+			hsize = 0;
+	}
+	if (state->oy > hsize)
 		return (0);
 	if (state->cx >= sx || state->cy >= sy)
 		return (0);
@@ -5179,10 +5195,7 @@ window_copy_state_is_valid(struct window_pane *wp,
 		return (0);
 	if (state->transformed_sely < 0)
 		return (0);
-	if (state->view_mode == 1 && state->transformed_sely >= sy)
-		return (0);
-	if (state->view_mode == 0 &&
-	    state->transformed_sely > (int64_t)hsize + sy - 1)
+	if (state->transformed_sely > (int64_t)hsize + sy - 1)
 		return (0);
 	if (state->selx >= sx)
 		return (0);

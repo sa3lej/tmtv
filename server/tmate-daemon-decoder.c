@@ -488,6 +488,14 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 			seen_idxs[seen_count++] = idx;
 		w = wl->window;
 
+		/* Relay geometry is owned by the host, not by the latest viewer.
+		 * A viewer's status line/terminal size must not resize restored
+		 * copy backing grids and shift their selection coordinates. */
+		options_set_number(w->options, "window-size", WINDOW_SIZE_MANUAL);
+		w->manual_sx = (u_int)sx;
+		w->manual_sy = (u_int)sy;
+		w->flags &= ~WINDOW_RESIZE;
+
 		/* Resize window to match client dimensions */
 		if (w->sx != (u_int)sx || w->sy != (u_int)sy) {
 			tmate_info("sync_windows: resizing window idx=%d from %ux%u to %dx%d",
@@ -970,7 +978,9 @@ static void tmate_sync_copy_mode(__unused struct tmate_session *session,
 	struct tmate_unpacker cm_uk;
 	struct tmate_unpacker input_uk;
 	struct window_copy_state state;
-	int64_t pane_id, backing, oy, cx, cy, selx, transformed_sely, rectangle;
+	int64_t pane_id, backing, oy, cx, cy, selx = 0;
+	int64_t transformed_sely = 0, rectangle = 0;
+	int selection;
 
 	pane_id = unpack_int(uk);
 	unpack_array(uk, &cm_uk);
@@ -1000,11 +1010,14 @@ static void tmate_sync_copy_mode(__unused struct tmate_session *session,
 		struct tmate_unpacker sel_uk;
 
 		unpack_array(&cm_uk, &sel_uk);
-		if (sel_uk.argc != 3)
+		if (sel_uk.argc != 0 && sel_uk.argc != 3)
 			return;
-		selx = unpack_int(&sel_uk);
-		transformed_sely = unpack_int(&sel_uk);
-		rectangle = unpack_int(&sel_uk);
+		selection = sel_uk.argc == 3;
+		if (selection) {
+			selx = unpack_int(&sel_uk);
+			transformed_sely = unpack_int(&sel_uk);
+			rectangle = unpack_int(&sel_uk);
+		}
 	}
 	if (cm_uk.argc != 1 ||
 	    unpack_peek_type(&cm_uk) != MSGPACK_OBJECT_ARRAY)
@@ -1021,7 +1034,7 @@ static void tmate_sync_copy_mode(__unused struct tmate_session *session,
 	state.oy = (u_int)oy;
 	state.cx = (u_int)cx;
 	state.cy = (u_int)cy;
-	state.selection = 1;
+	state.selection = selection;
 	state.selx = (u_int)selx;
 	state.transformed_sely = transformed_sely;
 	state.rectangle = (int)rectangle;

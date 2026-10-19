@@ -547,9 +547,13 @@ static void do_snapshot_grid(struct tmate_encoder *__enc,
 
 static void do_snapshot_pane(struct tmate_encoder *__enc,
 			     struct window_pane *wp,
-			     unsigned int max_history_lines)
+			     unsigned int max_history_lines, int copy_backing)
 {
 	struct screen *screen = &wp->base;
+	struct window_mode_entry *wme = TAILQ_FIRST(&wp->modes);
+
+	if (copy_backing && wme != NULL && wme->mode == &window_copy_mode)
+		screen = wme->mode->get_screen(wme);
 
 	pack(array, 4);
 	pack(int, wp->id);
@@ -573,7 +577,7 @@ static void do_snapshot_pane(struct tmate_encoder *__enc,
 
 static void tmate_send_session_snapshot(struct tmate_session *session,
 					struct session *s,
-					unsigned int max_history_lines)
+					unsigned int max_history_lines, int copy_backing)
 {
 	PACK(session);
 	struct winlink *wl;
@@ -612,7 +616,7 @@ static void tmate_send_session_snapshot(struct tmate_session *session,
 			continue;
 
 		TAILQ_FOREACH(pane, &w->panes, entry)
-			do_snapshot_pane(__enc, pane, max_history_lines);
+			do_snapshot_pane(__enc, pane, max_history_lines, copy_backing);
 	}
 }
 
@@ -636,12 +640,38 @@ static void tmate_send_reconnection_data(struct tmate_session *session)
  */
 #define RECONNECTION_MAX_HISTORY_LINE 100
 
+/* The legacy view operation is literal text. Replay its bounded backing before
+ * restoring the cursor/selection; base snapshots alone contain shell output,
+ * not the independent view buffer. Rich parsed styles require negotiation. */
+static void
+tmate_send_view_snapshot(struct tmate_session *session, struct window_pane *wp)
+{
+	struct window_mode_entry *wme = TAILQ_FIRST(&wp->modes);
+	struct screen *backing;
+	u_int y, start;
+	char *line;
+
+	if (wme == NULL || wme->mode != &window_view_mode)
+		return;
+	backing = wme->mode->get_screen(wme);
+	start = screen_hsize(backing) > RECONNECTION_MAX_HISTORY_LINE ?
+	    screen_hsize(backing) - RECONNECTION_MAX_HISTORY_LINE : 0;
+	for (y = start; y <= screen_hsize(backing) + backing->cy; y++) {
+		line = grid_string_cells(backing->grid, 0, y,
+		    screen_size_x(backing), NULL, 0, backing);
+		tmate_write_copy_mode(session, wp, line);
+		free(line);
+	}
+}
+
 void tmate_send_reconnection_state(struct tmate_session *session)
 {
 	struct session *s;
 	struct winlink *wl;
 	struct window *w;
 	struct window_pane *wp;
+	struct window_mode_entry *wme;
+	int copy_backing = 0;
 
 	/* Start with a fresh encoder */
 	tmate_encoder_destroy(&session->encoder);
@@ -655,16 +685,31 @@ void tmate_send_reconnection_state(struct tmate_session *session)
 	tmate_write_ready(session);
 
 	tmate_sync_layout(session, NULL);
+	s = tmate_find_session(session);
+	if (s != NULL)
+		RB_FOREACH(wl, winlinks, &s->windows)
+			TAILQ_FOREACH(wp, &wl->window->panes, entry) {
+				wme = TAILQ_FIRST(&wp->modes);
+				if (wme != NULL && wme->mode == &window_copy_mode)
+					copy_backing = 1;
+			}
+	/* Clone the frozen copy grid first using existing snapshot/state
+	 * messages, then restore the independent live base below. */
 	tmate_send_session_snapshot(session, NULL,
-				    RECONNECTION_MAX_HISTORY_LINE);
+				    RECONNECTION_MAX_HISTORY_LINE, copy_backing);
 
 	s = tmate_find_session(session);
 	if (s != NULL)
 		RB_FOREACH(wl, winlinks, &s->windows) {
 			w = wl->window;
-			TAILQ_FOREACH(wp, &w->panes, entry)
+			TAILQ_FOREACH(wp, &w->panes, entry) {
+				tmate_send_view_snapshot(session, wp);
 				tmate_sync_copy_mode(session, wp);
+			}
 		}
+	if (copy_backing)
+		tmate_send_session_snapshot(session, NULL,
+		    RECONNECTION_MAX_HISTORY_LINE, 0);
 
 	/* Send current status so late-joining viewers get it immediately */
 	tmate_expand_status();

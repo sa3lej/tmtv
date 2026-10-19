@@ -88,7 +88,7 @@ decode_buffer(struct tmate_decoder *decoder, msgpack_sbuffer *sb, int fragmented
 }
 
 static void
-pack_copy_state(msgpack_sbuffer *sb, int64_t id, int64_t oy, int64_t cx,
+pack_copy_state(msgpack_sbuffer *sb, int view_mode, int64_t id, int64_t oy, int64_t cx,
     int64_t cy, int selection, int64_t selx, int64_t transformed_sely,
     int64_t rectangle)
 {
@@ -99,7 +99,7 @@ pack_copy_state(msgpack_sbuffer *sb, int64_t id, int64_t oy, int64_t cx,
 	msgpack_pack_int(&pk, TMATE_OUT_SYNC_COPY_MODE);
 	msgpack_pack_int64(&pk, id);
 	msgpack_pack_array(&pk, 6);
-	msgpack_pack_int(&pk, 1);
+	msgpack_pack_int(&pk, !view_mode);
 	msgpack_pack_int64(&pk, oy);
 	msgpack_pack_int64(&pk, cx);
 	msgpack_pack_int64(&pk, cy);
@@ -121,18 +121,20 @@ pack_output(msgpack_sbuffer *sb, int64_t id, const char *text)
 	msgpack_pack_array(&pk, 3);
 	msgpack_pack_int(&pk, TMATE_OUT_WRITE_COPY_MODE);
 	msgpack_pack_int64(&pk, id);
-	msgpack_pack_string(&pk, text);
+	/* This is a standalone packer, not the production encoder container. */
+	msgpack_pack_str(&pk, strlen(text));
+	msgpack_pack_str_body(&pk, text, strlen(text));
 }
 
 static void
-decode_copy_state(int64_t oy, int64_t cx, int64_t cy, int selection,
+decode_copy_state(int64_t id, int64_t oy, int64_t cx, int64_t cy, int selection,
     int64_t selx, int64_t transformed_sely, int64_t rectangle, int fragmented)
 {
 	struct tmate_decoder decoder;
 	msgpack_sbuffer sb;
 
 	msgpack_sbuffer_init(&sb);
-	pack_copy_state(&sb, 0, oy, cx, cy, selection, selx,
+	pack_copy_state(&sb, 0, id, oy, cx, cy, selection, selx,
 	    transformed_sely, rectangle);
 	tmate_decoder_init(&decoder, read_message, NULL);
 	decode_buffer(&decoder, &sb, fragmented);
@@ -349,7 +351,7 @@ TEST(valid_copy_state_restores_cursor_selection_and_stack)
 	grid_scroll_history(wp->base.grid, 1);
 	window_pane_set_mode(wp, NULL, &window_clock_mode, NULL, NULL, NULL);
 	clock = TAILQ_FIRST(&wp->modes);
-	decode_copy_state(0, 5, 6, 1, 3, 0, 1, 0);
+	decode_copy_state(wp->id, 0, 5, 6, 1, 3, 0, 1, 0);
 	ASSERT_EQ(dispatched, before + 1);
 	ASSERT(TAILQ_FIRST(&wp->modes)->mode == &window_copy_mode);
 	ASSERT(TAILQ_NEXT(TAILQ_FIRST(&wp->modes), entry) == clock);
@@ -371,8 +373,9 @@ TEST(fragmented_valid_copy_state_restores)
 	struct window_pane *wp = create_pane();
 	int before = dispatched;
 
-	decode_copy_state(0, 4, 3, 0, 0, 0, 0, 1);
+	decode_copy_state(wp->id, 0, 4, 3, 0, 0, 0, 0, 1);
 	ASSERT_EQ(dispatched, before + 1);
+	ASSERT(TAILQ_FIRST(&wp->modes) != NULL);
 	ASSERT(TAILQ_FIRST(&wp->modes)->mode == &window_copy_mode);
 	destroy_pane(wp);
 }
@@ -397,13 +400,13 @@ TEST(malformed_copy_state_is_atomic_and_keeps_boundaries)
 	size_t i;
 
 	for (i = 0; i < nitems(invalid); i++) {
-		decode_copy_state(invalid[i][0], invalid[i][1], invalid[i][2],
+		decode_copy_state(wp->id, invalid[i][0], invalid[i][1], invalid[i][2],
 		    1, invalid[i][3], invalid[i][4], invalid[i][5], 1);
 		ASSERT(TAILQ_EMPTY(&wp->modes));
 	}
 	ASSERT_EQ(dispatched, before + (int)nitems(invalid));
 	msgpack_sbuffer_init(&sb);
-	pack_copy_state(&sb, wp->id, 0, 1, 2, 1, 3, INT64_MIN, 1);
+	pack_copy_state(&sb, 0, wp->id, 0, 1, 2, 1, 3, INT64_MIN, 1);
 	pack_output(&sb, wp->id, "after rejection");
 	tmate_decoder_init(&decoder, read_message, NULL);
 	decode_buffer(&decoder, &sb, 1);
@@ -411,6 +414,39 @@ TEST(malformed_copy_state_is_atomic_and_keeps_boundaries)
 	msgpack_sbuffer_destroy(&sb);
 	ASSERT(TAILQ_FIRST(&wp->modes)->mode == &window_view_mode);
 	ASSERT(line_equals(wp, 0, "after rejection"));
+	destroy_pane(wp);
+}
+
+TEST(view_state_uses_independent_backing_history)
+{
+	struct window_pane *wp = create_pane();
+	struct window_mode_entry *wme;
+	struct window_copy_state state;
+	struct tmate_decoder decoder;
+	msgpack_sbuffer sb;
+	u_int i, hsize;
+
+	for (i = 0; i < 40; i++)
+		write_output(wp->id, "view history", 0);
+	wme = TAILQ_FIRST(&wp->modes);
+	hsize = screen_hsize(wme->mode->get_screen(wme));
+	ASSERT(hsize > 0);
+	ASSERT_EQ(screen_hsize(&wp->base), 0);
+	msgpack_sbuffer_init(&sb);
+	pack_copy_state(&sb, 1, wp->id, hsize, 5, 3, 1, 2,
+	    hsize + wp->sy - 1 - 3, 1);
+	tmate_decoder_init(&decoder, read_message, NULL);
+	decode_buffer(&decoder, &sb, 1);
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	msgpack_sbuffer_destroy(&sb);
+	ASSERT(window_copy_get_state(wp, &state));
+	ASSERT_EQ(state.view_mode, 1);
+	ASSERT_EQ(state.oy, hsize);
+	ASSERT_EQ(state.cx, 5);
+	ASSERT_EQ(state.cy, 3);
+	ASSERT_EQ(state.selection, 1);
+	ASSERT_EQ(state.rectangle, 1);
+	ASSERT_EQ(screen_hsize(&wp->base), 0);
 	destroy_pane(wp);
 }
 
@@ -1271,6 +1307,61 @@ TEST(malformed_snapshot_preserves_both_grids_and_message_boundaries)
 static int host_exit;
 static int host_bulk;
 
+TEST(host_frozen_copy_and_live_base_restore_independently)
+{
+	struct tmate_decoder decoder;
+	struct session *s;
+	struct window_pane *wp;
+	struct window_mode_entry *wme;
+	struct grid_cell gc;
+	char *buf;
+	size_t capacity, count;
+	int ch, before = dispatched;
+
+	ASSERT(RB_EMPTY(&sessions));
+	tmate_decoder_init(&decoder, read_message, tmate_session);
+	while (1) {
+		tmate_decoder_get_buffer(&decoder, &buf, &capacity);
+		if (host_bulk) {
+			count = fread(buf, 1, capacity, stdin);
+			if (count == 0)
+				break;
+		} else {
+			ch = getchar();
+			if (ch == EOF)
+				break;
+			*buf = ch;
+			count = 1;
+		}
+		tmate_decoder_commit(&decoder, count);
+	}
+	ASSERT(!ferror(stdin));
+	ASSERT_EQ(dispatched, before + 5);
+	wp = window_pane_find_by_id(0);
+	ASSERT(wp != NULL);
+	wme = TAILQ_FIRST(&wp->modes);
+	ASSERT(wme != NULL && wme->mode == &window_copy_mode);
+	grid_get_cell(wme->mode->get_screen(wme)->grid, 0, 1, &gc);
+	ASSERT_EQ(gc.data.data[0], 'F');
+	grid_get_cell(wp->base.grid, 0, 1, &gc);
+	ASSERT_EQ(gc.data.data[0], 'L');
+	ASSERT(wp->base.saved_grid != NULL);
+	grid_get_cell(wp->base.saved_grid, 0, 0, &gc);
+	ASSERT_EQ(gc.data.data[0], 'S');
+	ASSERT_EQ(options_get_number(wp->window->options, "window-size"), WINDOW_SIZE_MANUAL);
+	ASSERT_EQ(wp->window->manual_sx, 80);
+	ASSERT_EQ(wp->window->manual_sy, 24);
+	window_pane_reset_mode(wp);
+	ASSERT(wp->screen == &wp->base);
+	grid_get_cell(wp->screen->grid, 0, 1, &gc);
+	ASSERT_EQ(gc.data.data[0], 'L');
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	s = RB_MIN(sessions, &sessions);
+	session_destroy(s, 0, __func__);
+	while (cmdq_next(NULL) != 0)
+		;
+}
+
 TEST(host_copy_state_routes_and_preserves_clock)
 {
 	struct window_pane *wp = create_pane();
@@ -1377,7 +1468,11 @@ main(int argc, char **argv)
 			options_default(global_w_options, oe);
 	}
 	TEST_SUITE_BEGIN("Production relay copy output");
-	if (argc == 2 && (strstr(argv[1], "--host-vertical-reconnect") == argv[1] ||
+	if (argc == 2 && (strcmp(argv[1], "--host-frozen-copy") == 0 ||
+	    strcmp(argv[1], "--host-frozen-copy-bulk") == 0)) {
+		host_bulk = strcmp(argv[1], "--host-frozen-copy-bulk") == 0;
+		RUN_TEST(host_frozen_copy_and_live_base_restore_independently);
+	} else if (argc == 2 && (strstr(argv[1], "--host-vertical-reconnect") == argv[1] ||
 	    strstr(argv[1], "--host-horizontal-reconnect") == argv[1] ||
 	    strstr(argv[1], "--host-mixed-vertical-reconnect") == argv[1] ||
 	    strstr(argv[1], "--host-mixed-horizontal-reconnect") == argv[1])) {
@@ -1421,6 +1516,10 @@ main(int argc, char **argv)
 		RUN_TEST(existing_view_mode_is_resumed);
 		RUN_TEST(empty_state_exits_copy_and_preserves_unrelated_modes);
 		RUN_TEST(nonempty_and_invalid_pane_state_do_not_exit);
+		RUN_TEST(valid_copy_state_restores_cursor_selection_and_stack);
+		RUN_TEST(fragmented_valid_copy_state_restores);
+		RUN_TEST(malformed_copy_state_is_atomic_and_keeps_boundaries);
+		RUN_TEST(view_state_uses_independent_backing_history);
 	}
 	options_free(global_w_options);
 	options_free(global_s_options);

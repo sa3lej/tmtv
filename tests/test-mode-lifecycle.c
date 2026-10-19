@@ -509,7 +509,7 @@ emit_copy_output(int exit_mode)
 	return (result);
 }
 
-static int emit_layout;
+static int emit_layout, emit_frozen_copy;
 
 static int
 emit_copy_state(void)
@@ -557,6 +557,7 @@ emit_snapshot_message(void *userdata, struct tmate_unpacker *uk)
 	msgpack_packer *pk = userdata;
 	int i;
 	if (uk->argc == 0 || (uk->argv[0].via.i64 != TMATE_OUT_SNAPSHOT &&
+	    !(emit_frozen_copy && uk->argv[0].via.i64 == TMATE_OUT_SYNC_COPY_MODE) &&
 	    (!emit_layout || (uk->argv[0].via.i64 != TMATE_OUT_SYNC_LAYOUT &&
 	    uk->argv[0].via.i64 != TMATE_OUT_PTY_DATA))))
 		return;
@@ -587,7 +588,7 @@ emit_reconnect_snapshot(void)
 	wl = winlink_add(&s->windows, 1);
 	wl->session = s;
 	winlink_set_window(wl, second->window);
-	if (emit_layout) {
+	if (emit_layout && !emit_frozen_copy) {
 		window_resize(first->window, 67, 19, -1, -1);
 		window_pane_resize(first, 67, 19);
 		window_pane_resize(second, 43, 12);
@@ -623,9 +624,21 @@ emit_reconnect_snapshot(void)
 	gc = grid_default_cell;
 	utf8_set(&gc.data, 'B');
 	grid_set_cell(second->base.grid, 0, 0, &gc);
+	if (emit_frozen_copy) {
+		struct args *args = args_create();
+		gc = grid_default_cell;
+		utf8_set(&gc.data, 'F');
+		grid_set_cell(first->base.grid, 0, 1, &gc);
+		first->base.grid->linedata[1].cellused = 3;
+		first->base.cx = 5;
+		window_pane_set_mode(first, first, &window_copy_mode, NULL, NULL, args);
+		args_free(args);
+		utf8_set(&gc.data, 'L');
+		grid_set_cell(first->base.grid, 0, 1, &gc);
+	}
 	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
 	tmate_send_reconnection_state(&tmate_session);
-	if (emit_layout) {
+	if (emit_layout && !emit_frozen_copy) {
 		tmate_pty_data(&tmate_session, first, "\033[10;4HZ", 8);
 		tmate_pty_data(&tmate_session, second, "\033[2;3HY", 7);
 	}
@@ -753,13 +766,15 @@ main(int argc, char **argv)
 	if (argc == 2 && (strcmp(argv[1], "--emit-copy-output") == 0 ||
 	    strcmp(argv[1], "--emit-copy-exit") == 0 ||
 	    strcmp(argv[1], "--emit-copy-state") == 0 ||
+	    strcmp(argv[1], "--emit-frozen-copy") == 0 ||
 	    strcmp(argv[1], "--emit-snapshot") == 0 ||
 	    strcmp(argv[1], "--emit-layout-snapshot") == 0 ||
 	    strcmp(argv[1], "--emit-vertical-reconnect") == 0 ||
 	    strcmp(argv[1], "--emit-horizontal-reconnect") == 0 ||
 	    strcmp(argv[1], "--emit-mixed-vertical-reconnect") == 0 ||
 	    strcmp(argv[1], "--emit-mixed-horizontal-reconnect") == 0)) {
-		emit_layout = strcmp(argv[1], "--emit-layout-snapshot") == 0;
+		emit_frozen_copy = strcmp(argv[1], "--emit-frozen-copy") == 0;
+		emit_layout = emit_frozen_copy || strcmp(argv[1], "--emit-layout-snapshot") == 0;
 		int result = strcmp(argv[1], "--emit-copy-state") == 0 ?
 		    emit_copy_state() :
 		    strstr(argv[1], "-reconnect") != NULL ?

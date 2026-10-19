@@ -538,13 +538,21 @@ python3 -m venv /tmp/tmtv-e2e-venv
 make -C tests relay-e2e PYTHON=/tmp/tmtv-e2e-venv/bin/python
 ```
 
-The seven checks cover host registration, valid/invalid web and SSH tokens, SSH and SSE
-terminal decoding, bidirectional RW input, SSH/web RO input isolation, the web CSRF
-gate, and late viewers reconstructing the current screen. A successful write must
+The thirteen checks cover delayed host registration, valid/invalid web and SSH tokens,
+SSH/SSE terminal decoding, bidirectional RW input, SSH/web RO input isolation, the
+web CSRF gate, and late viewers reconstructing the current screen. The fixture cuts
+only the opaque host TCP transport and verifies stable named/opaque aliases,
+unselected and selected copy state, independent frozen-copy/live-shell grids,
+literal view backing, and mode exit after real host reconnects. Viewers reconnect
+through the original links; uninterrupted SSH sockets are not promised. A successful write must
 produce a real host-side effect, not merely HTTP 200 or an echoed command. The
-terminal stream is parsed with pyte. This is transport validation, not browser DOM,
-full host-transport reconnect, copy/view-mode, SIXEL or cross-platform coverage.
-Those need the broader integration suite. This target does not run in `make all`
+terminal stream and selection styles are parsed with pyte, including the SSE
+virtual PTY's extra status row. Copy backing is restored through existing snapshot
+and state operations before an independent live-base snapshot; literal view lines
+use the existing view-output operation. Snapshot history remains bounded to 100
+lines. Full-fidelity parsed view styles, deeper scrollback, browser DOM, SIXEL and
+cross-platform coverage still need the broader integration/protocol work.
+This target does not run in `make all`
 and requires no existing server, credentials, DNS, TLS or deployment.
 
 Optional `E2E_ARGS='--artifacts /private/log/path'` retains fixture logs, excluding
