@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: format-draw.c,v 1.34 2026/07/21 07:20:18 nicm Exp $ */
 
 /*
  * Copyright (c) 2019 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -49,6 +49,7 @@ format_is_type(struct format_range *fr, struct style *sy)
 	case STYLE_RANGE_NONE:
 	case STYLE_RANGE_LEFT:
 	case STYLE_RANGE_RIGHT:
+	case STYLE_RANGE_CONTROL:
 		return (1);
 	case STYLE_RANGE_PANE:
 	case STYLE_RANGE_WINDOW:
@@ -709,6 +710,7 @@ format_draw(struct screen_write_ctx *octx, const struct grid_cell *base,
 					     "AFTER" };
 	size_t			 size = strlen(expanded);
 	struct screen		*os = octx->s, s[TOTAL];
+	struct hyperlinks	*hl = os->hyperlinks;
 	struct screen_write_ctx	 ctx[TOTAL];
 	u_int			 ocx = os->cx, ocy = os->cy, n, i, width[TOTAL];
 	u_int			 map[] = { LEFT,
@@ -722,7 +724,7 @@ format_draw(struct screen_write_ctx *octx, const struct grid_cell *base,
 	struct grid_cell	 gc, current_default, base_default;
 	struct style		 sy, saved_sy;
 	struct utf8_data	*ud = &sy.gc.data;
-	const char		*cp, *end;
+	const char		*cp, *end, *link_uri;
 	enum utf8_state		 more;
 	char			*tmp;
 	struct format_range	*fr = NULL, *fr1;
@@ -837,6 +839,17 @@ format_draw(struct screen_write_ctx *octx, const struct grid_cell *base,
 			sy.gc.fg = base->fg;
 		}
 
+		/*
+		 * Resolve any hyperlink and store it in the cell. The URI
+		 * doubles as the internal ID so repeated links share one entry
+		 * and the ID stays stable across redraws.
+		 */
+		link_uri = style_link(&sy);
+		if (link_uri != NULL && hl != NULL)
+			sy.gc.link = hyperlinks_put(hl, link_uri, link_uri);
+		else
+			sy.gc.link = 0;
+
 		/* If this style has a fill colour, store it for later. */
 		if (sy.fill != 8)
 			fill = sy.fill;
@@ -945,7 +958,7 @@ format_draw(struct screen_write_ctx *octx, const struct grid_cell *base,
 		if (srs != NULL) {
 			if (fr != NULL && !format_is_type(fr, &sy)) {
 				if (s[current].cx != fr->start) {
-					fr->end = s[current].cx + 1;
+					fr->end = s[current].cx;
 					TAILQ_INSERT_TAIL(&frs, fr, entry);
 				} else
 					free(fr);
@@ -1065,6 +1078,10 @@ format_draw(struct screen_write_ctx *octx, const struct grid_cell *base,
 			log_debug("%s: range user|%u at %u-%u", __func__,
 			    sr->argument, sr->start, sr->end);
 			break;
+		case STYLE_RANGE_CONTROL:
+			log_debug("%s: range control|%u at %u-%u", __func__,
+			    sr->argument, sr->start, sr->end);
+			break;
 		}
 		format_free_range(&frs, fr);
 	}
@@ -1116,7 +1133,7 @@ format_width(const char *expanded)
 /*
  * Trim on the left, taking #[] into account.  Note, we copy the whole set of
  * unescaped #s, but only add their escaped size to width. This is because the
- * format_draw function will actually do the escaping when it runs
+ * format_draw function will actually do the escaping.
  */
 char *
 format_trim_left(const char *expanded, u_int limit)

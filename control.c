@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: control.c,v 1.68 2026/09/09 08:30:05 nicm Exp $ */
 
 /*
  * Copyright (c) 2012 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -19,6 +19,9 @@
 
 #include <sys/types.h>
 
+#include <errno.h>
+#include <event.h>
+#include <poll.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -180,6 +183,38 @@ control_free_block(struct control_state *cs, struct control_block *cb)
 	free(cb);
 }
 
+/* Get pane offsets for this client. */
+static struct control_pane *
+control_get_pane(struct client *c, struct window_pane *wp)
+{
+	struct control_state	*cs = c->control_state;
+	struct control_pane	 cp = { .pane = wp->id };
+
+	return (RB_FIND(control_panes, &cs->panes, &cp));
+}
+
+/* Add pane offsets for this client. */
+static struct control_pane *
+control_add_pane(struct client *c, struct window_pane *wp)
+{
+	struct control_state	*cs = c->control_state;
+	struct control_pane	*cp;
+
+	cp = control_get_pane(c, wp);
+	if (cp != NULL)
+		return (cp);
+
+	cp = xcalloc(1, sizeof *cp);
+	cp->pane = wp->id;
+	RB_INSERT(control_panes, &cs->panes, cp);
+
+	memcpy(&cp->offset, &wp->offset, sizeof cp->offset);
+	memcpy(&cp->queued, &wp->offset, sizeof cp->queued);
+	TAILQ_INIT(&cp->blocks);
+
+	return (cp);
+}
+
 /* Get window for this client. */
 static struct control_window *
 control_get_window(struct client *c, u_int window)
@@ -238,38 +273,6 @@ control_clear_window_size(struct client *c, u_int window)
 		RB_REMOVE(control_windows, &cs->windows, cw);
 		free(cw);
 	}
-}
-
-/* Get pane offsets for this client. */
-static struct control_pane *
-control_get_pane(struct client *c, struct window_pane *wp)
-{
-	struct control_state	*cs = c->control_state;
-	struct control_pane	 cp = { .pane = wp->id };
-
-	return (RB_FIND(control_panes, &cs->panes, &cp));
-}
-
-/* Add pane offsets for this client. */
-static struct control_pane *
-control_add_pane(struct client *c, struct window_pane *wp)
-{
-	struct control_state	*cs = c->control_state;
-	struct control_pane	*cp;
-
-	cp = control_get_pane(c, wp);
-	if (cp != NULL)
-		return (cp);
-
-	cp = xcalloc(1, sizeof *cp);
-	cp->pane = wp->id;
-	RB_INSERT(control_panes, &cs->panes, cp);
-
-	memcpy(&cp->offset, &wp->offset, sizeof cp->offset);
-	memcpy(&cp->queued, &wp->offset, sizeof cp->queued);
-	TAILQ_INIT(&cp->blocks);
-
-	return (cp);
 }
 
 /* Discard output for a pane. */
@@ -405,7 +408,6 @@ control_pause_pane(struct client *c, struct window_pane *wp)
 void
 control_reset_pane(struct client *c, struct window_pane *wp)
 {
-	struct control_state	*cs = c->control_state;
 	struct control_pane	*cp;
 
 	if (c->control_state == NULL)
@@ -734,6 +736,53 @@ control_all_done(struct client *c)
 	return (EVBUFFER_LENGTH(cs->write_event->output) == 0);
 }
 
+/*
+ * Wait for the terminal to send an empty line or close, used by a control
+ * client after printing %exit so a wrapping terminal (such as iTerm2) can
+ * finish reading.
+ */
+void
+control_wait_exit(int fd)
+{
+	struct pollfd	 pfd;
+	struct evbuffer	*evb;
+	char		*line;
+	int		 n;
+
+	evb = evbuffer_new();
+	if (evb == NULL)
+		fatalx("out of memory");
+
+	for (;;) {
+		line = evbuffer_readln(evb, NULL, EVBUFFER_EOL_LF);
+		if (line != NULL) {
+			if (*line == '\0') { /* empty line, stop */
+				free(line);
+				break;
+			}
+			free(line);
+			continue; /* drain buffered lines first */
+		}
+
+		memset(&pfd, 0, sizeof pfd);
+		pfd.fd = fd;
+		pfd.events = POLLIN;
+		if (poll(&pfd, 1, INFTIM) == -1) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+
+		n = evbuffer_read(evb, fd, -1);
+		if (n == 0)
+			break;
+		if (n == -1 && errno != EAGAIN && errno != EINTR)
+			break;
+	}
+
+	evbuffer_free(evb);
+}
+
 /* Flush all blocks until output. */
 static void
 control_flush_all_blocks(struct client *c)
@@ -1004,7 +1053,6 @@ control_discard_all(struct client *c)
 {
 	struct control_state	*cs = c->control_state;
 	struct control_block	*cb, *cb1;
-	struct control_window	*cw, *cw1;
 
 	control_discard(c);
 	TAILQ_FOREACH_SAFE(cb, &cs->all_blocks, all_entry, cb1)
@@ -1024,6 +1072,7 @@ control_stop(struct client *c)
 
 	if (cs == NULL)
 		return;
+
 	monitor_destroy(cs->subs);
 
 	TAILQ_FOREACH_SAFE(cl, &cs->deferred, entry, cl1) {

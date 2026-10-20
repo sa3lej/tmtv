@@ -1,8 +1,27 @@
 /* Link the complete host. Test modes exercise the production lifecycle API. */
 #include "../tmate.h"
 #include "../tmate-protocol.h"
+#include "../tmate-key.h"
 #include "test-harness.h"
 #include <locale.h>
+
+/* Frozen protocol 6 values from the pre-port header, not internal enum math. */
+TEST(sharing_key_numbers_stay_compatible)
+{
+	ASSERT_EQ(tmate_key_to_wire(KEYC_BSPACE, 6), 0x10e25a);
+	ASSERT_EQ(tmate_key_to_wire(KEYC_F1, 6), 0x10e25b);
+	ASSERT_EQ(tmate_key_to_wire(KEYC_UP, 6), 0x10e26e);
+	ASSERT_EQ(tmate_key_to_wire(KEYC_RIGHT, 6), 0x10e271);
+	ASSERT_EQ(tmate_key_to_wire(KEYC_FOCUS_IN, 6), 0x10e000);
+	ASSERT_EQ(tmate_key_to_wire(KEYC_PASTE_END, 6), 0x10e004);
+	ASSERT_EQ(tmate_key_to_wire(KEYC_BSPACE, 5), 0x10e251);
+	ASSERT_EQ(tmate_key_from_wire(0x10e26e | KEYC_CTRL), KEYC_UP | KEYC_CTRL);
+	ASSERT_EQ(tmate_key_from_wire(0x10f003), KEYC_USER + 3);
+	ASSERT_EQ(tmate_key_from_wire(0x1f98a), 0x1f98a);
+	ASSERT_EQ(tmate_key_to_wire(0x1f98a | KEYC_META, 6), 0x1f98a | KEYC_META);
+	ASSERT_EQ(tmate_key_from_wire(0x10e010), KEYC_UNKNOWN);
+	ASSERT_EQ(tmate_key_to_wire(KEYC_MOUSE, 6), TMATE_WIRE_UNKNOWN);
+}
 
 static struct cmdq_item *seen_item;
 static struct cmd_find_state *seen_fs;
@@ -372,7 +391,7 @@ check_snapshot_cell_fields(int fragmented, int empty_name)
 	winlink_set_window(wl, wp->window);
 	s->curw = wl;
 	window_set_active_pane(wp->window, wp, 0);
-	window_set_name(wp->window, empty_name ? "" : "snapshot-fields");
+	window_set_name(wp->window, empty_name ? "" : "snapshot-fields", 0);
 	/* TAB sets the high flag bit; modern attributes exceed one wire byte. */
 	grid_set_tab(&gc, 1);
 	gc.attr = GRID_ATTR_OVERLINE | GRID_ATTR_STRIKETHROUGH | GRID_ATTR_BRIGHT;
@@ -392,7 +411,7 @@ check_snapshot_cell_fields(int fragmented, int empty_name)
 	utf8_append(&gc.data, 0x8c); /* wide UTF-8 character 界 */
 	gc.attr = GRID_ATTR_STRIKETHROUGH | GRID_ATTR_REVERSE;
 	grid_set_cell(wp->base.saved_grid, 0, 0, &gc);
-	grid_set_padding(wp->base.saved_grid, 1, 0);
+	grid_set_padding(wp->base.saved_grid, 1, 0, 8);
 	wp->base.saved_cx = 5;
 	wp->base.saved_cy = 2;
 	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
@@ -612,7 +631,7 @@ emit_reconnect_snapshot(void)
 	utf8_append(&gc.data, 0x8c);
 	gc.attr = GRID_ATTR_REVERSE;
 	grid_set_cell(first->base.grid, 1, 1, &gc);
-	grid_set_padding(first->base.grid, 2, 1);
+	grid_set_padding(first->base.grid, 2, 1, 8);
 	first->base.cx = first->sx;
 	first->base.cy = 3;
 	first->base.saved_grid = grid_create(first->sx, first->sy, 0);
@@ -790,6 +809,7 @@ main(int argc, char **argv)
 		return (result);
 	}
 	TEST_SUITE_BEGIN("Production mode lifecycle");
+	RUN_TEST(sharing_key_numbers_stay_compatible);
 	RUN_TEST(context_and_duplicate_entry);
 	RUN_TEST(declined_mode_preserves_base_and_previous_mode);
 	RUN_TEST(no_stack_replacement_restores_underlying_mode_on_decline);

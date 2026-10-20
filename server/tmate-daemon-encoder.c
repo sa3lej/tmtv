@@ -1,5 +1,6 @@
 #include "tmate.h"
 #include "tmate-protocol.h"
+#include "../tmate-key.h"
 
 #define pack(what, ...) _pack(&tmate_session->daemon_encoder, what, ##__VA_ARGS__)
 
@@ -147,10 +148,9 @@ void tmate_client_pane_key(int pane_id, key_code key)
 		return;
 	}
 
-	if (tmate_session->client_protocol_version == 5 && key & KEYC_BASE) {
-		if ((key & KEYC_MASK_KEY) >= (KEYC_BSPACE & KEYC_MASK_KEY))
-			key -= 9;
-	}
+	key = tmate_key_to_wire(key, tmate_session->client_protocol_version);
+	if (key == TMATE_WIRE_UNKNOWN)
+		return;
 
 	pack(array, 3);
 	pack(int, TMATE_IN_PANE_KEY);
@@ -316,5 +316,5 @@ void tmate_send_user_input(struct tmate_session *session,
 	_pack(&session->daemon_encoder, int, TMATE_IN_USER_INPUT);
 	_pack(&session->daemon_encoder, int, user_id);
 	_pack(&session->daemon_encoder, int, pane_id);
-	_pack(&session->daemon_encoder, unsigned_int, (unsigned int)key);
+	_pack(&session->daemon_encoder, uint64, tmate_key_to_wire(key, 6));
 }

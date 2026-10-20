@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: cmd-new-window.c,v 1.104 2026/09/03 21:04:11 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -38,8 +38,8 @@ const struct cmd_entry cmd_new_window_entry = {
 	.name = "new-window",
 	.alias = "neww",
 
-	.args = { "abc:de:F:kn:PSt:", 0, -1, NULL },
-	.usage = "[-abdkPS] [-c start-directory] [-e environment] [-F format] "
+	.args = { "abc:de:EF:kn:PSt:", 0, -1, NULL },
+	.usage = "[-abdEkPS] [-c start-directory] [-e environment] [-F format] "
 		 "[-n window-name] " CMD_TARGET_WINDOW_USAGE
 		 " [shell-command [argument ...]]",
 
@@ -61,40 +61,69 @@ cmd_new_window_exec(struct cmd *self, struct cmdq_item *item)
 	struct session		*s = target->s;
 	struct winlink		*wl = target->wl, *new_wl = NULL;
 	int			 idx = target->idx, before;
-	char			*cause = NULL, *cp, *expanded;
+	int			 count = args_count(args);
+	char			*cause = NULL, *cp, *expanded, *wname = NULL;
 	const char		*template, *name;
 	struct cmd_find_state	 fs;
 	struct args_value	*av;
 
+	if (args_has(args, 'E') &&
+	    count != 0 &&
+	    (count != 1 || *args_string(args, 0) != '\0')) {
+		cmdq_error(item, "command cannot be given for empty pane");
+		return (CMD_RETURN_ERROR);
+	}
+
 	/*
-	 * If -S and -n are given and -t is not and a single window with this
-	 * name already exists, select it.
+	 * If -S is given, select an existing window instead of creating a
+	 * new one: preferring -t if it already points at a window, or
+	 * otherwise -n if one exists with that name. If neither matches,
+	 * fall through and create a window as normal.
 	 */
 	name = args_get(args, 'n');
-	if (args_has(args, 'S') && name != NULL && target->idx == -1) {
+	if (name != NULL) {
 		expanded = format_single(item, name, c, s, NULL, NULL);
-		RB_FOREACH(wl, winlinks, &s->windows) {
-			if (strcmp(wl->window->name, expanded) != 0)
-				continue;
-			if (new_wl == NULL) {
-				new_wl = wl;
-				continue;
-			}
-			cmdq_error(item, "multiple windows named %s", name);
+		if (!check_name(expanded)) {
+			cmdq_error(item, "invalid window name: %s", expanded);
 			free(expanded);
 			return (CMD_RETURN_ERROR);
 		}
+		wname = clean_name(expanded, 0);
 		free(expanded);
-		if (new_wl != NULL) {
-			if (args_has(args, 'd'))
-				return (CMD_RETURN_NORMAL);
-			if (session_set_current(s, new_wl) == 0)
-				server_redraw_session(s);
-			if (c != NULL && c->session != NULL)
-				s->curw->window->latest = c;
-			recalculate_sizes();
-			return (CMD_RETURN_NORMAL);
+	}
+	if (args_has(args, 'S')) {
+		if (idx != -1)
+			new_wl = winlink_find_by_index(&s->windows, idx);
+		else if (wname != NULL) {
+			expanded = format_single(item, wname, c, s, NULL, NULL);
+			RB_FOREACH(wl, winlinks, &s->windows) {
+				if (strcmp(wl->window->name, expanded) != 0)
+					continue;
+				if (new_wl == NULL) {
+					new_wl = wl;
+					continue;
+				}
+				cmdq_error(item, "multiple windows named %s",
+				    wname);
+				free(wname);
+				free(expanded);
+				return (CMD_RETURN_ERROR);
+			}
+			free(expanded);
 		}
+	}
+
+	/* Found an existing window to select instead of creating a new one. */
+	if (new_wl != NULL) {
+		free(wname);
+		if (args_has(args, 'd'))
+			return (CMD_RETURN_NORMAL);
+		if (session_set_current(s, new_wl) == 0)
+			server_redraw_session(s);
+		if (c != NULL && c->session != NULL)
+			s->curw->window->latest = c;
+		recalculate_sizes();
+		return (CMD_RETURN_NORMAL);
 	}
 
 	before = args_has(args, 'b');
@@ -108,7 +137,7 @@ cmd_new_window_exec(struct cmd *self, struct cmdq_item *item)
 	sc.s = s;
 	sc.tc = tc;
 
-	sc.name = args_get(args, 'n');
+	sc.name = wname;
 	args_to_vector(args, &sc.argc, &sc.argv);
 	sc.environ = environ_create();
 
@@ -122,6 +151,8 @@ cmd_new_window_exec(struct cmd *self, struct cmdq_item *item)
 	sc.cwd = args_get(args, 'c');
 
 	sc.flags = 0;
+	if (args_has(args, 'E') || (count == 1 && *args_string(args, 0) == '\0'))
+		sc.flags |= SPAWN_EMPTY;
 	if (args_has(args, 'd'))
 		sc.flags |= SPAWN_DETACHED;
 	if (args_has(args, 'k'))
@@ -130,10 +161,7 @@ cmd_new_window_exec(struct cmd *self, struct cmdq_item *item)
 	if ((new_wl = spawn_window(&sc, &cause)) == NULL) {
 		cmdq_error(item, "create window failed: %s", cause);
 		free(cause);
-		if (sc.argv != NULL)
-			cmd_free_argv(sc.argc, sc.argv);
-		environ_free(sc.environ);
-		return (CMD_RETURN_ERROR);
+		goto fail;
 	}
 	if (!args_has(args, 'd') || new_wl == s->curw) {
 		cmd_find_from_winlink(current, new_wl, 0);
@@ -156,5 +184,13 @@ cmd_new_window_exec(struct cmd *self, struct cmdq_item *item)
 	if (sc.argv != NULL)
 		cmd_free_argv(sc.argc, sc.argv);
 	environ_free(sc.environ);
+	free(wname);
 	return (CMD_RETURN_NORMAL);
+
+fail:
+	if (sc.argv != NULL)
+		cmd_free_argv(sc.argc, sc.argv);
+	environ_free(sc.environ);
+	free(wname);
+	return (CMD_RETURN_ERROR);
 }

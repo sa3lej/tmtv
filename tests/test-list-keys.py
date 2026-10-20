@@ -20,7 +20,8 @@ class ListKeysTests(unittest.TestCase):
             socket = path / "socket"
             config = path / "config"
             # File parsing creates a command group per line inside the block.
-            config.write_text("set-option -g exit-empty off\n"
+            config.write_text('set -g tmtv-server-host ""\n'
+                              "set-option -g exit-empty off\n"
                               "bind-key -T serialization-live x {\n"
                               " set-option -g @live-first 'quote\"; dollar$ back\\slash'\n"
                               " set-option -g @live-second two\n}\n")

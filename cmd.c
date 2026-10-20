@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: cmd.c,v 1.189 2026/07/17 08:29:34 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -71,6 +71,7 @@ extern const struct cmd_entry cmd_lock_server_entry;
 extern const struct cmd_entry cmd_lock_session_entry;
 extern const struct cmd_entry cmd_move_pane_entry;
 extern const struct cmd_entry cmd_move_window_entry;
+extern const struct cmd_entry cmd_new_pane_entry;
 extern const struct cmd_entry cmd_new_session_entry;
 extern const struct cmd_entry cmd_new_window_entry;
 extern const struct cmd_entry cmd_next_layout_entry;
@@ -114,6 +115,7 @@ extern const struct cmd_entry cmd_suspend_client_entry;
 extern const struct cmd_entry cmd_swap_pane_entry;
 extern const struct cmd_entry cmd_swap_window_entry;
 extern const struct cmd_entry cmd_switch_client_entry;
+extern const struct cmd_entry cmd_switch_mode_entry;
 extern const struct cmd_entry cmd_unbind_key_entry;
 extern const struct cmd_entry cmd_unlink_window_entry;
 extern const struct cmd_entry cmd_wait_for_entry;
@@ -163,6 +165,7 @@ const struct cmd_entry *cmd_table[] = {
 	&cmd_lock_session_entry,
 	&cmd_move_pane_entry,
 	&cmd_move_window_entry,
+	&cmd_new_pane_entry,
 	&cmd_new_session_entry,
 	&cmd_new_window_entry,
 	&cmd_next_layout_entry,
@@ -206,6 +209,7 @@ const struct cmd_entry *cmd_table[] = {
 	&cmd_swap_pane_entry,
 	&cmd_swap_window_entry,
 	&cmd_switch_client_entry,
+	&cmd_switch_mode_entry,
 	&cmd_unbind_key_entry,
 	&cmd_unlink_window_entry,
 	&cmd_wait_for_entry,
@@ -774,9 +778,9 @@ cmd_mouse_at(struct window_pane *wp, struct mouse_event *m, u_int *xp,
 	if (m->statusat == 0 && y >= m->statuslines)
 		y -= m->statuslines;
 
-	if (x < wp->xoff || x >= wp->xoff + wp->sx)
+	if ((int)x < wp->xoff || (int)x >= wp->xoff + (int)wp->sx)
 		return (-1);
-	if (y < wp->yoff || y >= wp->yoff + wp->sy)
+	if ((int)y < wp->yoff || (int)y >= wp->yoff + (int)wp->sy)
 		return (-1);
 
 	if (xp != NULL)
@@ -828,6 +832,8 @@ cmd_mouse_pane(struct mouse_event *m, struct session **sp,
 		if (!window_has_pane(wl->window, wp))
 			return (NULL);
 	}
+	if (wl->window->modal != NULL && wp != wl->window->modal)
+		return (NULL);
 
 	if (wlp != NULL)
 		*wlp = wl;

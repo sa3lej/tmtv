@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: cmd-send-keys.c,v 1.81 2026/06/11 19:13:34 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -39,7 +39,8 @@ const struct cmd_entry cmd_send_keys_entry = {
 
 	.target = { 't', CMD_FIND_PANE, 0 },
 
-	.flags = CMD_AFTERHOOK|CMD_CLIENT_CFLAG|CMD_CLIENT_CANFAIL,
+	.flags = CMD_AFTERHOOK|CMD_CLIENT_CFLAG|CMD_CLIENT_CANFAIL|
+		 CMD_READONLY,
 	.exec = cmd_send_keys_exec
 };
 
@@ -69,6 +70,7 @@ cmd_send_keys_inject_key(struct cmdq_item *item, struct cmdq_item *after,
 	struct key_table		*table = NULL;
 	struct key_binding		*bd;
 	struct key_event		*event;
+	struct cmdq_item		*new_after = after;
 
 	if (args_has(args, 'K')) {
 		if (tc == NULL)
@@ -76,10 +78,16 @@ cmd_send_keys_inject_key(struct cmdq_item *item, struct cmdq_item *after,
 		event = xcalloc(1, sizeof *event);
 		event->key = key|KEYC_SENT;
 		memset(&event->m, 0, sizeof event->m);
-		if (server_client_handle_key(tc, event) == 0) {
-			free(event->buf);
-			free(event);
+		if (after == NULL) {
+			if (server_client_handle_key(tc, event) != 0)
+				return (item);
+		} else {
+			if (server_client_handle_key_after(tc, event, after,
+			    &new_after) != 0)
+				return (new_after);
 		}
+		free(event->buf);
+		free(event);
 		return (item);
 	}
 
@@ -167,6 +175,11 @@ cmd_send_keys_exec(struct cmd *self, struct cmdq_item *item)
 	u_int				 count = args_count(args);
 	char				*cause = NULL;
 
+	if (tc != NULL && tc->flags & CLIENT_READONLY && !args_has(args, 'X')) {
+		cmdq_error(item, "client is read-only");
+		return (CMD_RETURN_ERROR);
+	}
+
 	if (args_has(args, 'N')) {
 		np = args_strtonum_and_expand(args, 'N', 1, UINT_MAX, item,
 			 &cause);
@@ -223,8 +236,10 @@ cmd_send_keys_exec(struct cmd *self, struct cmdq_item *item)
 	if (count == 0) {
 		if (args_has(args, 'N') || args_has(args, 'R'))
 			return (CMD_RETURN_NORMAL);
+		after = args_has(args, 'K') ? item : NULL;
 		for (; np != 0; np--)
-			cmd_send_keys_inject_key(item, NULL, args, event->key);
+			after = cmd_send_keys_inject_key(item, after, args,
+			    event->key);
 		return (CMD_RETURN_NORMAL);
 	}
 

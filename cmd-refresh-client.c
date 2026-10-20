@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: cmd-refresh-client.c,v 1.55 2026/07/17 08:37:29 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -34,7 +34,7 @@ const struct cmd_entry cmd_refresh_client_entry = {
 	.name = "refresh-client",
 	.alias = "refresh",
 
-	.args = { "A:B:cC:Df:r:F:l::LRSt:U", 0, 1, NULL },
+	.args = { "A:B:cC:Df:r:F:lLRSt:U", 0, 1, NULL },
 	.usage = "[-cDlLRSU] [-A pane:state] [-B name:what:format] "
 		 "[-C XxY] [-f flags] [-r pane:report] " CMD_TARGET_CLIENT_USAGE
 		 " [adjustment]",
@@ -81,6 +81,8 @@ cmd_refresh_client_control_client_size(struct cmd *self, struct cmdq_item *item)
 		return (CMD_RETURN_NORMAL);
 	}
 	if (sscanf(size, "@%u:", &w) == 1) {
+		log_debug("%s: client %s window @%u: no size", __func__,
+		    tc->name, w);
 		control_clear_window_size(tc, w);
 		recalculate_sizes_now(1);
 		return (CMD_RETURN_NORMAL);
@@ -135,42 +137,12 @@ out:
 	free(copy);
 }
 
-static enum cmd_retval
-cmd_refresh_client_clipboard(struct cmd *self, struct cmdq_item *item)
-{
-	struct args		*args = cmd_get_args(self);
-	struct client		*tc = cmdq_get_target_client(item);
-	const char		*p;
-	u_int			 i;
-	struct cmd_find_state	 fs;
-
-	p = args_get(args, 'l');
-	if (p == NULL) {
-		if (tc->flags & CLIENT_CLIPBOARDBUFFER)
-			return (CMD_RETURN_NORMAL);
-		tc->flags |= CLIENT_CLIPBOARDBUFFER;
-	} else {
-		if (cmd_find_target(&fs, item, p, CMD_FIND_PANE, 0) != 0)
-			return (CMD_RETURN_ERROR);
-		for (i = 0; i < tc->clipboard_npanes; i++) {
-			if (tc->clipboard_panes[i] == fs.wp->id)
-				break;
-		}
-		if (i != tc->clipboard_npanes)
-			return (CMD_RETURN_NORMAL);
-		tc->clipboard_panes = xreallocarray(tc->clipboard_panes,
-		    tc->clipboard_npanes + 1, sizeof *tc->clipboard_panes);
-		tc->clipboard_panes[tc->clipboard_npanes++] = fs.wp->id;
-	}
-	tty_clipboard_query(&tc->tty);
-	return (CMD_RETURN_NORMAL);
-}
-
 static void
 cmd_refresh_report(struct tty *tty, const char *value)
 {
 	struct window_pane	*wp;
 	u_int			 pane;
+	int			 fg, bg;
 	size_t			 size = 0;
 	char			*copy, *split;
 
@@ -187,8 +159,14 @@ cmd_refresh_report(struct tty *tty, const char *value)
 	if (wp == NULL)
 		goto out;
 
-	tty_keys_colours(tty, split, strlen(split), &size, &wp->control_fg,
-	    &wp->control_bg);
+	fg = wp->control_fg;
+	bg = wp->control_bg;
+	if (tty_keys_colours(tty, split, strlen(split), &size, &fg, &bg) == 0) {
+		if (bg != wp->control_bg)
+			wp->flags |= PANE_THEMECHANGED;
+		wp->control_fg = fg;
+	        wp->control_bg = bg;
+	}
 
 out:
 	free(copy);
@@ -256,8 +234,10 @@ cmd_refresh_client_exec(struct cmd *self, struct cmdq_item *item)
 		return (CMD_RETURN_NORMAL);
 	}
 
-	if (args_has(args, 'l'))
-		return (cmd_refresh_client_clipboard(self, item));
+	if (args_has(args, 'l')) {
+		tty_clipboard_query(&tc->tty);
+		return (CMD_RETURN_NORMAL);
+	}
 
 	if (args_has(args, 'F')) /* -F is an alias for -f */
 		server_client_set_flags(tc, args_get(args, 'F'));

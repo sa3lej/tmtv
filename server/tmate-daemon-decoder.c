@@ -236,7 +236,7 @@ tmate_layout_append(struct layout_cell *root, struct layout_cell *lc)
 			child->parent = root;
 			TAILQ_INSERT_TAIL(&root->cells, child, entry);
 		}
-		layout_free_cell(lc);
+		layout_free_cell(lc, 0);
 	} else {
 		lc->parent = root;
 		TAILQ_INSERT_TAIL(&root->cells, lc, entry);
@@ -284,9 +284,9 @@ tmate_layout_tree(struct window_pane **panes, u_int count,
 			if (left == NULL || right == NULL) {
 				/* Panes have no attached cells until the whole tree succeeds. */
 				if (left != NULL)
-					layout_free_cell(left);
+					layout_free_cell(left, 0);
 				if (right != NULL)
-					layout_free_cell(right);
+					layout_free_cell(right, 0);
 				return (NULL);
 			}
 			root = layout_create_cell(NULL);
@@ -332,7 +332,7 @@ tmate_layout_root(struct window *w)
 			bottom = wp->yoff + wp->sy;
 	}
 	if (w->layout_root != NULL)
-		layout_free(w);
+		layout_free(w, 0);
 	if (count == 0)
 		return;
 	root = tmate_layout_tree(panes, count, x, y, right - x, bottom - y);
@@ -367,7 +367,7 @@ static void tmate_sync_window_panes(struct window *w,
 	/* Release every leaf while its pane is still alive. Closing individual
 	 * old leaves later would resize survivors over received rectangles. */
 	if (w->layout_root != NULL) {
-		layout_free(w);
+		layout_free(w, 0);
 		w->layout_root = NULL;
 	}
 
@@ -402,7 +402,7 @@ static void tmate_sync_window_panes(struct window *w,
 			 * Pass NULL for other_pane, 0 for flags.
 			 */
 			wp = window_add_pane(w, NULL, TMATE_HLIMIT, 0);
-			wp->ictx = input_init(wp, NULL, &wp->palette);
+			wp->ictx = input_init(wp, NULL, &wp->palette, NULL);
 			window_set_active_pane(w, wp, 0);
 
 			/* Replay any pty_data that arrived before this
@@ -479,7 +479,7 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 			wl = session_attach(s, w, idx, NULL);
 			if (!wl)
 				tmate_fatal("can't create window idx=%d", idx);
-			window_set_name(w, name);
+			window_set_name(w, name, 0);
 			/* Disable automatic rename so client-sent names stick */
 			options_set_number(w->options, "automatic-rename", 0);
 		}
@@ -503,7 +503,7 @@ static void tmate_sync_windows(struct session *s, int sx, int sy,
 			window_resize(w, sx, sy, -1, -1);
 		}
 
-		window_set_name(w, name);
+		window_set_name(w, name, 0);
 		free(name);
 
 		tmate_sync_window_panes(w, &uk, &num_panes);
@@ -1184,7 +1184,7 @@ snapshot_grid(msgpack_object obj, struct grid *current, u_int *cx, u_int *cy,
 				    (gc.flags & GRID_FLAG_TAB))
 					goto invalid;
 				padding--;
-				grid_set_padding(gd, x, y);
+				grid_set_padding(gd, x, y, gc.bg);
 				continue;
 			}
 			if (padding != 0)

@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: window-client.c,v 1.49 2026/08/31 12:41:03 kirill Exp $ */
 
 /*
  * Copyright (c) 2017 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -26,7 +26,8 @@
 #include "tmux.h"
 
 static struct screen	*window_client_init(struct window_mode_entry *,
-			     struct cmdq_item *, struct cmd_find_state *, struct args *);
+			     struct cmdq_item *, struct cmd_find_state *,
+			     struct args *);
 static void		 window_client_free(struct window_mode_entry *);
 static void		 window_client_resize(struct window_mode_entry *, u_int,
 			     u_int);
@@ -38,7 +39,7 @@ static void		 window_client_key(struct window_mode_entry *,
 #define WINDOW_CLIENT_DEFAULT_COMMAND "detach-client -t '%%'"
 
 #define WINDOW_CLIENT_DEFAULT_FORMAT \
-	"#{t/p:client_activity}: session #{session_name}"
+	"#[fg=themelightgrey]#{t/p:client_activity}: session #[default]#{session_name}"
 
 #define WINDOW_CLIENT_DEFAULT_KEY_FORMAT \
 	"#{?#{e|<:#{line},10}," \
@@ -46,6 +47,100 @@ static void		 window_client_key(struct window_mode_entry *,
 	",#{e|<:#{line},36},"	\
 		"M-#{a:#{e|+:97,#{e|-:#{line},10}}}" \
 	"}"
+
+#define WINDOW_CLIENT_FEATURE(f) \
+	"#{?#{I/f:" #f "}," \
+	"#[fg=themegreen],#[fg=themelightgrey]}#{p/15:#{l:" #f "}}" \
+	"#[default]"
+static const char *window_client_info_lines[] = {
+	"#[fg=themelightgrey]Client Name   #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{client_name} #[fg=themelightgrey]"
+	"#[fg=themelightgrey](PID #{client_pid})#[default]",
+	"#[fg=themelightgrey]Session       #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{session_name}",
+	"#[fg=themelightgrey]Attach Time   #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{t:client_created} "
+	"#[fg=themelightgrey](#{t/r:client_created})#[default]",
+	"#[fg=themelightgrey]Activity Time #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{t:client_activity} "
+	"#[fg=themelightgrey](#{t/r:client_activity})#[default]",
+	"#[fg=themelightgrey]Terminal Type #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{?client_termtype,#{client_termtype},Unknown}",
+	"#[fg=themelightgrey]TERM          #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{client_termname}",
+	"#[fg=themelightgrey]Size          #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{client_width}x#{client_height} "
+	"#[fg=themelightgrey](cell #{client_cell_width}x"
+	"#{client_cell_height})#[default]",
+	"#[fg=themelightgrey]Bytes Written #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{client_written} "
+	"#[fg=themelightgrey](#{client_discarded} discarded)#[default]",
+
+	"#[fg=themelightgrey]Features      #[#{E:tree-mode-border-style},acs]x#[default] "
+	WINDOW_CLIENT_FEATURE(256) " "
+	WINDOW_CLIENT_FEATURE(RGB) " "
+	WINDOW_CLIENT_FEATURE(bpaste) " "
+	WINDOW_CLIENT_FEATURE(ccolour),
+	"              #[#{E:tree-mode-border-style},acs]x#[default] "
+	WINDOW_CLIENT_FEATURE(clipboard) " "
+	WINDOW_CLIENT_FEATURE(cstyle) " "
+	WINDOW_CLIENT_FEATURE(extkeys) " "
+	WINDOW_CLIENT_FEATURE(focus),
+	"              #[#{E:tree-mode-border-style},acs]x#[default] "
+	WINDOW_CLIENT_FEATURE(hyperlinks) " "
+	WINDOW_CLIENT_FEATURE(ignorefkeys) " "
+	WINDOW_CLIENT_FEATURE(margins) " "
+	WINDOW_CLIENT_FEATURE(mouse),
+	"              #[#{E:tree-mode-border-style},acs]x#[default] "
+	WINDOW_CLIENT_FEATURE(osc7) " "
+	WINDOW_CLIENT_FEATURE(overline) " "
+	WINDOW_CLIENT_FEATURE(progressbar) " "
+	WINDOW_CLIENT_FEATURE(rectfill),
+	"              #[#{E:tree-mode-border-style},acs]x#[default] "
+	WINDOW_CLIENT_FEATURE(sixel) " "
+	WINDOW_CLIENT_FEATURE(strikethrough) " "
+	WINDOW_CLIENT_FEATURE(sync) " "
+	WINDOW_CLIENT_FEATURE(title),
+	"              #[#{E:tree-mode-border-style},acs]x#[default] "
+	WINDOW_CLIENT_FEATURE(usstyle) " "
+	WINDOW_CLIENT_FEATURE(utf8),
+	"#[#{E:tree-mode-border-style},acs]qqqqqqqqqqqqqqn#{R:q,#{window_width}}#[default]",
+
+	"#[fg=themelightgrey]prefix        #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{prefix}",
+
+	"#[fg=themelightgrey]mouse         #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{?mouse,#{?#{I/c:kmous},,#[fg=themered]}on,#[fg=themelightgrey]off} "
+	"#{?#{I/c:kmous},,#[align=right]unavailable: [kmous] missing}",
+
+	"#[fg=themelightgrey]set-clipboard #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{?#{!=:#{set-clipboard},off},#{?#{I/c:Ms},,"
+	"#[fg=themered]}#{set-clipboard},#[fg=themelightgrey]off} "
+	"#{?#{I/c:Ms},,#[align=right]unavailable: [Ms] "
+	"#{?clipboard_invalid,invalid,missing}}",
+
+	"#[fg=themelightgrey]get-clipboard #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{?#{!=:#{get-clipboard},off},#{?#{I/c:Ms},,"
+	"#[fg=themered]}#{get-clipboard},#[fg=themelightgrey]off} "
+	"#{?#{I/c:Ms},,#[align=right]unavailable: [Ms] "
+	"#{?clipboard_invalid,invalid,missing}}",
+
+	"#[fg=themelightgrey]focus-events  #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{?focus-events,#{?#{I/f:focus},,#[fg=themered]}on,#[fg=themelightgrey]off} "
+	"#{?#{I/f:focus},,#[align=right]unavailable: [Enfcs] or [Dcfcs] missing}",
+
+	"#[fg=themelightgrey]extended-keys #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{?#{!=:#{extended-keys},off},#{?#{I/f:extkeys},,"
+	"#[fg=themered]}#{extended-keys},#[fg=themelightgrey]off} "
+	"#{?#{I/f:extkeys},,#[align=right]unavailable: [Eneks] or [Dseks] missing}",
+
+	"#[fg=themelightgrey]set-titles    #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{?set-titles,on,#[fg=themelightgrey]off}",
+
+	"#[fg=themelightgrey]escape-time   #[#{E:tree-mode-border-style},acs]x#[default] "
+	"#{escape-time} ms",
+};
+
 
 static const struct menu_item window_client_menu_items[] = {
 	{ "Detach", 'd', NULL },
@@ -71,22 +166,9 @@ const struct window_mode window_client_mode = {
 	.key = window_client_key,
 };
 
-enum window_client_sort_type {
-	WINDOW_CLIENT_BY_NAME,
-	WINDOW_CLIENT_BY_SIZE,
-	WINDOW_CLIENT_BY_CREATION_TIME,
-	WINDOW_CLIENT_BY_ACTIVITY_TIME,
-};
-static const char *window_client_sort_list[] = {
-	"name",
-	"size",
-	"creation",
-	"activity"
-};
-static struct mode_tree_sort_criteria *window_client_sort;
-
 struct window_client_itemdata {
 	struct client	*c;
+	char		*ttyname;
 };
 
 struct window_client_modedata {
@@ -97,8 +179,19 @@ struct window_client_modedata {
 	char				 *key_format;
 	char				 *command;
 
+	int				  hide_preview_this_pane;
+	int				  preview_is_info;
+
 	struct window_client_itemdata	**item_list;
 	u_int				  item_size;
+};
+
+static enum sort_order window_client_order_seq[] = {
+	SORT_NAME,
+	SORT_SIZE,
+	SORT_CREATION,
+	SORT_ACTIVITY,
+	SORT_END,
 };
 
 static struct window_client_itemdata *
@@ -116,57 +209,18 @@ static void
 window_client_free_item(struct window_client_itemdata *item)
 {
 	server_client_unref(item->c);
+	free(item->ttyname);
 	free(item);
 }
 
-static int
-window_client_cmp(const void *a0, const void *b0)
-{
-	const struct window_client_itemdata *const	*a = a0;
-	const struct window_client_itemdata *const	*b = b0;
-	const struct window_client_itemdata		*itema = *a;
-	const struct window_client_itemdata		*itemb = *b;
-	struct client					*ca = itema->c;
-	struct client					*cb = itemb->c;
-	int						 result = 0;
-
-	switch (window_client_sort->field) {
-	case WINDOW_CLIENT_BY_SIZE:
-		result = ca->tty.sx - cb->tty.sx;
-		if (result == 0)
-			result = ca->tty.sy - cb->tty.sy;
-		break;
-	case WINDOW_CLIENT_BY_CREATION_TIME:
-		if (timercmp(&ca->creation_time, &cb->creation_time, >))
-			result = -1;
-		else if (timercmp(&ca->creation_time, &cb->creation_time, <))
-			result = 1;
-		break;
-	case WINDOW_CLIENT_BY_ACTIVITY_TIME:
-		if (timercmp(&ca->activity_time, &cb->activity_time, >))
-			result = -1;
-		else if (timercmp(&ca->activity_time, &cb->activity_time, <))
-			result = 1;
-		break;
-	}
-
-	/* Use WINDOW_CLIENT_BY_NAME as default order and tie breaker. */
-	if (result == 0)
-		result = strcmp(ca->name, cb->name);
-
-	if (window_client_sort->reversed)
-		result = -result;
-	return (result);
-}
-
 static void
-window_client_build(void *modedata, struct mode_tree_sort_criteria *sort_crit,
+window_client_build(void *modedata, struct sort_criteria *sort_crit,
     __unused uint64_t *tag, const char *filter)
 {
 	struct window_client_modedata	*data = modedata;
 	struct window_client_itemdata	*item;
-	u_int				 i;
-	struct client			*c;
+	u_int				 i, n;
+	struct client			*c, **l;
 	char				*text, *cp;
 
 	for (i = 0; i < data->item_size; i++)
@@ -175,19 +229,18 @@ window_client_build(void *modedata, struct mode_tree_sort_criteria *sort_crit,
 	data->item_list = NULL;
 	data->item_size = 0;
 
-	TAILQ_FOREACH(c, &clients, entry) {
-		if (c->session == NULL || (c->flags & CLIENT_UNATTACHEDFLAGS))
+	l = sort_get_clients(&n, sort_crit);
+	for (i = 0; i < n; i++) {
+		if (l[i]->session == NULL ||
+		    (l[i]->flags & CLIENT_UNATTACHEDFLAGS))
 			continue;
 
 		item = window_client_add_item(data);
-		item->c = c;
+		item->c = l[i];
+		item->ttyname = xstrdup(l[i]->ttyname);
 
-		c->references++;
+		l[i]->references++;
 	}
-
-	window_client_sort = sort_crit;
-	qsort(data->item_list, data->item_size, sizeof *data->item_list,
-	    window_client_cmp);
 
 	for (i = 0; i < data->item_size; i++) {
 		item = data->item_list[i];
@@ -210,18 +263,71 @@ window_client_build(void *modedata, struct mode_tree_sort_criteria *sort_crit,
 }
 
 static void
-window_client_draw(__unused void *modedata, void *itemdata,
+window_client_draw_info(__unused void *modedata, void *itemdata,
     struct screen_write_ctx *ctx, u_int sx, u_int sy)
 {
 	struct window_client_itemdata	*item = itemdata;
 	struct client			*c = item->c;
 	struct screen			*s = ctx->s;
+	struct window			*w = c->session->curw->window;
+	struct grid_cell		 gc;
+	u_int				 cx = s->cx, cy = s->cy, i;
+	struct format_tree		*ft;
+	char				*expanded;
+
+	ft = format_create_defaults(NULL, c, NULL, NULL, NULL);
+	if (c->tty.term->flags & TERM_INVALIDMS)
+		format_add(ft, "clipboard_invalid", "1");
+	else
+		format_add(ft, "clipboard_invalid", "0");
+
+	screen_write_cursormove(ctx, cx, cy, 0);
+	for (i = 0; i < nitems(window_client_info_lines); i++) {
+		if (i == sy)
+			break;
+		expanded = format_expand(ft, window_client_info_lines[i]);
+		screen_write_cursormove(ctx, cx, cy + i, 0);
+		format_draw(ctx, &grid_default_cell, sx, expanded, NULL, 0);
+		free(expanded);
+	}
+	if (sx > 14 && i < sy) {
+		memcpy(&gc, &grid_default_cell, sizeof gc);
+		style_apply(&gc, w->options, "tree-mode-border-style", NULL);
+		screen_write_cursormove(ctx, cx + 14, cy + i, 0);
+		screen_write_vline(ctx, sy - i, 0, 0, &gc);
+	}
+
+	format_free(ft);
+}
+
+static void
+window_client_draw(void *modedata, void *itemdata,
+    struct screen_write_ctx *ctx, u_int sx, u_int sy)
+{
+	struct window_client_modedata	*data = modedata;
+	struct window_client_itemdata	*item = itemdata;
+	struct client			*c = item->c;
+	struct session			*session = c->session;
+	struct screen			*s = ctx->s;
+	struct window			*w;
 	struct window_pane		*wp;
+	struct grid_cell		 gc;
 	u_int				 cx = s->cx, cy = s->cy, lines, at;
 
-	if (c->session == NULL || (c->flags & CLIENT_UNATTACHEDFLAGS))
+	if (session == NULL || (c->flags & CLIENT_UNATTACHEDFLAGS))
 		return;
-	wp = c->session->curw->window->active;
+	if (data->preview_is_info) {
+		window_client_draw_info(modedata, itemdata, ctx, sx, sy);
+		return;
+	}
+	w = session->curw->window;
+	wp = w->active;
+	if (data->hide_preview_this_pane && wp == data->wp) {
+		if (!TAILQ_EMPTY(&w->last_panes))
+			wp = TAILQ_FIRST(&w->last_panes);
+		else
+			wp = NULL;
+	}
 
 	lines = status_line_size(c);
 	if (lines >= sy)
@@ -232,13 +338,16 @@ window_client_draw(__unused void *modedata, void *itemdata,
 		at = 0;
 
 	screen_write_cursormove(ctx, cx, cy + at, 0);
-	screen_write_preview(ctx, &wp->base, sx, sy - 2 - lines);
+	if (wp != NULL)
+		screen_write_preview(ctx, &wp->base, sx, sy - 2 - lines);
 
 	if (at != 0)
 		screen_write_cursormove(ctx, cx, cy + 2, 0);
 	else
 		screen_write_cursormove(ctx, cx, cy + sy - 1 - lines, 0);
-	screen_write_hline(ctx, sx, 0, 0, BOX_LINES_DEFAULT, NULL);
+	memcpy(&gc, &grid_default_cell, sizeof gc);
+	style_apply(&gc, w->options, "tree-mode-border-style", NULL);
+	screen_write_hline(ctx, sx, 0, 0, BOX_LINES_DEFAULT, &gc);
 
 	if (at != 0)
 		screen_write_cursormove(ctx, cx, cy, 0);
@@ -280,6 +389,44 @@ window_client_get_key(void *modedata, void *itemdata, u_int line)
 	return (key);
 }
 
+static void
+window_client_sort(struct sort_criteria *sort_crit)
+{
+	sort_crit->order_seq = window_client_order_seq;
+	if (sort_crit->order == SORT_END)
+		sort_crit->order = sort_crit->order_seq[0];
+}
+
+static const char* window_client_help_lines[] = {
+	"#[fg=themelightgrey]"
+	"          i #[#{E:tree-mode-border-style},acs]x#[default] Toggle info view",
+	"#[fg=themelightgrey]"
+	"      Enter #[#{E:tree-mode-border-style},acs]x#[default] Choose selected %1",
+	"#[fg=themelightgrey]"
+	"          d #[#{E:tree-mode-border-style},acs]x#[default] Detach selected %1",
+	"#[fg=themelightgrey]"
+	"          D #[#{E:tree-mode-border-style},acs]x#[default] Detach tagged %1s",
+	"#[fg=themelightgrey]"
+	"          x #[#{E:tree-mode-border-style},acs]x#[default] Detach selected %1",
+	"#[fg=themelightgrey]"
+	"          X #[#{E:tree-mode-border-style},acs]x#[default] Detach tagged %1s",
+	"#[fg=themelightgrey]"
+	"          z #[#{E:tree-mode-border-style},acs]x#[default] Suspend selected %1",
+	"#[fg=themelightgrey]"
+	"          Z #[#{E:tree-mode-border-style},acs]x#[default] Suspend tagged %1s",
+	"#[fg=themelightgrey]"
+	"          f #[#{E:tree-mode-border-style},acs]x#[default] Enter a filter",
+	NULL
+};
+
+static const char**
+window_client_help(u_int *width, const char **item)
+{
+	*width = 0;
+	*item = "client";
+	return (window_client_help_lines);
+}
+
 static struct screen *
 window_client_init(struct window_mode_entry *wme,
     __unused struct cmdq_item *item, __unused struct cmd_find_state *fs,
@@ -291,6 +438,8 @@ window_client_init(struct window_mode_entry *wme,
 
 	wme->data = data = xcalloc(1, sizeof *data);
 	data->wp = wp;
+	data->hide_preview_this_pane = args != NULL && args_has(args, 'h');
+	data->preview_is_info = args != NULL && args_has(args, 'i');
 
 	if (args == NULL || !args_has(args, 'F'))
 		data->format = xstrdup(WINDOW_CLIENT_DEFAULT_FORMAT);
@@ -307,9 +456,14 @@ window_client_init(struct window_mode_entry *wme,
 
 	data->data = mode_tree_start(wp, args, window_client_build,
 	    window_client_draw, NULL, window_client_menu, NULL,
-	    window_client_get_key, NULL, data, window_client_menu_items,
-	    window_client_sort_list, nitems(window_client_sort_list), &s);
+	    window_client_get_key, NULL, window_client_sort,
+	    window_client_help, data, window_client_menu_items, &s);
 	mode_tree_zoom(data->data, args);
+
+	if (data->preview_is_info)
+		mode_tree_view_name(data->data, "info");
+	else
+		mode_tree_view_name(data->data, "preview");
 
 	mode_tree_build(data->data);
 	mode_tree_draw(data->data);
@@ -400,9 +554,17 @@ window_client_key(struct window_mode_entry *wme, struct client *c,
 		mode_tree_each_tagged(mtd, window_client_do_detach, c, key, 0);
 		mode_tree_build(mtd);
 		break;
+	case 'i':
+		data->preview_is_info = !data->preview_is_info;
+		if (data->preview_is_info)
+			mode_tree_view_name(mtd, "info");
+		else
+			mode_tree_view_name(mtd, "preview");
+		mode_tree_build(mtd);
+		break;
 	case '\r':
 		item = mode_tree_get_current(mtd);
-		mode_tree_run_command(c, NULL, data->command, item->c->ttyname);
+		mode_tree_run_command(c, NULL, data->command, item->ttyname);
 		finished = 1;
 		break;
 	}

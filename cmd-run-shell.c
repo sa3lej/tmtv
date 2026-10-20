@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: cmd-run-shell.c,v 1.95 2026/09/20 07:59:55 nicm Exp $ */
 
 /*
  * Copyright (c) 2009 Tiago Cunha <me@tiagocunha.org>
@@ -44,9 +44,9 @@ const struct cmd_entry cmd_run_shell_entry = {
 	.name = "run-shell",
 	.alias = "run",
 
-	.args = { "bd:Ct:Es:c:", 0, 1, cmd_run_shell_args_parse },
+	.args = { "bd:Ct:Es:c:", 0, -1, cmd_run_shell_args_parse },
 	.usage = "[-bCE] [-c start-directory] [-d delay] " CMD_TARGET_PANE_USAGE
-	         " [shell-command]",
+	         " [shell-command [argument ...]]",
 
 	.target = { 't', CMD_FIND_PANE, CMD_FIND_CANFAIL },
 
@@ -90,8 +90,8 @@ cmd_run_shell_print(struct job *job, const char *msg)
 			cmdq_print(cdata->item, "%s", msg);
 			return;
 		}
-		if (cdata->item != NULL && cdata->client != NULL)
-			wp = server_client_get_pane(cdata->client);
+		if (cdata->client != NULL && cdata->client->session != NULL)
+			wp = cdata->client->session->curw->window->active;
 		if (wp == NULL && cmd_find_from_nothing(&fs, 0) == 0)
 			wp = fs.wp;
 		if (wp == NULL)
@@ -100,7 +100,8 @@ cmd_run_shell_print(struct job *job, const char *msg)
 
 	wme = TAILQ_FIRST(&wp->modes);
 	if (wme == NULL || wme->mode != &window_view_mode)
-		window_pane_set_mode(wp, NULL, &window_view_mode, NULL, NULL, NULL);
+		window_pane_set_mode(wp, NULL, &window_view_mode, NULL, NULL,
+		    NULL);
 	window_copy_add(wp, 1, "%s", msg);
 }
 
@@ -115,9 +116,11 @@ cmd_run_shell_exec(struct cmd *self, struct cmdq_item *item)
 	struct session			*s = target->s;
 	struct window_pane		*wp = target->wp;
 	const char			*delay, *cmd;
+	struct format_tree		*ft;
 	double				 d;
 	struct timeval			 tv;
-	char				*end;
+	char				*end, key[16];
+	u_int				 i;
 	int				 wait = !args_has(args, 'b');
 
 	if ((delay = args_get(args, 'd')) != NULL) {
@@ -132,8 +135,15 @@ cmd_run_shell_exec(struct cmd *self, struct cmdq_item *item)
 	cdata = xcalloc(1, sizeof *cdata);
 	if (!args_has(args, 'C')) {
 		cmd = args_string(args, 0);
-		if (cmd != NULL)
-			cdata->cmd = format_single_from_target(item, cmd);
+		if (cmd != NULL) {
+			ft = format_create_from_target(item);
+			for (i = 1; i < args_count(args); i++) {
+				xsnprintf(key, sizeof key, "%u", i);
+				format_add(ft, key, "%s", args_string(args, i));
+			}
+			cdata->cmd = format_expand(ft, cmd);
+			format_free(ft);
+		}
 	} else {
 		cdata->state = args_make_commands_prepare(self, item, 0, NULL,
 		    wait, 1);
@@ -154,7 +164,7 @@ cmd_run_shell_exec(struct cmd *self, struct cmdq_item *item)
 	if (cdata->client != NULL)
 		cdata->client->references++;
 	if (args_has(args, 'c'))
-		cdata->cwd = xstrdup(args_get(args, 'c'));
+		cdata->cwd = format_single_from_target(item, args_get(args, 'c'));
 	else
 		cdata->cwd = xstrdup(server_client_get_cwd(c, s));
 
@@ -198,8 +208,17 @@ cmd_run_shell_timer(__unused int fd, __unused short events, void* arg)
 		}
 		if (job_run(cmd, 0, NULL, NULL, cdata->s, cdata->cwd, NULL,
 		    cmd_run_shell_callback, cmd_run_shell_free, cdata,
-		    cdata->flags, -1, -1) == NULL)
+		    cdata->flags, -1, -1) == NULL) {
+			if (cdata->item == NULL)
+				status_message_set(c, -1, 1, 0, 0,
+				    "failed to run command: %s", cmd);
+			else {
+				cmdq_error(cdata->item,
+				    "failed to run command: %s", cmd);
+				cmdq_continue(cdata->item);
+			}
 			cmd_run_shell_free(cdata);
+		}
 		return;
 	}
 

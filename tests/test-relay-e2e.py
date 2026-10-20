@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import pty
 import select
+import shlex
 import socket
 import struct
 import subprocess
@@ -311,6 +312,25 @@ set -g invalid-option-E2E_VIEW yes
         assert not (ROOT / "web-ro-forbidden").exists()
         print("PASS SSH/SSE RO input isolation and web CSRF gate; RW control remains usable", flush=True)
 
+        # Exercise special keys through the actual SSH decoder and stable wire
+        # numbers, rather than only ASCII or host-injected send-keys.
+        sequences = [b"\x1b[A", b"\x1b[B", b"\x1b[D", b"\x1b[C", b"\x1b[3~", b"\x1bOP"]
+        expected = b"".join(sequences)
+        script = ("import os,termios,tty; original=termios.tcgetattr(0); tty.setraw(0); "
+                  "print('SPECIAL_KEYS_READY',flush=True); data=b''; "
+                  f"exec(\"while len(data)<{len(expected)}: data+=os.read(0,{len(expected)}-len(data))\"); "
+                  "open('/tmp/e2e/special-keys','w').write(data.hex()); "
+                  "termios.tcsetattr(0,termios.TCSANOW,original)")
+        host("send-keys", "-l", "python3 -c " + shlex.quote(script))
+        host("send-keys", "Enter")
+        ssh_rw.sees("SPECIAL_KEYS_READY")
+        for sequence in sequences:
+            ssh_rw.send(sequence)
+            time.sleep(.03)
+        wait_for(lambda: (ROOT / "special-keys").exists(), "SSH special keys reach raw host input")
+        assert (ROOT / "special-keys").read_text() == expected.hex()
+        print("PASS SSH arrows, Delete and F1 retain legacy wire numbers and host key semantics", flush=True)
+
         # Observe real mode commands through decoded viewer terminals, not just
         # host state or echoed input. Enter without a selection, then move/select.
         host("copy-mode")
@@ -423,7 +443,7 @@ set -g invalid-option-E2E_VIEW yes
             viewers.append(viewer)
             viewer.sees("LATE_VIEWER_READY")
         print("PASS fresh SSH/SSE RO viewers reconstruct the current screen", flush=True)
-        print("13 end-to-end checks passed; browser DOM, parsed view styles, full-fidelity SIXEL and platforms remain separate coverage.", flush=True)
+        print("14 end-to-end checks passed; browser DOM, parsed view styles, full-fidelity SIXEL and platforms remain separate coverage.", flush=True)
     except BaseException:
         with open(ROOT / "diagnostics.log", "w") as out:
             out.write("session entries: " + repr([p.name for p in Path('/tmp/tmtv/sessions').iterdir()]) + "\n")

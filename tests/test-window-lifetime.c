@@ -64,7 +64,7 @@ TEST(retained_pane_detaches_and_closes_resources)
 	ASSERT_EQ(wp->references, 2);
 	ASSERT(wp->flags & PANE_DESTROYED);
 	ASSERT(window_pane_find_by_id(id) == NULL);
-	ASSERT_EQ(window_count_panes(w), 0);
+	ASSERT_EQ(window_count_panes(w, 1), 0);
 	ASSERT_EQ(wp->fd, -1);
 	ASSERT_EQ(wp->pipe_fd, -1);
 	ASSERT(wp->event == NULL && wp->pipe_event == NULL && wp->ictx == NULL);

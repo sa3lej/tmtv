@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: screen.c,v 1.107 2026/07/26 09:20:54 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -36,6 +36,8 @@ struct screen_sel {
 	u_int		 ex;
 	u_int		 ey;
 
+	u_int		 clipx;
+
 	struct grid_cell cell;
 };
 
@@ -67,6 +69,7 @@ screen_free_titles(struct screen *s)
 
 	free(s->titles);
 	s->titles = NULL;
+	s->ntitles = 0;
 }
 
 /* Create a new screen. */
@@ -78,6 +81,7 @@ screen_init(struct screen *s, u_int sx, u_int sy, u_int hlimit)
 
 	s->title = xstrdup("");
 	s->titles = NULL;
+	s->ntitles = 0;
 	s->path = NULL;
 
 	s->cstyle = SCREEN_CURSOR_DEFAULT;
@@ -97,12 +101,12 @@ screen_init(struct screen *s, u_int sx, u_int sy, u_int hlimit)
 	s->write_list = NULL;
 	s->hyperlinks = NULL;
 
-	screen_reinit(s);
+	screen_reinit(s, 1);
 }
 
 /* Reinitialise screen. */
 void
-screen_reinit(struct screen *s)
+screen_reinit(struct screen *s, int check)
 {
 	s->cx = 0;
 	s->cy = 0;
@@ -121,7 +125,8 @@ screen_reinit(struct screen *s)
 	s->saved_cy = UINT_MAX;
 
 	screen_reset_tabs(s);
-
+	if (check)
+		grid_check_is_clear(s->grid);
 	grid_clear_lines(s->grid, s->grid->hsize, s->grid->sy, 8);
 
 	screen_clear_selection(s);
@@ -131,6 +136,7 @@ screen_reinit(struct screen *s)
 	image_free_all(s);
 #endif
 
+	screen_set_progress_bar(s, PROGRESS_BAR_HIDDEN, 0);
 	screen_reset_hyperlinks(s);
 }
 
@@ -148,6 +154,10 @@ screen_reset_hyperlinks(struct screen *s)
 void
 screen_free(struct screen *s)
 {
+#ifdef ENABLE_SIXEL
+	struct image	*im;
+#endif
+
 	free(s->sel);
 	free(s->tabs);
 	free(s->path);
@@ -165,6 +175,14 @@ screen_free(struct screen *s)
 	screen_free_titles(s);
 
 #ifdef ENABLE_SIXEL
+	/*
+	 * Images saved when entering the alternate screen stay linked in the
+	 * global list; move them back so they are freed and unlinked here, or
+	 * a later eviction would write through this freed screen.
+	 */
+	TAILQ_CONCAT(&s->images, &s->saved_images, entry);
+	TAILQ_FOREACH(im, &s->images, entry)
+		im->list = &s->images;
 	image_free_all(s);
 #endif
 }
@@ -187,10 +205,11 @@ screen_reset_tabs(struct screen *s)
 void
 screen_set_default_cursor(struct screen *s, struct options *oo)
 {
-	int	c;
+	struct grid_cell	gc;
+	int			c;
 
-	c = options_get_number(oo, "cursor-colour");
-	s->default_ccolour = c;
+	style_apply(&gc, oo, "cursor-colour", NULL);
+	s->default_ccolour = gc.fg;
 
 	c = options_get_number(oo, "cursor-style");
 	s->default_mode = 0;
@@ -242,21 +261,30 @@ screen_set_cursor_colour(struct screen *s, int colour)
 
 /* Set screen title. */
 int
-screen_set_title(struct screen *s, const char *title)
+screen_set_title(struct screen *s, const char *title, int untrusted)
 {
-	if (!utf8_isvalid(title))
+	char	*new_title;
+
+	new_title = clean_name(title, untrusted);
+	if (new_title == NULL)
 		return (0);
 	free(s->title);
-	s->title = xstrdup(title);
+	s->title = new_title;
 	return (1);
 }
 
 /* Set screen path. */
-void
-screen_set_path(struct screen *s, const char *path)
+int
+screen_set_path(struct screen *s, const char *path, int untrusted)
 {
+	char	*new_path;
+
+	new_path = clean_name(path, untrusted);
+	if (new_path == NULL)
+		return (0);
 	free(s->path);
-	utf8_stravis(&s->path, path, VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL);
+	s->path = new_path;
+	return (1);
 }
 
 /* Push the current title onto the stack. */
@@ -265,6 +293,16 @@ screen_push_title(struct screen *s)
 {
 	struct screen_title_entry *title_entry;
 
+	log_debug("%s: %u", __func__, s->ntitles);
+
+	while (s->ntitles >= 10) {
+		title_entry = TAILQ_LAST(s->titles, screen_titles);
+		free(title_entry->text);
+		TAILQ_REMOVE(s->titles, title_entry, entry);
+		free(title_entry);
+		s->ntitles--;
+	}
+
 	if (s->titles == NULL) {
 		s->titles = xmalloc(sizeof *s->titles);
 		TAILQ_INIT(s->titles);
@@ -272,6 +310,7 @@ screen_push_title(struct screen *s)
 	title_entry = xmalloc(sizeof *title_entry);
 	title_entry->text = xstrdup(s->title);
 	TAILQ_INSERT_HEAD(s->titles, title_entry, entry);
+	s->ntitles++;
 }
 
 /*
@@ -285,16 +324,30 @@ screen_pop_title(struct screen *s)
 
 	if (s->titles == NULL)
 		return;
+	log_debug("%s: %u", __func__, s->ntitles);
 
 	title_entry = TAILQ_FIRST(s->titles);
 	if (title_entry != NULL) {
-		screen_set_title(s, title_entry->text);
-
+		free(s->title);
+		s->title = title_entry->text;
 		TAILQ_REMOVE(s->titles, title_entry, entry);
-		free(title_entry->text);
 		free(title_entry);
+		s->ntitles--;
 	}
 }
+
+/*
+ * Set the progress bar state and progress. The progress will not be updated
+ * if p is negative.
+ */
+void
+screen_set_progress_bar(struct screen *s, enum progress_bar_state pbs, int p)
+{
+	s->progress_bar.state = pbs;
+	if (p >= 0 && pbs != PROGRESS_BAR_INDETERMINATE)
+		s->progress_bar.progress = p;
+}
+
 
 /* Resize screen with options. */
 void
@@ -442,7 +495,8 @@ screen_resize_y(struct screen *s, u_int sy, int eat_empty, u_int *cy)
 /* Set selection. */
 void
 screen_set_selection(struct screen *s, u_int sx, u_int sy,
-    u_int ex, u_int ey, u_int rectangle, int modekeys, struct grid_cell *gc)
+    u_int ex, u_int ey, u_int rectangle, u_int clipx, int modekeys,
+    struct grid_cell *gc)
 {
 	if (s->sel == NULL)
 		s->sel = xcalloc(1, sizeof *s->sel);
@@ -456,6 +510,7 @@ screen_set_selection(struct screen *s, u_int sx, u_int sy,
 	s->sel->sy = sy;
 	s->sel->ex = ex;
 	s->sel->ey = ey;
+	s->sel->clipx = clipx;
 }
 
 /* Clear selection. */
@@ -482,6 +537,8 @@ screen_check_selection(struct screen *s, u_int px, u_int py)
 	u_int			 xx;
 
 	if (sel == NULL || sel->hidden)
+		return (0);
+	if (px < sel->clipx)
 		return (0);
 
 	if (sel->rectangle) {
@@ -581,12 +638,12 @@ screen_check_selection(struct screen *s, u_int px, u_int py)
 }
 
 /* Get selected grid cell. */
-void
+int
 screen_select_cell(struct screen *s, struct grid_cell *dst,
     const struct grid_cell *src)
 {
 	if (s->sel == NULL || s->sel->hidden)
-		return;
+		return (0);
 
 	memcpy(dst, &s->sel->cell, sizeof *dst);
 	if (COLOUR_DEFAULT(dst->fg))
@@ -600,6 +657,7 @@ screen_select_cell(struct screen *s, struct grid_cell *dst,
 		dst->attr |= (src->attr & GRID_ATTR_CHARSET);
 	else
 		dst->attr |= src->attr;
+	return (1);
 }
 
 /* Reflow wrapped lines. */
@@ -630,13 +688,16 @@ screen_reflow(struct screen *s, u_int new_x, u_int *cx, u_int *cy, int cursor)
  * Enter alternative screen mode. A copy of the visible screen is saved and the
  * history is not updated.
  */
-void
+int
 screen_alternate_on(struct screen *s, struct grid_cell *gc, int cursor)
 {
-	u_int	sx, sy;
+	u_int		 sx, sy;
+#ifdef ENABLE_SIXEL
+	struct image	*im;
+#endif
 
 	if (SCREEN_IS_ALTERNATE(s))
-		return;
+		return 0;
 	sx = screen_size_x(s);
 	sy = screen_size_y(s);
 
@@ -650,19 +711,26 @@ screen_alternate_on(struct screen *s, struct grid_cell *gc, int cursor)
 
 #ifdef ENABLE_SIXEL
 	TAILQ_CONCAT(&s->saved_images, &s->images, entry);
+	TAILQ_FOREACH(im, &s->saved_images, entry)
+	    im->list = &s->saved_images;
 #endif
 
 	grid_view_clear(s->grid, 0, 0, sx, sy, 8);
 
 	s->saved_flags = s->grid->flags;
 	s->grid->flags &= ~GRID_HISTORY;
+
+	return 1;
 }
 
 /* Exit alternate screen mode and restore the copied grid. */
-void
+int
 screen_alternate_off(struct screen *s, struct grid_cell *gc, int cursor)
 {
-	u_int	sx = screen_size_x(s), sy = screen_size_y(s);
+	u_int		 sx = screen_size_x(s), sy = screen_size_y(s);
+#ifdef ENABLE_SIXEL
+	struct image	*im;
+#endif
 
 	/*
 	 * If the current size is different, temporarily resize to the old size
@@ -688,7 +756,7 @@ screen_alternate_off(struct screen *s, struct grid_cell *gc, int cursor)
 			s->cx = screen_size_x(s) - 1;
 		if (s->cy > screen_size_y(s) - 1)
 			s->cy = screen_size_y(s) - 1;
-		return;
+		return 0;
 	}
 
 	/* Restore the saved grid. */
@@ -709,12 +777,16 @@ screen_alternate_off(struct screen *s, struct grid_cell *gc, int cursor)
 #ifdef ENABLE_SIXEL
 	image_free_all(s);
 	TAILQ_CONCAT(&s->images, &s->saved_images, entry);
+	TAILQ_FOREACH(im, &s->images, entry)
+	    im->list = &s->images;
 #endif
 
 	if (s->cx > screen_size_x(s) - 1)
 		s->cx = screen_size_x(s) - 1;
 	if (s->cy > screen_size_y(s) - 1)
 		s->cy = screen_size_y(s) - 1;
+
+	return 1;
 }
 
 /* Get mode as a string. */
@@ -747,6 +819,8 @@ screen_mode_to_string(int mode)
 		strlcat(tmp, "CURSOR_BLINKING,", sizeof tmp);
 	if (mode & MODE_CURSOR_VERY_VISIBLE)
 		strlcat(tmp, "CURSOR_VERY_VISIBLE,", sizeof tmp);
+	if (mode & MODE_CURSOR_BLINKING_SET)
+		strlcat(tmp, "CURSOR_BLINKING_SET,", sizeof tmp);
 	if (mode & MODE_MOUSE_UTF8)
 		strlcat(tmp, "MOUSE_UTF8,", sizeof tmp);
 	if (mode & MODE_MOUSE_SGR)
@@ -765,6 +839,85 @@ screen_mode_to_string(int mode)
 		strlcat(tmp, "KEYS_EXTENDED,", sizeof tmp);
 	if (mode & MODE_KEYS_EXTENDED_2)
 		strlcat(tmp, "KEYS_EXTENDED_2,", sizeof tmp);
-	tmp[strlen(tmp) - 1] = '\0';
+	if (mode & MODE_THEME_UPDATES)
+		strlcat(tmp, "THEME_UPDATES,", sizeof tmp);
+	if (mode & MODE_SYNC)
+		strlcat(tmp, "SYNC,", sizeof tmp);
+	if (*tmp != '\0')
+		tmp[strlen(tmp) - 1] = '\0';
 	return (tmp);
+}
+
+/* Convert screen to a string. */
+const char *
+screen_print(struct screen *s, int line)
+{
+	static char		*buf;
+	static size_t		 len = 16384;
+	const char		*acs;
+	u_int			 x, y;
+	int			 n;
+	size_t			 last = 0;
+	struct utf8_data	 ud;
+	struct grid_line	*gl;
+	struct grid_cell_entry	*gce;
+
+	if (buf == NULL)
+		buf = xmalloc(len);
+
+	for (y = 0; y < screen_hsize(s) + s->grid->sy; y++) {
+		if (line >= 0 && y != (u_int)line)
+			continue;
+		n = snprintf(buf + last, len - last, "%.4d \"", y);
+		if (n <= 0 || (u_int)n >= len - last)
+			goto out;
+		last += n;
+
+		gl = &s->grid->linedata[y];
+		for (x = 0; x < gl->cellused; x++) {
+			gce = &gl->celldata[x];
+			if (gce->flags & GRID_FLAG_PADDING)
+				continue;
+
+			if (~gce->flags & GRID_FLAG_EXTENDED) {
+				if (last + 2 >= len)
+					goto out;
+				buf[last++] = gce->data.data;
+			} else if (gce->flags & GRID_FLAG_TAB) {
+				if (last + 2 >= len)
+					goto out;
+				buf[last++] = '\t';
+			} else if (gce->flags & GRID_ATTR_CHARSET) {
+				acs = tty_acs_get(NULL, gce->data.data);
+				if (acs != NULL)
+					n = strlen(acs);
+				else {
+					acs = &gce->data.data;
+					n = 1;
+				}
+				if (last + n + 1 >= len)
+					goto out;
+				memcpy(buf + last, acs, n);
+				last += n;
+			} else {
+				utf8_to_data(gl->extddata[gce->offset].data,
+				    &ud);
+				if (ud.size > 0) {
+					if (last + ud.size + 1 >= len)
+						goto out;
+					memcpy(buf + last, ud.data, ud.size);
+					last += ud.size;
+				}
+			}
+		}
+
+		if (last + 3 >= len)
+			goto out;
+		buf[last++] = '"';
+		buf[last++] = '\n';
+	}
+
+out:
+	buf[last] = '\0';
+	return (buf);
 }

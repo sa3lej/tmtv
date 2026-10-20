@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: input-keys.c,v 1.114 2026/06/15 21:47:01 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -313,12 +313,6 @@ static struct input_key_entry input_key_defaults[] = {
 	{ .key = KEYC_DC|KEYC_BUILD_MODIFIERS,
 	  .data = "\033[3;_~"
 	},
-	{ .key = KEYC_REPORT_DARK_THEME,
-	  .data = "\033[?997;1n"
-	},
-	{ .key = KEYC_REPORT_LIGHT_THEME,
-	  .data = "\033[?997;2n"
-	},
 };
 static const key_code input_key_modifiers[] = {
 	0,
@@ -489,7 +483,7 @@ input_key_vt10x(struct bufferevent *bev, key_code key)
 {
 	struct utf8_data	 ud;
 	key_code		 onlykey;
-	char			*p;
+	const char		*p;
 	static const char	*standard_map[2] = {
 		"1!9(0)=+;:'\",<.>/-8? 2",
 		"119900=+;;'',,..\x1f\x1f\x7f\x7f\0\0",
@@ -679,8 +673,7 @@ input_key(struct screen *s, struct bufferevent *bev, key_code key)
 	}
 
 	/* Ignore internal function key codes. */
-	if ((key >= KEYC_BASE && key < KEYC_BASE_END) ||
-	    (key >= KEYC_USER && key < KEYC_USER_END)) {
+	if (KEYC_IS_USER(key) || KEYC_IS_SPECIAL(key) || KEYC_IS_MOUSE(key)) {
 		log_debug("%s: ignoring key 0x%llx", __func__, key);
 		return (0);
 	}
@@ -813,7 +806,7 @@ input_key_mouse(struct window_pane *wp, struct mouse_event *m)
 		return;
 	if (cmd_mouse_at(wp, m, &x, &y, 0) != 0)
 		return;
-	if (!window_pane_visible(wp))
+	if (!window_pane_is_visible(wp))
 		return;
 	if (!input_key_get_mouse(s, m, x, y, &buf, &len))
 		return;

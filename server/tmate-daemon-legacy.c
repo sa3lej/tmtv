@@ -120,7 +120,7 @@ void tmate_translate_legacy_key(int pane_id, key_code key)
 	case KEYC_FOCUS_IN:   lkey = LEGACY_KEYC_FOCUS_IN;	break;
 	case KEYC_FOCUS_OUT:  lkey = LEGACY_KEYC_FOCUS_OUT;	break;
 	default:
-		if (justkey >= KEYC_BASE) {
+		if (!KEYC_IS_TYPE(key, KEYC_TYPE_UNICODE)) {
 			/* Unknown key */
 			return;
 		}

@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: cmd-rename-session.c,v 1.39 2026/07/10 13:38:45 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -49,15 +49,17 @@ cmd_rename_session_exec(struct cmd *self, struct cmdq_item *item)
 	struct args		*args = cmd_get_args(self);
 	struct cmd_find_state	*target = cmdq_get_target(item);
 	struct session		*s = target->s;
+	struct event_payload	*ep;
+	struct cmd_find_state	 fs;
 	char			*newname, *tmp;
 
 	tmp = format_single_from_target(item, args_string(args, 0));
-	newname = session_check_name(tmp);
-	if (newname == NULL) {
-		cmdq_error(item, "invalid session: %s", tmp);
+	if (!check_name(tmp)) {
+		cmdq_error(item, "invalid session name: %s", tmp);
 		free(tmp);
 		return (CMD_RETURN_ERROR);
 	}
+	newname = clean_name(tmp, 0);
 	free(tmp);
 	if (strcmp(newname, s->name) == 0) {
 		free(newname);
@@ -69,13 +71,20 @@ cmd_rename_session_exec(struct cmd *self, struct cmdq_item *item)
 		return (CMD_RETURN_ERROR);
 	}
 
+	ep = event_payload_create();
+	cmd_find_from_session(&fs, s, 0);
+	event_payload_set_target(ep, &fs);
+	event_payload_set_session(ep, "session", s);
+	event_payload_set_string(ep, "old_name", "%s", s->name);
+	event_payload_set_string(ep, "new_name", "%s", newname);
+
 	RB_REMOVE(sessions, &sessions, s);
 	free(s->name);
 	s->name = newname;
 	RB_INSERT(sessions, &sessions, s);
 
 	server_status_session(s);
-	events_fire_session("session-renamed", s);
+	events_fire("session-renamed", ep);
 
 	return (CMD_RETURN_NORMAL);
 }

@@ -133,10 +133,10 @@ TEST(optional_argument_preserves_following_flags)
 	struct cmd_parse_result *pr;
 	struct args *args;
 	const char *texts[] = {
-		"refresh-client -l -S",
-		"refresh-client -l -- target",
-		"refresh-client -l -2",
-		"refresh-client -lvalue -S"
+		"resize-pane -D -Z",
+		"resize-pane -D -- target",
+		"resize-pane -D -2",
+		"resize-pane -Dvalue -Z"
 	};
 	u_int i;
 
@@ -144,19 +144,19 @@ TEST(optional_argument_preserves_following_flags)
 		pr = cmd_parse_from_string(texts[i], NULL);
 		ASSERT_EQ(pr->status, CMD_PARSE_SUCCESS);
 		args = cmd_get_args(cmd_list_first(pr->cmdlist));
-		ASSERT(args_has(args, 'l'));
+		ASSERT(args_has(args, 'D'));
 		if (i == 0) {
-			ASSERT(args_get(args, 'l') == NULL);
-			ASSERT(args_has(args, 'S'));
+			ASSERT(args_get(args, 'D') == NULL);
+			ASSERT(args_has(args, 'Z'));
 		} else if (i == 1) {
-			ASSERT(args_get(args, 'l') == NULL);
+			ASSERT(args_get(args, 'D') == NULL);
 			ASSERT_EQ(args_count(args), 1);
 			ASSERT_STR_EQ(args_string(args, 0), "target");
 		} else if (i == 2)
-			ASSERT_STR_EQ(args_get(args, 'l'), "-2");
+			ASSERT_STR_EQ(args_get(args, 'D'), "-2");
 		else {
-			ASSERT_STR_EQ(args_get(args, 'l'), "value");
-			ASSERT(args_has(args, 'S'));
+			ASSERT_STR_EQ(args_get(args, 'D'), "value");
+			ASSERT(args_has(args, 'Z'));
 		}
 		cmd_list_free(pr->cmdlist);
 	}

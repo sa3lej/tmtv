@@ -24,7 +24,7 @@ class PromptHistoryTests(unittest.TestCase):
         self.socket = self.root / "socket"
         self.history = self.root / "history"
         self.config = self.root / "config"
-        self.config.write_text(f'set -g history-file "{self.history}"\n')
+        self.config.write_text(f'set -g tmtv-server-host ""\nset -g history-file "{self.history}"\n')
 
     def command(self, *args, check=True):
         return subprocess.run(

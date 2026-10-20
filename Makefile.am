@@ -13,32 +13,44 @@ dist_EXTRA_tmtv_SOURCES = compat/*.[ch]
 
 # Preprocessor flags.
 AM_CPPFLAGS += @XOPEN_DEFINES@ \
-	-DTMUX_VERSION='"3.6a"' \
+	-DTMUX_VERSION='"3.8"' \
 	-DTMTV_VERSION='"@VERSION@"' \
 	-DTMUX_CONF='"$(sysconfdir)/tmtv.conf:~/.tmtv.conf:$$XDG_CONFIG_HOME/tmtv/tmtv.conf:~/.config/tmtv/tmtv.conf"' \
 	-DTMUX_LOCK_CMD='"@DEFAULT_LOCK_CMD@"' \
-	-DTMUX_TERM='"@DEFAULT_TERM@"'
+	-DTMUX_TERM='"@DEFAULT_TERM@"' \
+	-DTMUX_MOUSE=1
 
 # Additional object files.
 LDADD = $(LIBOBJS)
 
 # Set flags for gcc.
 if IS_GCC
-AM_CFLAGS += -std=gnu99 -O2
+AM_CFLAGS += -std=gnu99
+if IS_OPTIMIZED
+AM_CFLAGS += -O2
+else
+AM_CFLAGS += -O0
+endif
 if IS_DEBUG
-AM_CFLAGS += -g
-AM_CFLAGS += -Wno-long-long -Wall -W -Wformat=2
+AM_CFLAGS += -g3 -ggdb
+AM_CFLAGS += -Wno-long-long -Wall -W -Wformat=2 -Wno-use-after-free
 AM_CFLAGS += -Wmissing-prototypes -Wstrict-prototypes -Wmissing-declarations
 AM_CFLAGS += -Wwrite-strings -Wshadow -Wpointer-arith -Wsign-compare
-AM_CFLAGS += -Wundef -Wbad-function-cast -Winline -Wcast-align
+AM_CFLAGS += -Wundef -Wbad-function-cast -Winline -Wno-cast-align
 AM_CFLAGS += -Wdeclaration-after-statement -Wno-pointer-sign -Wno-attributes
-AM_CFLAGS += -Wno-unused-result -Wno-format-y2k
+AM_CFLAGS += -Wno-unused-result -Wno-format-y2k -Wno-unknown-warning-option
+AM_CFLAGS += -Wno-maybe-uninitialized
 if IS_DARWIN
-AM_CFLAGS += -Wno-deprecated-declarations -Wno-cast-align -Wno-macro-redefined
+AM_CFLAGS += -Wno-deprecated-declarations -Wno-macro-redefined
 endif
 AM_CPPFLAGS += -DDEBUG
 endif
 AM_CPPFLAGS += -iquote.
+if IS_ASAN
+AM_CPPFLAGS += -DASAN
+AM_CFLAGS += -fsanitize=address -fno-omit-frame-pointer
+AM_LDFLAGS += -fsanitize=address
+endif
 endif
 
 # Set flags for Solaris.
@@ -93,7 +105,6 @@ dist_tmtv_SOURCES = \
 	cmd-detach-client.c \
 	cmd-display-menu.c \
 	cmd-display-message.c \
-	cmd-display-panes.c \
 	cmd-find-window.c \
 	cmd-find.c \
 	cmd-if-shell.c \
@@ -153,16 +164,16 @@ dist_tmtv_SOURCES = \
 	control-notify.c \
 	control.c \
 	environ.c \
-	events.c \
-	hooks.c \
-	monitor.c \
 	events-payload.c \
+	events.c \
 	file.c \
-	format.c \
 	format-draw.c \
+	format.c \
+	fuzzy.c \
 	grid-reader.c \
 	grid-view.c \
 	grid.c \
+	hooks.c \
 	hyperlinks.c \
 	input-keys.c \
 	input.c \
@@ -176,12 +187,15 @@ dist_tmtv_SOURCES = \
 	log.c \
 	menu.c \
 	mode-tree.c \
+	monitor.c \
 	names.c \
 	options-table.c \
 	options.c \
 	paste.c \
 	popup.c \
 	proc.c \
+	prompt-history.c \
+	prompt.c \
 	regsub.c \
 	resize.c \
 	screen-redraw.c \
@@ -192,30 +206,37 @@ dist_tmtv_SOURCES = \
 	server-fn.c \
 	server.c \
 	session.c \
+	sort.c \
 	spawn.c \
 	status.c \
 	style.c \
+	tmux-protocol.h \
 	tmux.c \
 	tmux.h \
-	tmux-protocol.h \
 	tty-acs.c \
+	tty-draw.c \
 	tty-features.c \
 	tty-keys.c \
 	tty-term.c \
 	tty.c \
 	utf8-combined.c \
 	utf8.c \
+	window-border.c \
 	window-buffer.c \
 	window-client.c \
 	window-clock.c \
 	window-copy.c \
 	window-customize.c \
+	window-panes.c \
+	window-switch.c \
 	window-tree.c \
+	window-visible.c \
 	window.c \
 	xmalloc.c \
 	xmalloc.h \
 	tmate.h \
 	tmate-protocol.h \
+	tmate-key.h \
 	tmate-debug.c \
 	tmate-decoder.c \
 	tmate-encoder.c \
@@ -250,7 +271,6 @@ dist_tmtv_server_SOURCES = \
 	cmd-detach-client.c \
 	cmd-display-menu.c \
 	cmd-display-message.c \
-	cmd-display-panes.c \
 	cmd-find-window.c \
 	cmd-find.c \
 	cmd-if-shell.c \
@@ -310,16 +330,16 @@ dist_tmtv_server_SOURCES = \
 	control-notify.c \
 	control.c \
 	environ.c \
-	events.c \
-	hooks.c \
-	monitor.c \
 	events-payload.c \
+	events.c \
 	file.c \
-	format.c \
 	format-draw.c \
+	format.c \
+	fuzzy.c \
 	grid-reader.c \
 	grid-view.c \
 	grid.c \
+	hooks.c \
 	hyperlinks.c \
 	input-keys.c \
 	input.c \
@@ -333,12 +353,15 @@ dist_tmtv_server_SOURCES = \
 	log.c \
 	menu.c \
 	mode-tree.c \
+	monitor.c \
 	names.c \
 	options-table.c \
 	options.c \
 	paste.c \
 	popup.c \
 	proc.c \
+	prompt-history.c \
+	prompt.c \
 	regsub.c \
 	resize.c \
 	screen-redraw.c \
@@ -349,30 +372,37 @@ dist_tmtv_server_SOURCES = \
 	server-fn.c \
 	server.c \
 	session.c \
+	sort.c \
 	spawn.c \
 	status.c \
 	style.c \
+	tmux-protocol.h \
 	tmux.c \
 	tmux.h \
-	tmux-protocol.h \
 	tty-acs.c \
+	tty-draw.c \
 	tty-features.c \
 	tty-keys.c \
 	tty-term.c \
 	tty.c \
 	utf8-combined.c \
 	utf8.c \
+	window-border.c \
 	window-buffer.c \
 	window-client.c \
 	window-clock.c \
 	window-copy.c \
 	window-customize.c \
+	window-panes.c \
+	window-switch.c \
 	window-tree.c \
+	window-visible.c \
 	window.c \
 	xmalloc.c \
 	xmalloc.h \
 	tmate.h \
 	tmate-protocol.h \
+	tmate-key.h \
 	server/tmate.h \
 	server/tmate-auth-keys.c \
 	server/tmate-daemon-decoder.c \
@@ -427,10 +457,21 @@ dist_tmtv_server_SOURCES += image.c image-sixel.c
 endif
 endif
 
+# Add bits for fuzzing if enabled.
 if NEED_FUZZING
-check_PROGRAMS = fuzz/input-fuzzer
+check_PROGRAMS = \
+	fuzz/input-fuzzer \
+	fuzz/cmd-parse-fuzzer \
+	fuzz/format-fuzzer \
+	fuzz/style-fuzzer
 fuzz_input_fuzzer_LDFLAGS = $(FUZZING_LIBS)
 fuzz_input_fuzzer_LDADD = $(LDADD) $(tmtv_OBJECTS)
+fuzz_cmd_parse_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_cmd_parse_fuzzer_LDADD = $(LDADD) $(tmtv_OBJECTS)
+fuzz_format_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_format_fuzzer_LDADD = $(LDADD) $(tmtv_OBJECTS)
+fuzz_style_fuzzer_LDFLAGS = $(FUZZING_LIBS)
+fuzz_style_fuzzer_LDADD = $(LDADD) $(tmtv_OBJECTS)
 endif
 
 # Install tmtv.1 in the right format.
@@ -520,7 +561,7 @@ tests/test-control-subscriptions: tests/test-control-subscriptions.o tests/test-
 CLEANFILES += tests/test-control-subscriptions tests/test-control-subscriptions.o
 EXTRA_DIST += tests/test-control-subscriptions.c
 
-tests/test-mode-lifecycle.o: tests/test-mode-lifecycle.c tmux.h
+tests/test-mode-lifecycle.o: tests/test-mode-lifecycle.c tmux.h tmate-key.h
 	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-mode-lifecycle.c -o $@
 
 tests/test-mode-lifecycle: tests/test-mode-lifecycle.o tests/test-window-tmux.o $(tmtv_OBJECTS) $(tmtv_DEPENDENCIES)
@@ -544,3 +585,5 @@ tests/test-relay-copy-output: tests/test-relay-copy-output.o tests/test-relay-tm
 
 CLEANFILES += tests/test-relay-copy-output tests/test-relay-copy-output.o tests/test-relay-tmux.o tests/test-relay-main.o
 EXTRA_DIST += tests/test-relay-copy-output.c
+
+EXTRA_DIST += tests/test-core38-commands.py tests/run-tmux38-regress.sh

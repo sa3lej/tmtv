@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: file.c,v 1.22 2026/08/17 07:56:56 nicm Exp $ */
 
 /*
  * Copyright (c) 2019 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -55,6 +55,7 @@ file_get_path(struct client *c, const char *file)
 	if (*path == '/')
 		return (path);
 	xasprintf(&full_path, "%s/%s", server_client_get_cwd(c, NULL), path);
+	free(path);
 	return (full_path);
 }
 
@@ -184,6 +185,7 @@ file_can_print(struct client *c)
 {
 	if (c == NULL ||
 	    (c->flags & CLIENT_ATTACHED) ||
+	    (c->flags & CLIENT_DEAD) ||
 	    (c->flags & CLIENT_CONTROL))
 		return (0);
 	return (1);
@@ -398,6 +400,10 @@ file_read(struct client *c, const char *path, client_file_cb cb, void *cbdata)
 		}
 		for (;;) {
 			size = fread(buffer, 1, sizeof buffer, f);
+			if (ferror(f)) {
+				cf->error = errno;
+				goto done;
+			}
 			if (evbuffer_add(cf->buffer, buffer, size) != 0) {
 				cf->error = ENOMEM;
 				goto done;
@@ -496,7 +502,8 @@ file_push(struct client_file *cf)
 	} else if (cf->stream > 2) {
 		close.stream = cf->stream;
 		proc_send(cf->peer, MSG_WRITE_CLOSE, -1, &close, sizeof close);
-		file_fire_done(cf);
+		if (cf->c == NULL || (~cf->c->flags & CLIENT_WRITE_ACK))
+			file_fire_done(cf);
 	}
 	free(msg);
 }
@@ -521,14 +528,48 @@ file_write_left(struct client_files *files)
 	return (waiting != 0);
 }
 
+/* Finish writing a client file. */
+static void
+file_write_finished(struct client_file *cf)
+{
+	struct msg_write_done	 msg;
+
+	if (cf->event != NULL) {
+		bufferevent_free(cf->event);
+		cf->event = NULL;
+	}
+	if (cf->fd != -1) {
+		if (close(cf->fd) != 0 && cf->error == 0)
+			cf->error = errno;
+		cf->fd = -1;
+	}
+
+	msg.stream = cf->stream;
+	msg.error = cf->error;
+	proc_send(cf->peer, MSG_WRITE_DONE, -1, &msg, sizeof msg);
+
+	if (cf->cb != NULL)
+		cf->cb(NULL, NULL, 0, -1, NULL, cf->data);
+	file_free(cf);
+}
+
 /* Client file write error callback. */
 static void
-file_write_error_callback(__unused struct bufferevent *bev, __unused short what,
+file_write_error_callback(__unused struct bufferevent *bev, short what,
     void *arg)
 {
 	struct client_file	*cf = arg;
+	int			 error;
+
+	if (what & EVBUFFER_ERROR)
+		error = errno;
+	else
+		error = EIO;
+	if (error == 0)
+		error = EIO;
 
 	log_debug("write error file %d", cf->stream);
+	cf->error = error;
 
 	bufferevent_free(cf->event);
 	cf->event = NULL;
@@ -536,7 +577,9 @@ file_write_error_callback(__unused struct bufferevent *bev, __unused short what,
 	close(cf->fd);
 	cf->fd = -1;
 
-	if (cf->cb != NULL)
+	if (cf->closed)
+		file_write_finished(cf);
+	else if (cf->cb != NULL)
 		cf->cb(NULL, NULL, 0, -1, NULL, cf->data);
 }
 
@@ -548,15 +591,10 @@ file_write_callback(__unused struct bufferevent *bev, void *arg)
 
 	log_debug("write check file %d", cf->stream);
 
-	if (cf->cb != NULL)
+	if (cf->closed && EVBUFFER_LENGTH(cf->event->output) == 0)
+		file_write_finished(cf);
+	else if (cf->cb != NULL)
 		cf->cb(NULL, NULL, 0, -1, NULL, cf->data);
-
-	if (cf->closed && EVBUFFER_LENGTH(cf->event->output) == 0) {
-		bufferevent_free(cf->event);
-		close(cf->fd);
-		RB_REMOVE(client_files, cf->tree, cf);
-		file_free(cf);
-	}
 }
 
 /* Handle a file write open message (client). */
@@ -657,20 +695,16 @@ file_write_close(struct client_files *files, struct imsg *imsg)
 	if ((cf = RB_FIND(client_files, files, &find)) == NULL)
 		fatalx("unknown stream number");
 	log_debug("close file %d", cf->stream);
+	cf->closed = 1;
 
 	if (cf->event == NULL || EVBUFFER_LENGTH(cf->event->output) == 0) {
-		if (cf->event != NULL)
-			bufferevent_free(cf->event);
-		if (cf->fd != -1)
-			close(cf->fd);
-		RB_REMOVE(client_files, files, cf);
-		file_free(cf);
+		file_write_finished(cf);
 	}
 }
 
 /* Client file read error callback. */
 static void
-file_read_error_callback(__unused struct bufferevent *bev, __unused short what,
+file_read_error_callback(__unused struct bufferevent *bev, short what,
     void *arg)
 {
 	struct client_file	*cf = arg;
@@ -679,7 +713,7 @@ file_read_error_callback(__unused struct bufferevent *bev, __unused short what,
 	log_debug("read error file %d", cf->stream);
 
 	msg.stream = cf->stream;
-	msg.error = 0;
+	msg.error = (what & EVBUFFER_ERROR) ? EIO : 0;
 	proc_send(cf->peer, MSG_READ_DONE, -1, &msg, sizeof msg);
 
 	bufferevent_free(cf->event);
@@ -803,7 +837,7 @@ file_read_cancel(struct client_files *files, struct imsg *imsg)
 }
 
 /* Handle a write ready message (server). */
-void
+int
 file_write_ready(struct client_files *files, struct imsg *imsg)
 {
 	struct msg_write_ready	*msg = imsg->data;
@@ -811,19 +845,42 @@ file_write_ready(struct client_files *files, struct imsg *imsg)
 	struct client_file	 find, *cf;
 
 	if (msglen != sizeof *msg)
-		fatalx("bad MSG_WRITE_READY size");
+		return (-1);
 	find.stream = msg->stream;
 	if ((cf = RB_FIND(client_files, files, &find)) == NULL)
-		return;
+		return (0);
 	if (msg->error != 0) {
 		cf->error = msg->error;
 		file_fire_done(cf);
 	} else
 		file_push(cf);
+	return (0);
+}
+
+/* Handle a write done message (server). */
+int
+file_write_done(struct client_files *files, struct imsg *imsg)
+{
+	struct msg_write_done	*msg = imsg->data;
+	size_t			 msglen = imsg->hdr.len - IMSG_HEADER_SIZE;
+	struct client_file	 find, *cf;
+
+	if (msglen != sizeof *msg)
+		return (-1);
+	find.stream = msg->stream;
+	if ((cf = RB_FIND(client_files, files, &find)) == NULL)
+		return (0);
+	if (cf->c == NULL || (~cf->c->flags & CLIENT_WRITE_ACK))
+		return (0);
+
+	log_debug("file %d write done", cf->stream);
+	cf->error = msg->error;
+	file_fire_done(cf);
+	return (0);
 }
 
 /* Handle read data message (server). */
-void
+int
 file_read_data(struct client_files *files, struct imsg *imsg)
 {
 	struct msg_read_data	*msg = imsg->data;
@@ -833,10 +890,10 @@ file_read_data(struct client_files *files, struct imsg *imsg)
 	size_t			 bsize = msglen - sizeof *msg;
 
 	if (msglen < sizeof *msg)
-		fatalx("bad MSG_READ_DATA size");
+		return (-1);
 	find.stream = msg->stream;
 	if ((cf = RB_FIND(client_files, files, &find)) == NULL)
-		return;
+		return (0);
 
 	log_debug("file %d read %zu bytes", cf->stream, bsize);
 	if (cf->error == 0 && !cf->closed) {
@@ -846,10 +903,11 @@ file_read_data(struct client_files *files, struct imsg *imsg)
 		} else
 			file_fire_read(cf);
 	}
+	return (0);
 }
 
 /* Handle a read done message (server). */
-void
+int
 file_read_done(struct client_files *files, struct imsg *imsg)
 {
 	struct msg_read_done	*msg = imsg->data;
@@ -857,12 +915,13 @@ file_read_done(struct client_files *files, struct imsg *imsg)
 	struct client_file	 find, *cf;
 
 	if (msglen != sizeof *msg)
-		fatalx("bad MSG_READ_DONE size");
+		return (-1);
 	find.stream = msg->stream;
 	if ((cf = RB_FIND(client_files, files, &find)) == NULL)
-		return;
+		return (0);
 
 	log_debug("file %d read done", cf->stream);
 	cf->error = msg->error;
 	file_fire_done(cf);
+	return (0);
 }

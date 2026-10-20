@@ -53,7 +53,7 @@ new_session(struct window **w, struct window_pane **wp)
 	wl->session = s;
 	winlink_set_window(wl, *w);
 	s->curw = wl;
-	window_set_name(*w, "monitor-window");
+	window_set_name(*w, "monitor-window", 0);
 	drain();
 	return (s);
 }
@@ -613,7 +613,7 @@ TEST(pane_window_scans_and_subscription_replacement)
 	monitor_add(ms, "windows", MONITOR_ALL_WINDOWS, -1, "#{window_name}", MONITOR_NOTIFY_INITIAL);
 	tick();
 	ASSERT_EQ(reports, 2);
-	window_set_name(w, "changed");
+	window_set_name(w, "changed", 0);
 	tick();
 	ASSERT_EQ(reports, 3);
 	ASSERT_EQ(monitor_get_fire_count(ms, "windows"), 2);

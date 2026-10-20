@@ -31,7 +31,7 @@ relay-e2e:
 	$(MAKE) -C .. tmtv tmtv-server
 	$(PYTHON) run-relay-e2e.py $(E2E_ARGS)
 
-all: relay-copy-output mode-lifecycle unit server-unit functional hooks session-cleanup prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
+all: core38-commands relay-copy-output mode-lifecycle unit server-unit functional hooks session-cleanup prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
 
 unit: $(UNIT_TESTS)
 	@echo ""
@@ -208,3 +208,7 @@ relay-copy-output:
 	        ./test-relay-copy-output --host-$$axis-reconnect < "$$wire"; \
 	        ./test-relay-copy-output --host-$$axis-reconnect-bulk < "$$wire"; \
 	    done
+
+.PHONY: core38-commands
+core38-commands:
+	@TMTV=$(TMTV) $(PYTHON) test-core38-commands.py

@@ -1,4 +1,5 @@
 #include "tmate.h"
+#include "tmate-key.h"
 #include "tmate-protocol.h"
 
 /*
@@ -83,7 +84,7 @@ static void handle_pane_key(struct tmate_session *session,
 	struct window_pane *wp;
 
 	int pane_id = unpack_int(uk);
-	key_code key = unpack_int(uk);
+	key_code key = tmate_key_from_wire(unpack_int(uk));
 
 	s = tmate_find_session(session);
 	if (!s)
@@ -253,6 +254,8 @@ static void handle_user_input(__unused struct tmate_session *session,
 {
 	int user_id = unpack_int(uk);
 	int pane_id = unpack_int(uk);
+	/* Input subscribers consume the stable wire key numbers. This is a
+	 * report to an external application, not input to the local pane. */
 	key_code key = (key_code)unpack_int(uk);
 
 	tmtv_input_on_user_input(user_id, pane_id, key);

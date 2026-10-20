@@ -57,7 +57,7 @@ new_session(struct window **w, struct window_pane **wp)
 	wl->session = s;
 	winlink_set_window(wl, *w);
 	s->curw = wl;
-	window_set_name(*w, "payload-window");
+	window_set_name(*w, "payload-window", 0);
 	drain();
 	return (s);
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: options.c,v 1.92 2026/07/27 19:15:58 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -581,6 +581,7 @@ options_array_set(struct options_entry *o, const char *key, const char *value,
 				*cause = pr->error;
 			else
 				free(pr->error);
+			free(new_key);
 			return (-1);
 		case CMD_PARSE_SUCCESS:
 			break;
@@ -614,6 +615,7 @@ options_array_set(struct options_entry *o, const char *key, const char *value,
 	if (o->tableentry->type == OPTIONS_TABLE_COLOUR) {
 		if ((number = colour_fromstring(value)) == -1) {
 			xasprintf(cause, "bad colour: %s", value);
+			free(new_key);
 			return (-1);
 		}
 		a = options_array_item(o, new_key);
@@ -628,7 +630,7 @@ options_array_set(struct options_entry *o, const char *key, const char *value,
 
 	if (cause != NULL)
 		*cause = xstrdup("wrong array type");
-		free(new_key);
+	free(new_key);
 	return (-1);
 }
 
@@ -760,6 +762,7 @@ options_parse(const char *name, char **key)
 
 	if (*name == '\0')
 		return (NULL);
+	*key = NULL;
 	copy = xstrdup(name);
 	if ((cp = strchr(copy, '[')) == NULL) {
 		return (copy);
@@ -795,8 +798,10 @@ options_parse_get(struct options *oo, const char *s, char **key, int only)
 	else
 		o = options_get(oo, name);
 	free(name);
-	if (o == NULL)
-		free(*key), *key = NULL;
+	if (o == NULL) {
+		free(*key);
+		*key = NULL;
+	}
 	return (o);
 }
 
@@ -874,8 +879,10 @@ options_match_get(struct options *oo, const char *s, char **key, int only,
 	else
 		o = options_get(oo, name);
 	free(name);
-	if (o == NULL)
-		free(*key), *key = NULL;
+	if (o == NULL) {
+		free(*key);
+		*key = NULL;
+	}
 	return (o);
 }
 
@@ -905,7 +912,7 @@ options_get_number(struct options *oo, const char *name)
 	return (o->value.number);
 }
 
-const struct cmd_list *
+struct cmd_list *
 options_get_command(struct options *oo, const char *name)
 {
 	struct options_entry	*o;
@@ -1133,9 +1140,12 @@ struct style *
 options_string_to_style(struct options *oo, const char *name,
     struct format_tree *ft)
 {
-	struct options_entry	*o;
-	const char		*s;
-	char			*expanded;
+	struct options_entry			*o;
+	const struct options_table_entry	*oe;
+	const struct grid_cell			*dgc = &grid_default_cell;
+	const char				*s;
+	char					*expanded;
+	int					 failed;
 
 	o = options_get(oo, name);
 	if (o == NULL || !OPTIONS_IS_STRING(o))
@@ -1144,20 +1154,27 @@ options_string_to_style(struct options *oo, const char *name,
 	if (o->cached)
 		return (&o->style);
 	s = o->value.string;
+	oe = o->tableentry;
 	log_debug("%s: %s is '%s'", __func__, name, s);
 
-	style_set(&o->style, &grid_default_cell);
+	style_set(&o->style, dgc);
 	o->cached = (strstr(s, "#{") == NULL);
 
 	if (ft != NULL && !o->cached) {
 		expanded = format_expand(ft, s);
-		if (style_parse(&o->style, &grid_default_cell, expanded) != 0) {
-			free(expanded);
-			return (NULL);
-		}
+		if (oe != NULL && (oe->flags & OPTIONS_TABLE_IS_COLOUR))
+			failed = style_parse_colour(&o->style, dgc, expanded);
+		else
+			failed = style_parse(&o->style, dgc, expanded);
 		free(expanded);
+		if (failed != 0)
+			return (NULL);
 	} else {
-		if (style_parse(&o->style, &grid_default_cell, s) != 0)
+		if (oe != NULL && (oe->flags & OPTIONS_TABLE_IS_COLOUR))
+			failed = style_parse_colour(&o->style, dgc, s);
+		else
+			failed = style_parse(&o->style, dgc, s);
+		if (failed != 0)
 			return (NULL);
 	}
 	return (&o->style);
@@ -1183,6 +1200,12 @@ options_from_string_check(const struct options_table_entry *oe,
 	    strstr(value, "#{") == NULL &&
 	    style_parse(&sy, &grid_default_cell, value) != 0) {
 		xasprintf(cause, "invalid style: %s", value);
+		return (-1);
+	}
+	if ((oe->flags & OPTIONS_TABLE_IS_COLOUR) &&
+	    strstr(value, "#{") == NULL &&
+	    style_parse_colour(&sy, &grid_default_cell, value) != 0) {
+		xasprintf(cause, "invalid colour: %s", value);
 		return (-1);
 	}
 	return (0);
@@ -1342,6 +1365,17 @@ options_push_changes(const char *name)
 
 	log_debug("%s: %s", __func__, name);
 
+	if (strcmp(name, "theme") == 0 ||
+	    strncmp(name, "dark-theme-", 11) == 0 ||
+	    strncmp(name, "light-theme-", 12) == 0) {
+		TAILQ_FOREACH(loop, &clients, entry) {
+			server_client_update_theme_colours(loop);
+			if (loop->tty.flags & TTY_OPENED)
+				tty_invalidate(&loop->tty);
+			server_redraw_client(loop);
+		}
+	}
+
 	if (strcmp(name, "automatic-rename") == 0) {
 		RB_FOREACH(w, windows, &windows) {
 			if (w->active == NULL)
@@ -1360,7 +1394,7 @@ options_push_changes(const char *name)
 	}
 	if (strcmp(name, "fill-character") == 0) {
 		RB_FOREACH(w, windows, &windows)
-			window_set_fill_character(w);
+			window_set_fill_cells(w);
 	}
 	if (strcmp(name, "key-table") == 0) {
 		TAILQ_FOREACH(loop, &clients, entry)
@@ -1375,12 +1409,26 @@ options_push_changes(const char *name)
 	if (strcmp(name, "status") == 0 ||
 	    strcmp(name, "status-interval") == 0)
 		status_timer_start_all();
+	if (strcmp(name, "status") == 0 ||
+	    strcmp(name, "status-position") == 0 ||
+	    strcmp(name, "pane-border-indicators") == 0 ||
+	    strcmp(name, "pane-border-lines") == 0 ||
+	    strcmp(name, "pane-border-status") == 0 ||
+	    strcmp(name, "pane-scrollbars") == 0 ||
+	    strcmp(name, "pane-scrollbars-timeout") == 0 ||
+	    strcmp(name, "pane-scrollbars-position") == 0 ||
+	    strcmp(name, "pane-scrollbars-style") == 0)
+		redraw_invalidate_all_scenes();
 	if (strcmp(name, "monitor-silence") == 0)
 		alerts_reset_all();
 	if (strcmp(name, "window-style") == 0 ||
 	    strcmp(name, "window-active-style") == 0) {
 		RB_FOREACH(wp, window_pane_tree, &all_window_panes)
 			wp->flags |= (PANE_STYLECHANGED|PANE_THEMECHANGED);
+	}
+	if (*name == '@') {
+		RB_FOREACH(wp, window_pane_tree, &all_window_panes)
+			wp->flags |= PANE_STYLECHANGED;
 	}
 	if (strcmp(name, "pane-colours") == 0) {
 		RB_FOREACH(wp, window_pane_tree, &all_window_panes)
@@ -1389,8 +1437,17 @@ options_push_changes(const char *name)
 	if (strcmp(name, "pane-border-status") == 0 ||
 	    strcmp(name, "pane-scrollbars") == 0 ||
 	    strcmp(name, "pane-scrollbars-position") == 0) {
-		RB_FOREACH(w, windows, &windows)
+		RB_FOREACH(w, windows, &windows) {
+			w->sb = options_get_number(w->options,
+			    "pane-scrollbars");
+			w->sb_pos = options_get_number(w->options,
+			    "pane-scrollbars-position");
 			layout_fix_panes(w, NULL);
+		}
+	}
+	if (strcmp(name, "pane-scrollbars") == 0) {
+		RB_FOREACH(wp, window_pane_tree, &all_window_panes)
+			window_pane_scrollbar_hide(wp);
 	}
 	if (strcmp(name, "pane-scrollbars-style") == 0) {
 		RB_FOREACH(wp, window_pane_tree, &all_window_panes) {
@@ -1404,6 +1461,10 @@ options_push_changes(const char *name)
 		utf8_update_width_cache();
 	if (strcmp(name, "input-buffer-size") == 0)
 		input_set_buffer_size(options_get_number(global_options, name));
+	if (strcmp(name, "history-limit") == 0) {
+		RB_FOREACH(s, sessions, &sessions)
+			session_update_history(s);
+	}
 	RB_FOREACH(s, sessions, &sessions)
 		status_update_cache(s);
 

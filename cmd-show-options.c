@@ -315,9 +315,9 @@ cmd_show_hooks_print_monitor(struct cmd *self, struct cmdq_item *item,
 	format_add(ft, "option_array_key", "%s", "");
 	format_add(ft, "option_has_array_key", "0");
 
+	format_add(ft, "hook_monitor_display", "%s", value);
 	format_add(ft, "hook_monitor_target", "%s", target);
 	format_add(ft, "hook_monitor_format", "%s", format);
-	format_add(ft, "hook_monitor_display", "%s", value);
 
 	fire_count = hooks_monitor_get_fire_count(o);
 	format_add(ft, "hook_fire_count", "%u", fire_count);

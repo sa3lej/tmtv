@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: alerts.c,v 1.35 2026/07/10 13:38:45 nicm Exp $ */
 
 /*
  * Copyright (c) 2015 Nicholas Marriott <nicholas.marriott@gmail.com>

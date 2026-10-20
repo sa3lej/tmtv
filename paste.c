@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: paste.c,v 1.53 2026/07/10 13:38:45 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -40,19 +40,6 @@ static int clipboard_from_remote;
  * Set of paste buffers. Note that paste buffer data is not necessarily a C
  * string!
  */
-
-struct paste_buffer {
-	char		*data;
-	size_t		 size;
-
-	char		*name;
-	time_t		 created;
-	int		 automatic;
-	u_int		 order;
-
-	RB_ENTRY(paste_buffer) name_entry;
-	RB_ENTRY(paste_buffer) time_entry;
-};
 
 static u_int	paste_next_index;
 static u_int	paste_next_order;
@@ -143,7 +130,7 @@ paste_is_empty(void)
 
 /* Get the most recent automatic buffer. */
 struct paste_buffer *
-paste_get_top(const char **name)
+paste_get_top(char **name)
 {
 	struct paste_buffer	*pb;
 
@@ -153,7 +140,7 @@ paste_get_top(const char **name)
 	if (pb == NULL)
 		return (NULL);
 	if (name != NULL)
-		*name = pb->name;
+		*name = xstrdup(pb->name);
 	return (pb);
 }
 
@@ -213,7 +200,6 @@ paste_add(const char *prefix, char *data, size_t size)
 	}
 
 	pb = xmalloc(sizeof *pb);
-
 	pb->name = NULL;
 	do {
 		free(pb->name);
@@ -269,6 +255,7 @@ int
 paste_rename(const char *oldname, const char *newname, char **cause)
 {
 	struct paste_buffer	*pb, *pb_new;
+	char			*name;
 
 	if (cause != NULL)
 		*cause = NULL;
@@ -284,23 +271,33 @@ paste_rename(const char *oldname, const char *newname, char **cause)
 		return (-1);
 	}
 
+	name = clean_name(newname, 0);
+	if (name == NULL) {
+		if (cause != NULL)
+			xasprintf(cause, "invalid buffer name: %s", newname);
+		return (-1);
+	}
+
 	pb = paste_get_name(oldname);
 	if (pb == NULL) {
 		if (cause != NULL)
 			xasprintf(cause, "no buffer %s", oldname);
+		free(name);
 		return (-1);
 	}
 
-	pb_new = paste_get_name(newname);
-	if (pb_new == pb)
+	pb_new = paste_get_name(name);
+	if (pb_new == pb) {
+		free(name);
 		return (0);
+	}
 	if (pb_new != NULL)
 		paste_free(pb_new);
 
 	RB_REMOVE(paste_name_tree, &paste_by_name, pb);
 
 	free(pb->name);
-	pb->name = xstrdup(newname);
+	pb->name = name;
 
 	if (pb->automatic)
 		paste_num_automatic--;
@@ -309,7 +306,7 @@ paste_rename(const char *oldname, const char *newname, char **cause)
 	RB_INSERT(paste_name_tree, &paste_by_name, pb);
 
 	paste_fire_event("paste-buffer-deleted", oldname);
-	paste_fire_event("paste-buffer-changed", newname);
+	paste_fire_event("paste-buffer-changed", pb->name);
 
 	return (0);
 }
@@ -322,6 +319,7 @@ int
 paste_set(char *data, size_t size, const char *name, char **cause)
 {
 	struct paste_buffer	*pb, *old;
+	char			*newname;
 
 	if (cause != NULL)
 		*cause = NULL;
@@ -341,9 +339,15 @@ paste_set(char *data, size_t size, const char *name, char **cause)
 		return (-1);
 	}
 
-	pb = xmalloc(sizeof *pb);
+	newname = clean_name(name, 0);
+	if (newname == NULL) {
+		if (cause != NULL)
+			xasprintf(cause, "invalid buffer name: %s", name);
+		return (-1);
+	}
 
-	pb->name = xstrdup(name);
+	pb = xmalloc(sizeof *pb);
+	pb->name = newname;
 
 	pb->data = data;
 	pb->size = size;
@@ -353,13 +357,13 @@ paste_set(char *data, size_t size, const char *name, char **cause)
 
 	pb->created = time(NULL);
 
-	if ((old = paste_get_name(name)) != NULL)
+	if ((old = paste_get_name(pb->name)) != NULL)
 		paste_free(old);
 
 	RB_INSERT(paste_name_tree, &paste_by_name, pb);
 	RB_INSERT(paste_time_tree, &paste_by_time, pb);
 
-	paste_fire_event("paste-buffer-changed", name);
+	paste_fire_event("paste-buffer-changed", pb->name);
 
 	return (0);
 }

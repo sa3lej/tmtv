@@ -8,12 +8,14 @@ set -e
 
 TMTV="${TMTV:-./tmtv}"
 SOCKET="/tmp/tmtv-hooks-test-$$"
+CONFIG=$(mktemp)
+printf 'set -g tmtv-server-host ""\n' > "$CONFIG"
 PASSED=0
 FAILED=0
 
 cleanup() {
-    "$TMTV" -S "$SOCKET" kill-server 2>/dev/null || true
-    rm -f "$SOCKET"
+    "$TMTV" -f "$CONFIG" -S "$SOCKET" kill-server 2>/dev/null || true
+    rm -f "$SOCKET" "$CONFIG"
 }
 trap cleanup EXIT
 
@@ -60,8 +62,8 @@ else
 fi
 
 # Test 5: tmate options are available
-"$TMTV" -S "$SOCKET" new-session -d -s hooktest 2>/dev/null
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g tmtv-server-host 2>/dev/null || echo "MISSING")
+"$TMTV" -f "$CONFIG" -S "$SOCKET" new-session -d -s hooktest 2>/dev/null
+OUTPUT=$("$TMTV" -f "$CONFIG" -S "$SOCKET" show-option -g tmtv-server-host 2>/dev/null || echo "MISSING")
 if echo "$OUTPUT" | grep -q "tmtv-server-host"; then
     pass "tmtv-server-host option exists"
 else
@@ -69,7 +71,7 @@ else
 fi
 
 # Test 6: tmtv-server-port option
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g tmtv-server-port 2>/dev/null || echo "MISSING")
+OUTPUT=$("$TMTV" -f "$CONFIG" -S "$SOCKET" show-option -g tmtv-server-port 2>/dev/null || echo "MISSING")
 if echo "$OUTPUT" | grep -q "tmtv-server-port"; then
     pass "tmtv-server-port option exists"
 else
@@ -77,7 +79,7 @@ else
 fi
 
 # Test 7: tmtv-identity option (session scope)
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option tmtv-identity 2>/dev/null || echo "MISSING")
+OUTPUT=$("$TMTV" -f "$CONFIG" -S "$SOCKET" show-option tmtv-identity 2>/dev/null || echo "MISSING")
 if echo "$OUTPUT" | grep -q "tmtv-identity"; then
     pass "tmtv-identity option exists"
 else
@@ -85,7 +87,7 @@ else
 fi
 
 # Test 7b: tmtv-session-name option
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g tmtv-session-name 2>/dev/null || echo "MISSING")
+OUTPUT=$("$TMTV" -f "$CONFIG" -S "$SOCKET" show-option -g tmtv-session-name 2>/dev/null || echo "MISSING")
 if echo "$OUTPUT" | grep -q "tmtv-session-name"; then
     pass "tmtv-session-name option exists"
 else
@@ -93,7 +95,7 @@ else
 fi
 
 # Test 7c: tmtv-web-input option
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g tmtv-web-input 2>/dev/null || echo "MISSING")
+OUTPUT=$("$TMTV" -f "$CONFIG" -S "$SOCKET" show-option -g tmtv-web-input 2>/dev/null || echo "MISSING")
 if echo "$OUTPUT" | grep -q "tmtv-web-input"; then
     pass "tmtv-web-input option exists"
 else
@@ -101,8 +103,8 @@ else
 fi
 
 # Test 8: Core tmux still works with hooks (regression)
-"$TMTV" -S "$SOCKET" new-window -t hooktest 2>/dev/null
-OUTPUT=$("$TMTV" -S "$SOCKET" list-windows -t hooktest 2>/dev/null)
+"$TMTV" -f "$CONFIG" -S "$SOCKET" new-window -t hooktest 2>/dev/null
+OUTPUT=$("$TMTV" -f "$CONFIG" -S "$SOCKET" list-windows -t hooktest 2>/dev/null)
 if echo "$OUTPUT" | grep -q "1:"; then
     pass "new-window works with hooks"
 else
@@ -157,7 +159,7 @@ fi
 # Test 15: status-left is readable in detached session (core scenario)
 # This validates that detached sessions have status options available
 # for the periodic timer to expand
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g status-left 2>/dev/null || echo "MISSING")
+OUTPUT=$("$TMTV" -f "$CONFIG" -S "$SOCKET" show-option -g status-left 2>/dev/null || echo "MISSING")
 if echo "$OUTPUT" | grep -q "status-left"; then
     pass "status-left option accessible in detached session"
 else
@@ -165,7 +167,7 @@ else
 fi
 
 # Test 16: status-right is readable in detached session
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option -g status-right 2>/dev/null || echo "MISSING")
+OUTPUT=$("$TMTV" -f "$CONFIG" -S "$SOCKET" show-option -g status-right 2>/dev/null || echo "MISSING")
 if echo "$OUTPUT" | grep -q "status-right"; then
     pass "status-right option accessible in detached session"
 else
@@ -194,9 +196,9 @@ else
 fi
 
 # Test 20: per-session env vars work at runtime (set and read back)
-"$TMTV" -S "$SOCKET" new-session -d -s envtest 2>/dev/null || true
-"$TMTV" -S "$SOCKET" set-option -t envtest tmtv-session-name "test-session-42" 2>/dev/null
-OUTPUT=$("$TMTV" -S "$SOCKET" show-option -t envtest tmtv-session-name 2>/dev/null || echo "MISSING")
+"$TMTV" -f "$CONFIG" -S "$SOCKET" new-session -d -s envtest 2>/dev/null || true
+"$TMTV" -f "$CONFIG" -S "$SOCKET" set-option -t envtest tmtv-session-name "test-session-42" 2>/dev/null
+OUTPUT=$("$TMTV" -f "$CONFIG" -S "$SOCKET" show-option -t envtest tmtv-session-name 2>/dev/null || echo "MISSING")
 if echo "$OUTPUT" | grep -q "test-session-42"; then
     pass "per-session tmtv-session-name set/get works"
 else
@@ -204,7 +206,7 @@ else
 fi
 
 # Cleanup
-"$TMTV" -S "$SOCKET" kill-server 2>/dev/null || true
+"$TMTV" -f "$CONFIG" -S "$SOCKET" kill-server 2>/dev/null || true
 
 echo ""
 echo "$((PASSED + FAILED)) tests: $PASSED passed, $FAILED failed"

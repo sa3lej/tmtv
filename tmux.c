@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: tmux.c,v 1.223 2026/08/17 14:47:41 nicm Exp $ */
 
 /*
  * Copyright (c) 2007 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -52,6 +52,24 @@ static char		*make_label(const char *, char **);
 
 static int		 areshell(const char *);
 static const char	*getshell(void);
+
+#ifdef ASAN
+__attribute__((used)) const char *__asan_default_options(void);
+__attribute__((used)) const char *
+__asan_default_options(void)
+{
+	return (
+	    "abort_on_error=1:"
+	    "halt_on_error=1:"
+	    "detect_leaks=0:"
+	    "detect_stack_use_after_return=1:"
+	    "strict_string_checks=1:"
+	    "check_initialization_order=1:"
+	    "log_path=/tmp/tmux-asan:"
+	    "log_exe_name=1"
+	);
+}
+#endif
 
 static __dead void
 usage(int status)
@@ -404,6 +422,31 @@ get_timer(void)
 	return ((ts.tv_sec * 1000ULL) + (ts.tv_nsec / 1000000ULL));
 }
 
+char *
+clean_name(const char *name, int untrusted)
+{
+	char	*copy, *cp, *new_name;
+
+	if (!utf8_isvalid(name))
+		return (NULL);
+	copy = xstrdup(name);
+	for (cp = copy; *cp != '\0'; cp++) {
+		if (untrusted && cp[0] == '#' && cp[1] == '(')
+			*cp = '_';
+	}
+	utf8_stravis(&new_name, copy, VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL);
+	free(copy);
+	return (new_name);
+}
+
+int
+check_name(const char *name)
+{
+	if (!utf8_isvalid(name))
+		return (0);
+	return (1);
+}
+
 const char *
 sig2name(int signo)
 {
@@ -455,7 +498,7 @@ find_home(void)
 	if (home == NULL || *home == '\0') {
 		pw = getpwuid(getuid());
 		if (pw != NULL)
-			home = pw->pw_dir;
+			home = xstrdup(pw->pw_dir);
 		else
 			home = NULL;
 	}
@@ -514,7 +557,7 @@ main(int argc, char **argv)
 	while ((opt = getopt(argc, argv, "2c:CDdFf:hH:k:lL:Np:P:qS:T:uUvV")) != -1) {
 		switch (opt) {
 		case '2':
-			tty_add_features(&feat, "256", ":,");
+			tty_parse_features("256", ":,", &feat, NULL);
 			break;
 		case 'c':
 			shell_command = optarg;
@@ -580,7 +623,7 @@ main(int argc, char **argv)
 			path = xstrdup(optarg);
 			break;
 		case 'T':
-			tty_add_features(&feat, optarg, ":,");
+			tty_parse_features(optarg, ":,", &feat, NULL);
 			break;
 		case 'u':
 			flags |= CLIENT_UTF8;

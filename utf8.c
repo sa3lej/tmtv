@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: utf8.c,v 1.73 2026/09/20 08:11:00 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -292,16 +292,37 @@ utf8_find_in_width_cache(wchar_t wc)
 	return RB_FIND(utf8_width_cache, &utf8_width_cache, &uw);
 }
 
+/* Add to width cache. */
+static void
+utf8_insert_width_cache(wchar_t wc, u_int width)
+{
+	struct utf8_width_item	*uw, *old;
+
+	log_debug("Unicode width cache: %08X=%u", (u_int)wc, width);
+
+	uw = xcalloc(1, sizeof *uw);
+	uw->wc = wc;
+	uw->width = width;
+	uw->allocated = 1;
+
+	old = RB_INSERT(utf8_width_cache, &utf8_width_cache, uw);
+	if (old != NULL) {
+		RB_REMOVE(utf8_width_cache, &utf8_width_cache, old);
+		if (old->allocated)
+			free(old);
+		RB_INSERT(utf8_width_cache, &utf8_width_cache, uw);
+	}
+}
+
 /* Parse a single codepoint option. */
 static void
 utf8_add_to_width_cache(const char *s)
 {
-	struct utf8_width_item	*uw, *old;
 	char			*copy, *cp, *endptr;
 	u_int			 width;
 	const char		*errstr;
 	struct utf8_data	*ud;
-	wchar_t			 wc;
+	wchar_t			 wc, wc_start, wc_end;
 	unsigned long long	 n;
 
 	copy = xstrdup(s);
@@ -321,14 +342,45 @@ utf8_add_to_width_cache(const char *s)
 		errno = 0;
 		n = strtoull(copy + 2, &endptr, 16);
 		if (copy[2] == '\0' ||
-		    *endptr != '\0' ||
 		    n == 0 ||
 		    n > WCHAR_MAX ||
 		    (errno == ERANGE && n == ULLONG_MAX)) {
 			free(copy);
 			return;
 		}
-		wc = n;
+		wc_start = n;
+		if (*endptr == '-') {
+			endptr++;
+			if (strncmp(endptr, "U+", 2) != 0) {
+				free(copy);
+				return;
+			}
+			errno = 0;
+			n = strtoull(endptr + 2, &endptr, 16);
+			if (*endptr != '\0' ||
+			    n == 0 ||
+			    n > WCHAR_MAX ||
+			    (errno == ERANGE && n == ULLONG_MAX) ||
+			    (wchar_t)n < wc_start) {
+				free(copy);
+				return;
+			}
+			wc_end = n;
+		} else {
+			if (*endptr != '\0') {
+				free(copy);
+				return;
+			}
+			wc_end = wc_start;
+		}
+
+		wc = wc_start;
+		for (;;) {
+			utf8_insert_width_cache(wc, width);
+			if (wc == wc_end)
+				break;
+			wc++;
+		}
 	} else {
 		utf8_no_width = 1;
 		ud = utf8_fromcstr(copy);
@@ -348,21 +400,8 @@ utf8_add_to_width_cache(const char *s)
 			return;
 		}
 		free(ud);
-	}
 
-	log_debug("Unicode width cache: %08X=%u", (u_int)wc, width);
-
-	uw = xcalloc(1, sizeof *uw);
-	uw->wc = wc;
-	uw->width = width;
-	uw->allocated = 1;
-
-	old = RB_INSERT(utf8_width_cache, &utf8_width_cache, uw);
-	if (old != NULL) {
-		RB_REMOVE(utf8_width_cache, &utf8_width_cache, old);
-		if (old->allocated)
-			free(old);
-		RB_INSERT(utf8_width_cache, &utf8_width_cache, uw);
+		utf8_insert_width_cache(wc, width);
 	}
 
 	free(copy);
@@ -565,8 +604,74 @@ utf8_towc(const struct utf8_data *ud, wchar_t *wc)
 	case 0:
 		return (UTF8_ERROR);
 	}
-	log_debug("UTF-8 %.*s is %05X", (int)ud->size, ud->data, (u_int)*wc);
+	log_debug("UTF-8 %.*s is U+%06X", (int)ud->size, ud->data, (u_int)*wc);
 	return (UTF8_DONE);
+}
+
+/* Check for a Unicode whitespace character. */
+int
+utf8_has_whitespace(const struct utf8_data *ud)
+{
+	struct utf8_data tmp;
+	wchar_t		 wc;
+	u_int		 offset = 0, size;
+	u_char		 ch;
+
+	while (offset < ud->size) {
+		ch = ud->data[offset];
+		if (ch < 0x80) {
+			wc = ch;
+			size = 1;
+		} else {
+			if (ch >= 0xc2 && ch <= 0xdf)
+				size = 2;
+			else if (ch >= 0xe0 && ch <= 0xef)
+				size = 3;
+			else if (ch >= 0xf0 && ch <= 0xf4)
+				size = 4;
+			else
+				return (0);
+			if (size > ud->size - offset)
+				return (0);
+
+			memset(&tmp, 0, sizeof tmp);
+			memcpy(tmp.data, ud->data + offset, size);
+			tmp.size = tmp.have = size;
+			if (utf8_towc(&tmp, &wc) != UTF8_DONE)
+				return (0);
+		}
+		offset += size;
+
+		switch (wc) {
+		case 0x0009:
+		case 0x000A:
+		case 0x000B:
+		case 0x000C:
+		case 0x000D:
+		case 0x0020:
+		case 0x0085:
+		case 0x00A0:
+		case 0x1680:
+		case 0x2000:
+		case 0x2001:
+		case 0x2002:
+		case 0x2003:
+		case 0x2004:
+		case 0x2005:
+		case 0x2006:
+		case 0x2007:
+		case 0x2008:
+		case 0x2009:
+		case 0x200A:
+		case 0x2028:
+		case 0x2029:
+		case 0x202F:
+		case 0x205F:
+		case 0x3000:
+			return (1);
+		}
+	}
+	return (0);
 }
 
 /* Convert wide character to UTF-8 character. */
@@ -652,7 +757,7 @@ utf8_append(struct utf8_data *ud, u_char ch)
  * bytes available for each character from src (for \abc or UTF-8) plus space
  * for \0.
  */
-int
+size_t
 utf8_strvis(char *dst, const char *src, size_t len, int flag)
 {
 	struct utf8_data	 ud;
@@ -690,11 +795,11 @@ utf8_strvis(char *dst, const char *src, size_t len, int flag)
 }
 
 /* Same as utf8_strvis but allocate the buffer. */
-int
+size_t
 utf8_stravis(char **dst, const char *src, int flag)
 {
 	char	*buf;
-	int	 len;
+	size_t	 len;
 
 	buf = xreallocarray(NULL, 4, strlen(src) + 1);
 	len = utf8_strvis(buf, src, strlen(src), flag);
@@ -704,11 +809,11 @@ utf8_stravis(char **dst, const char *src, int flag)
 }
 
 /* Same as utf8_strvis but allocate the buffer. */
-int
+size_t
 utf8_stravisx(char **dst, const char *src, size_t srclen, int flag)
 {
 	char	*buf;
-	int	 len;
+	size_t	 len;
 
 	buf = xreallocarray(NULL, 4, srclen + 1);
 	len = utf8_strvis(buf, src, srclen, flag);

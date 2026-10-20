@@ -567,7 +567,7 @@ check_web_snapshot(int fragmented)
 	utf8_append(&gc.data, 0x8c); /* 界 */
 	gc.attr = GRID_ATTR_STRIKETHROUGH | GRID_ATTR_REVERSE;
 	grid_set_cell(wp->base.grid, 1, 2, &gc);
-	grid_set_padding(wp->base.grid, 2, 2);
+	grid_set_padding(wp->base.grid, 2, 2, 8);
 	gc = grid_default_cell;
 	utf8_set(&gc.data, 0x1b);
 	grid_set_cell(wp->base.grid, 3, 2, &gc);
@@ -843,10 +843,10 @@ read_split_message(void *session, struct tmate_unpacker *uk)
 			ASSERT_EQ(wp->sy, pane[2].via.u64);
 			ASSERT_EQ(wp->xoff, pane[3].via.u64);
 			ASSERT_EQ(wp->yoff, pane[4].via.u64);
-			ASSERT_EQ(leaf->sx, wp->sx);
-			ASSERT_EQ(leaf->sy, wp->sy);
-			ASSERT_EQ(leaf->xoff, wp->xoff);
-			ASSERT_EQ(leaf->yoff, wp->yoff);
+			ASSERT_EQ(leaf->g.sx, wp->sx);
+			ASSERT_EQ(leaf->g.sy, wp->sy);
+			ASSERT_EQ(leaf->g.xoff, wp->xoff);
+			ASSERT_EQ(leaf->g.yoff, wp->yoff);
 			ASSERT(wp->screen == &wp->base);
 		}
 		if (split_layouts == 1) {
@@ -857,17 +857,17 @@ read_split_message(void *session, struct tmate_unpacker *uk)
 		}
 		ASSERT(window_pane_find_by_id(1) == split_second);
 		ASSERT(w->active == split_second);
-		ASSERT_EQ(root->sx, w->sx);
-		ASSERT_EQ(root->sy, w->sy);
-		ASSERT_EQ(root->xoff, 0);
-		ASSERT_EQ(root->yoff, 0);
+		ASSERT_EQ(root->g.sx, w->sx);
+		ASSERT_EQ(root->g.sy, w->sy);
+		ASSERT_EQ(root->g.xoff, 0);
+		ASSERT_EQ(root->g.yoff, 0);
 		if (split_layouts < 3 || split_mixed) {
 			ASSERT_EQ(root->type, split_vertical ? LAYOUT_TOPBOTTOM : LAYOUT_LEFTRIGHT);
 			leaf = TAILQ_FIRST(&root->cells);
 			ASSERT(leaf == split_second->layout_cell && leaf->parent == root);
 			ASSERT(layout_search_by_border(root,
-			    split_vertical ? 0 : leaf->sx,
-			    split_vertical ? leaf->sy : 0) == leaf);
+			    split_vertical ? 0 : leaf->g.sx,
+			    split_vertical ? leaf->g.sy : 0) == leaf);
 			leaf = TAILQ_NEXT(leaf, entry);
 			ASSERT(leaf != NULL && leaf->parent == root);
 			ASSERT(TAILQ_NEXT(leaf, entry) == NULL);
@@ -880,11 +880,11 @@ read_split_message(void *session, struct tmate_unpacker *uk)
 					ASSERT(TAILQ_NEXT(TAILQ_FIRST(&leaf->cells), entry) == split_first->layout_cell);
 					ASSERT(split_first->layout_cell->parent == leaf);
 					ASSERT(split_third->layout_cell->parent == leaf);
-					ASSERT_EQ(leaf->sx, split_vertical ? w->sx : split_first->sx);
-					ASSERT_EQ(leaf->sy, split_vertical ? split_first->sy : w->sy);
+					ASSERT_EQ(leaf->g.sx, split_vertical ? w->sx : split_first->sx);
+					ASSERT_EQ(leaf->g.sy, split_vertical ? split_first->sy : w->sy);
 					ASSERT(layout_search_by_border(root,
-					    split_vertical ? split_third->sx : leaf->xoff,
-					    split_vertical ? leaf->yoff : split_third->sy) == split_third->layout_cell);
+					    split_vertical ? split_third->sx : leaf->g.xoff,
+					    split_vertical ? leaf->g.yoff : split_third->sy) == split_third->layout_cell);
 				} else
 					ASSERT(leaf == split_first->layout_cell);
 			} else {
@@ -1040,7 +1040,7 @@ TEST(maximum_panes_recover_spatial_tree)
 	w = s->curw->window;
 	ASSERT_EQ(TAILQ_FIRST(&w->panes)->id, 999);
 	ASSERT_EQ(w->layout_root->type, LAYOUT_LEFTRIGHT);
-	ASSERT_EQ(w->layout_root->sx, 1999);
+	ASSERT_EQ(w->layout_root->g.sx, 1999);
 	lc = TAILQ_FIRST(&w->layout_root->cells);
 	for (i = 0; i < 1000; i++) {
 		wp = window_pane_find_by_id(i);
@@ -1048,8 +1048,8 @@ TEST(maximum_panes_recover_spatial_tree)
 		ASSERT(lc == wp->layout_cell);
 		ASSERT(lc->parent == w->layout_root);
 		ASSERT_EQ(lc->type, LAYOUT_WINDOWPANE);
-		ASSERT_EQ(lc->sx, 1);
-		ASSERT_EQ(lc->xoff, 2 * i);
+		ASSERT_EQ(lc->g.sx, 1);
+		ASSERT_EQ(lc->g.xoff, 2 * i);
 		lc = TAILQ_NEXT(lc, entry);
 	}
 	ASSERT(lc == NULL);
@@ -1075,17 +1075,17 @@ TEST(non_tiled_rectangles_preserve_legacy_fallback)
 		ASSERT(s != NULL);
 		w = s->curw->window;
 		ASSERT_EQ(w->layout_root->type, LAYOUT_LEFTRIGHT);
-		ASSERT_EQ(w->layout_root->sx, 80);
-		ASSERT_EQ(w->layout_root->sy, 24);
+		ASSERT_EQ(w->layout_root->g.sx, 80);
+		ASSERT_EQ(w->layout_root->g.sy, 24);
 		lc = TAILQ_FIRST(&w->layout_root->cells);
 		TAILQ_FOREACH(wp, &w->panes, entry) {
 			ASSERT(lc == wp->layout_cell && lc->wp == wp);
 			ASSERT(lc->parent == w->layout_root);
 			ASSERT_EQ(lc->type, LAYOUT_WINDOWPANE);
-			ASSERT_EQ(lc->sx, wp->sx);
-			ASSERT_EQ(lc->sy, wp->sy);
-			ASSERT_EQ(lc->xoff, wp->xoff);
-			ASSERT_EQ(lc->yoff, wp->yoff);
+			ASSERT_EQ(lc->g.sx, wp->sx);
+			ASSERT_EQ(lc->g.sy, wp->sy);
+			ASSERT_EQ(lc->g.xoff, wp->xoff);
+			ASSERT_EQ(lc->g.yoff, wp->yoff);
 			lc = TAILQ_NEXT(lc, entry);
 		}
 		ASSERT(lc == NULL);

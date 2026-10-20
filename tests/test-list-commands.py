@@ -15,6 +15,8 @@ class ListCommandsTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(prefix="list-commands-", dir=ROOT / "tests")
         self.addCleanup(self.directory.cleanup)
         self.socket = Path(self.directory.name) / "socket"
+        self.config = Path(self.directory.name) / "config"
+        self.config.write_text('set -g tmtv-server-host ""\n')
         self.env = dict(os.environ, TERM="xterm-256color")
         for name in ("TMUX", "TMTV", "TMUX_PROGRAM"):
             self.env.pop(name, None)
@@ -23,7 +25,7 @@ class ListCommandsTests(unittest.TestCase):
 
     def run_command(self, *args, check=True):
         return subprocess.run(
-            [str(BINARY), "-S", str(self.socket), "-f", "/dev/null", *args],
+            [str(BINARY), "-S", str(self.socket), "-f", str(self.config), *args],
             env=self.env, text=True, capture_output=True, timeout=10, check=check,
         )
 

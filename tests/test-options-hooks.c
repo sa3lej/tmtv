@@ -23,6 +23,7 @@ setup(void)
 		if (oe->scope & OPTIONS_TABLE_WINDOW)
 			options_default(global_w_options, oe);
 	}
+	hooks_build_events();
 }
 
 static void

@@ -46,7 +46,7 @@ class ChildEnvironmentTests(unittest.TestCase):
         return f"env > {temporary} && mv -f {temporary} {path}"
 
     def start(self, config):
-        self.config.write_text(config)
+        self.config.write_text('set -g tmtv-server-host ""\n' + config)
         self.addCleanup(self.command, "kill-server", check=False)
         self.command("new-session", "-d", "-s", "environment", "sleep 60")
 

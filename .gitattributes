@@ -1,0 +1,2 @@
+# Golden terminal screens preserve their empty trailing rows.
+regress/screen-redraw-results/*.result whitespace=-blank-at-eof

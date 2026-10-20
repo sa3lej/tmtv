@@ -1,4 +1,5 @@
-/*
+/* $OpenBSD: control-notify.c,v 1.39 2026/09/08 10:20:08 nicm Exp $ */
+
 /*
  * Copyright (c) 2012 Nicholas Marriott <nicholas.marriott@gmail.com>
  * Copyright (c) 2012 George Nachman <tmux@georgester.com>
@@ -19,7 +20,6 @@
 #include <sys/types.h>
 
 #include <stdlib.h>
-#include <stdarg.h>
 
 #include "tmux.h"
 

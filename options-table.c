@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: options-table.c,v 1.249 2026/10/05 09:03:11 nicm Exp $ */
 
 /*
  * Copyright (c) 2011 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -64,19 +64,19 @@ static const char *options_table_cursor_style_list[] = {
 	"blinking-bar", "bar", NULL
 };
 static const char *options_table_pane_scrollbars_list[] = {
-	"off", "modal", "on", NULL
+	"off", "modal", "on", "auto-hide", NULL
 };
 static const char *options_table_pane_scrollbars_position_list[] = {
 	"right", "left", NULL
 };
 static const char *options_table_pane_status_list[] = {
-	"off", "top", "bottom", NULL
+	"off", "top", "bottom", "top-floating", "bottom-floating", NULL
 };
 static const char *options_table_pane_border_indicators_list[] = {
 	"off", "colour", "arrows", "both", NULL
 };
 static const char *options_table_pane_border_lines_list[] = {
-	"single", "double", "heavy", "simple", "number", "spaces", NULL
+	"single", "double", "heavy", "simple", "number", "spaces", "none", NULL
 };
 static const char *options_table_popup_border_lines_list[] = {
 	"single", "double", "heavy", "simple", "rounded", "padded", "none", NULL
@@ -84,11 +84,14 @@ static const char *options_table_popup_border_lines_list[] = {
 static const char *options_table_set_clipboard_list[] = {
 	"off", "external", "on", NULL
 };
+static const char *options_table_get_clipboard_list[] = {
+	"off", "buffer", "request", "both", NULL
+};
 static const char *options_table_window_size_list[] = {
 	"largest", "smallest", "manual", "latest", NULL
 };
 static const char *options_table_remain_on_exit_list[] = {
-	"off", "on", "failed", NULL
+	"off", "on", "failed", "key", "failed-key", NULL
 };
 static const char *options_table_destroy_unattached_list[] = {
 	"off", "on", "keep-last", "keep-group", NULL
@@ -104,6 +107,12 @@ static const char *options_table_extended_keys_format_list[] = {
 };
 static const char *options_table_allow_passthrough_list[] = {
 	"off", "on", "all", NULL
+};
+static const char *options_table_theme_list[] = {
+	"detect", "terminal", "light", "dark", NULL
+};
+static const char *options_table_copy_mode_line_numbers_list[] = {
+	"off", "default", "absolute", "relative", "hybrid", NULL
 };
 
 /* Status line format. */
@@ -138,7 +147,7 @@ static const char *options_table_allow_passthrough_list[] = {
 		"#{T:window-status-format}" \
 		"#[pop-default]" \
 		"#[norange default]" \
-		"#{?loop_last_flag,,#{window-status-separator}}" \
+		"#{?loop_last_flag,,#{E:window-status-separator}}" \
 	"," \
 		"#[range=window|#{window_index} list=focus " \
 			"#{?#{!=:#{E:window-status-current-style},default}," \
@@ -165,7 +174,7 @@ static const char *options_table_allow_passthrough_list[] = {
 		"#{T:window-status-current-format}" \
 		"#[pop-default]" \
 		"#[norange list=on default]" \
-		"#{?loop_last_flag,,#{window-status-separator}}" \
+		"#{?loop_last_flag,,#{E:window-status-separator}}" \
 	"}" \
 	"#[nolist align=right range=right #{E:status-right-style}]" \
 	"#[push-default]" \
@@ -173,7 +182,8 @@ static const char *options_table_allow_passthrough_list[] = {
 	"#[pop-default]" \
 	"#[norange default]"
 #define OPTIONS_TABLE_STATUS_FORMAT2 \
-	"#[align=left]#{R: ,#{n:#{session_name}}}P: " \
+	"#[align=left]" \
+	"#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}P: " \
 	"#[norange default]" \
 	"#[list=on align=#{status-justify}]" \
 	"#[list=left-marker]<#[list=right-marker]>#[list=on]" \
@@ -182,9 +192,10 @@ static const char *options_table_allow_passthrough_list[] = {
 			"#{E:pane-status-style}" \
 		"]" \
 		"#[push-default]" \
-		"#P[#{pane_width}x#{pane_height}]" \
+		"#{T:window-pane-status-format}" \
 		"#[pop-default]" \
-		"#[norange list=on default]  " \
+		"#[norange list=on default]" \
+		"#{?loop_last_flag,,#{E:window-status-separator}}" \
 	"," \
 		"#[range=pane|#{pane_id} list=focus " \
 			"#{?#{!=:#{E:pane-status-current-style},default}," \
@@ -193,12 +204,14 @@ static const char *options_table_allow_passthrough_list[] = {
 			"}" \
 		"]" \
 		"#[push-default]" \
-		"#P[#{pane_width}x#{pane_height}]*" \
+		"#{T:window-pane-current-status-format}" \
 		"#[pop-default]" \
-		"#[norange list=on default] " \
+		"#[norange list=on default]" \
+		"#{?loop_last_flag,,#{E:window-status-separator}}" \
 	"}"
 #define OPTIONS_TABLE_STATUS_FORMAT3 \
-	"#[align=left]#{R: ,#{n:#{session_name}}}S: " \
+	"#[align=left]" \
+	"#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}S: " \
 	"#[norange default]" \
 	"#[list=on align=#{status-justify}]" \
 	"#[list=left-marker]<#[list=right-marker]>#[list=on]" \
@@ -207,7 +220,7 @@ static const char *options_table_allow_passthrough_list[] = {
 			"#{E:session-status-style}" \
 		"]" \
 		"#[push-default]" \
-		"#S#{session_alert}" \
+		"#S#{q/h:session_alert}" \
 		"#[pop-default]" \
 		"#[norange list=on default]  " \
 	"," \
@@ -218,7 +231,7 @@ static const char *options_table_allow_passthrough_list[] = {
 			"}" \
 		"]" \
 		"#[push-default]" \
-		"#S*#{session_alert}" \
+		"#S*#{q/h:session_alert}" \
 		"#[pop-default]" \
 		"#[norange list=on default] " \
 	"}"
@@ -230,32 +243,39 @@ static const char *options_table_status_format_default[] = {
 };
 
 /* Helpers for hook options. */
-#define OPTIONS_TABLE_HOOK(hook_name, default_value) \
+#define OPTIONS_TABLE_HOOK(hook_name, default_value, hook_text) \
 	{ .name = hook_name, \
 	  .type = OPTIONS_TABLE_COMMAND, \
 	  .scope = OPTIONS_TABLE_SESSION, \
 	  .flags = OPTIONS_TABLE_IS_ARRAY|OPTIONS_TABLE_IS_HOOK, \
 	  .default_str = default_value,	\
-	  .separator = "" \
+	  .separator = "", \
+	  .text = hook_text \
 	}
 
-#define OPTIONS_TABLE_PANE_HOOK(hook_name, default_value) \
+#define OPTIONS_TABLE_PANE_HOOK(hook_name, default_value, hook_text) \
 	{ .name = hook_name, \
 	  .type = OPTIONS_TABLE_COMMAND, \
 	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE, \
 	  .flags = OPTIONS_TABLE_IS_ARRAY|OPTIONS_TABLE_IS_HOOK, \
 	  .default_str = default_value,	\
-	  .separator = "" \
+	  .separator = "", \
+	  .text = hook_text \
 	}
 
-#define OPTIONS_TABLE_WINDOW_HOOK(hook_name, default_value) \
+#define OPTIONS_TABLE_WINDOW_HOOK(hook_name, default_value, hook_text) \
 	{ .name = hook_name, \
 	  .type = OPTIONS_TABLE_COMMAND, \
 	  .scope = OPTIONS_TABLE_WINDOW, \
 	  .flags = OPTIONS_TABLE_IS_ARRAY|OPTIONS_TABLE_IS_HOOK, \
 	  .default_str = default_value,	\
-	  .separator = "" \
+	  .separator = "", \
+	  .text = hook_text \
 	}
+
+#define OPTIONS_TABLE_AFTER_HOOK(command_name) \
+	OPTIONS_TABLE_HOOK("after-" command_name, "", \
+	    "Run after the " command_name " command completes.")
 
 /* Map of name conversions. */
 const struct options_name_map options_other_names[] = {
@@ -264,6 +284,7 @@ const struct options_name_map options_other_names[] = {
 	{ "clock-mode-color", "clock-mode-colour" },
 	{ "cursor-color", "cursor-colour" },
 	{ "prompt-cursor-color", "prompt-cursor-colour" },
+	{ "prompt-command-cursor-color", "prompt-command-cursor-colour" },
 	{ "pane-colors", "pane-colours" },
 	{ NULL, NULL }
 };
@@ -286,6 +307,16 @@ const struct options_table_entry options_table[] = {
 	  .default_num = 50,
 	  .text = "The maximum number of automatic buffers. "
 		  "When this is reached, the oldest buffer is deleted."
+	},
+
+	{ .name = "clear-on-attach",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .default_num = 1,
+	  .text = "Whether to use the alternate screen and clear it when "
+		  "a client is attached. When disabled, tmux does not "
+		  "enter the alternate screen on attach so terminal "
+		  "content before tmux remains in scrollback."
 	},
 
 	{ .name = "command-alias",
@@ -321,9 +352,10 @@ const struct options_table_entry options_table[] = {
 	},
 
 	{ .name = "cursor-colour",
-	  .type = OPTIONS_TABLE_COLOUR,
+	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
-	  .default_num = -1,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "",
 	  .text = "Colour of the cursor."
 	},
 
@@ -405,6 +437,18 @@ const struct options_table_entry options_table[] = {
 	  .text = "Whether to send focus events to applications."
 	},
 
+	{ .name = "get-clipboard",
+	  .type = OPTIONS_TABLE_CHOICE,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .choices = options_table_get_clipboard_list,
+	  .default_num = 1,
+	  .text = "When an application requests the clipboard, whether to "
+		  "ignore the request ('off'); respond with the newest buffer "
+		  "('buffer'); request the clipboard from the most recently "
+		  "used terminal ('request'); or to request the clipboard, "
+		  "create a buffer, and send it to the application ('both')."
+	},
+
 	{ .name = "history-file",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SERVER,
@@ -426,7 +470,7 @@ const struct options_table_entry options_table[] = {
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
 	  .flags = OPTIONS_TABLE_IS_STYLE,
-	  .default_str = "default",
+	  .default_str = "bg=themedarkgrey,fg=themewhite",
 	  .separator = ",",
 	  .text = "Default style of menu."
 	},
@@ -435,7 +479,7 @@ const struct options_table_entry options_table[] = {
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
 	  .flags = OPTIONS_TABLE_IS_STYLE,
-	  .default_str = "bg=yellow,fg=black",
+	  .default_str = "bg=themeyellow,fg=themeblack",
 	  .separator = ",",
 	  .text = "Default style of selected menu item."
 	},
@@ -443,7 +487,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "menu-border-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "default",
+	  .default_str = "bg=themedarkgrey,fg=themelightgrey",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Default style of menu borders."
@@ -525,6 +569,175 @@ const struct options_table_entry options_table[] = {
 	  .separator = ",",
 	  .text = "List of terminal features, used if they cannot be "
 		  "automatically detected."
+	},
+
+	{ .name = "theme",
+	  .type = OPTIONS_TABLE_CHOICE,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .choices = options_table_theme_list,
+	  .default_num = 0,
+	  .text = "Whether tmux should detect the terminal theme, use terminal "
+		  "ANSI colours, or force the light or dark theme."
+	},
+
+	{ .name = "dark-theme-black",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},gray5,black}",
+	  .text = "Dark theme colour for black."
+	},
+
+	{ .name = "dark-theme-white",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},gray90,white}",
+	  .text = "Dark theme colour for white."
+	},
+
+	{ .name = "dark-theme-light-grey",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},gray70,white}",
+	  .text = "Dark theme colour for light grey."
+	},
+
+	{ .name = "dark-theme-dark-grey",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},gray15,black}",
+	  .text = "Dark theme colour for dark grey."
+	},
+
+	{ .name = "dark-theme-green",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},yellowgreen,green}",
+	  .text = "Dark theme colour for green."
+	},
+
+	{ .name = "dark-theme-yellow",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}",
+	  .text = "Dark theme colour for yellow."
+	},
+
+	{ .name = "dark-theme-red",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},indianred,red}",
+	  .text = "Dark theme colour for red."
+	},
+
+	{ .name = "dark-theme-blue",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},skyblue3,blue}",
+	  .text = "Dark theme colour for blue."
+	},
+
+	{ .name = "dark-theme-cyan",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},cadetblue,cyan}",
+	  .text = "Dark theme colour for cyan."
+	},
+
+	{ .name = "dark-theme-magenta",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}",
+	  .text = "Dark theme colour for magenta."
+	},
+
+	{ .name = "light-theme-black",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},gray10,black}",
+	  .text = "Light theme colour for black."
+	},
+
+	{ .name = "light-theme-white",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},gray95,white}",
+	  .text = "Light theme colour for white."
+	},
+
+	{ .name = "light-theme-light-grey",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},gray80,white}",
+	  .text = "Light theme colour for light grey."
+	},
+
+	{ .name = "light-theme-dark-grey",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},gray45,black}",
+	  .text = "Light theme colour for dark grey."
+	},
+
+	{ .name = "light-theme-green",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},seagreen,green}",
+	  .text = "Light theme colour for green."
+	},
+
+	{ .name = "light-theme-yellow",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}",
+	  .text = "Light theme colour for yellow."
+	},
+
+	{ .name = "light-theme-red",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},indianred4,red}",
+	  .text = "Light theme colour for red."
+	},
+
+	{ .name = "light-theme-blue",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},steelblue,blue}",
+	  .text = "Light theme colour for blue."
+	},
+
+	{ .name = "light-theme-cyan",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},darkcyan,cyan}",
+	  .text = "Light theme colour for cyan."
+	},
+
+	{ .name = "light-theme-magenta",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SERVER,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "#{?#{e|>=:#{client_colours},256},purple4,magenta}",
+	  .text = "Light theme colour for magenta."
 	},
 
 	{ .name = "user-keys",
@@ -624,30 +837,6 @@ const struct options_table_entry options_table[] = {
 		  "the client to another session if any exist."
 	},
 
-	{ .name = "display-panes-active-colour",
-	  .type = OPTIONS_TABLE_COLOUR,
-	  .scope = OPTIONS_TABLE_SESSION,
-	  .default_num = 1,
-	  .text = "Colour of the active pane for 'display-panes'."
-	},
-
-	{ .name = "display-panes-colour",
-	  .type = OPTIONS_TABLE_COLOUR,
-	  .scope = OPTIONS_TABLE_SESSION,
-	  .default_num = 4,
-	  .text = "Colour of not active panes for 'display-panes'."
-	},
-
-	{ .name = "display-panes-time",
-	  .type = OPTIONS_TABLE_NUMBER,
-	  .scope = OPTIONS_TABLE_SESSION,
-	  .minimum = 1,
-	  .maximum = INT_MAX,
-	  .default_num = 1000,
-	  .unit = "milliseconds",
-	  .text = "Time for which 'display-panes' should show pane numbers."
-	},
-
 	{ .name = "display-time",
 	  .type = OPTIONS_TABLE_NUMBER,
 	  .scope = OPTIONS_TABLE_SESSION,
@@ -656,6 +845,13 @@ const struct options_table_entry options_table[] = {
 	  .default_num = 750,
 	  .unit = "milliseconds",
 	  .text = "Time for which status line messages should appear."
+	},
+
+	{ .name = "focus-follows-mouse",
+	  .type = OPTIONS_TABLE_FLAG,
+	  .scope = OPTIONS_TABLE_SESSION,
+	  .default_num = 0,
+	  .text = "Whether moving the mouse into a pane selects it."
 	},
 
 	{ .name = "history-limit",
@@ -710,11 +906,24 @@ const struct options_table_entry options_table[] = {
 	{ .name = "message-command-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SESSION,
-	  .default_str = "bg=black,fg=yellow",
+	  .default_str = "bg=themeblack,fg=themeyellow,"
+			 "#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,"
+			 "fill=themeblack}",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of the command prompt when in command mode, if "
-		  "'mode-keys' is set to 'vi'."
+		  "'status-keys' is set to 'vi'."
+	},
+
+	{ .name = "message-format",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SESSION,
+	  .default_str = "#[#{?#{command_prompt},"
+		  "#{E:message-command-style},"
+		  "#{E:message-style}}]"
+		  "#{message}",
+	  .text = "Format string for the prompt and message area. "
+		  "The '#{message}' placeholder is replaced with the content."
 	},
 
 	{ .name = "message-line",
@@ -728,16 +937,21 @@ const struct options_table_entry options_table[] = {
 	{ .name = "message-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SESSION,
-	  .default_str = "bg=yellow,fg=black",
+	  .default_str = "bg=themeyellow,fg=themeblack,"
+			 "#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,"
+			 "fill=themeyellow}",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
-	  .text = "Style of messages and the command prompt."
+	  .text = "Style of messages and the command prompt. "
+		  "A 'fill' attribute controls background clearing and "
+		  "a 'width' attribute (fixed or percentage) constrains "
+		  "the prompt area width."
 	},
 
 	{ .name = "mouse",
 	  .type = OPTIONS_TABLE_FLAG,
 	  .scope = OPTIONS_TABLE_SESSION,
-	  .default_num = 0,
+	  .default_num = TMUX_MOUSE,
 	  .text = "Whether the mouse is recognised and mouse key bindings are "
 		  "executed. "
 		  "Applications inside panes can use the mouse even when 'off'."
@@ -925,7 +1139,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "status-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SESSION,
-	  .default_str = "bg=green,fg=black",
+	  .default_str = "bg=themegreen,fg=themeblack",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of the status line."
@@ -934,7 +1148,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "pane-status-current-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "default",
+	  .default_str = "underscore",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of the current pane in the status line."
@@ -951,10 +1165,20 @@ const struct options_table_entry options_table[] = {
 	},
 
 	{ .name = "prompt-cursor-colour",
-	  .type = OPTIONS_TABLE_COLOUR,
+	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_SESSION,
-	  .default_num = 6,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "",
 	  .text = "Colour of the cursor when in the command prompt."
+	},
+
+	{ .name = "prompt-command-cursor-colour",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_SESSION,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "",
+	  .text = "Colour of the cursor in the command prompt when in command "
+		  "mode, if 'status-keys' is set to 'vi'."
 	},
 
 	{ .name = "prompt-cursor-style",
@@ -965,10 +1189,19 @@ const struct options_table_entry options_table[] = {
 	  .text = "Style of the cursor when in the command prompt."
 	},
 
+	{ .name = "prompt-command-cursor-style",
+	  .type = OPTIONS_TABLE_CHOICE,
+	  .scope = OPTIONS_TABLE_SESSION,
+	  .choices = options_table_cursor_style_list,
+	  .default_num = 0,
+	  .text = "Style of the cursor in the command prompt when in command "
+		  "mode, if 'status-keys' is set to 'vi'."
+	},
+
 	{ .name = "session-status-current-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "default",
+	  .default_str = "underscore",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of the current session in the status line."
@@ -989,7 +1222,9 @@ const struct options_table_entry options_table[] = {
 	  .scope = OPTIONS_TABLE_SESSION,
 	  .flags = OPTIONS_TABLE_IS_ARRAY,
 	  .default_str = "DISPLAY KRB5CCNAME MSYSTEM SSH_ASKPASS SSH_AUTH_SOCK "
-			 "SSH_AGENT_PID SSH_CONNECTION WINDOWID XAUTHORITY",
+			 "SSH_AGENT_PID SSH_CONNECTION WAYLAND_DISPLAY "
+			 "WINDOWID XAUTHORITY XDG_CURRENT_DESKTOP "
+			 "XDG_SESSION_DESKTOP XDG_SESSION_TYPE",
 	  .text = "List of environment variables to update in the session "
 		  "environment when a client is attached."
 	},
@@ -1029,7 +1264,8 @@ const struct options_table_entry options_table[] = {
 	   * underscore.
 	   */
 	  .default_str = "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~",
-	  .text = "Characters considered to separate words."
+	  .text = "Characters considered to separate words; a space matches "
+		  "any character with the Unicode White_Space property."
 	},
 
 	/* tmtv options (session scope, stored in global_options). */
@@ -1226,9 +1462,10 @@ const struct options_table_entry options_table[] = {
 	},
 
 	{ .name = "clock-mode-colour",
-	  .type = OPTIONS_TABLE_COLOUR,
+	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_num = 4,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "themeblue",
 	  .text = "Colour of the clock in clock mode."
 	},
 
@@ -1240,10 +1477,54 @@ const struct options_table_entry options_table[] = {
 	  .text = "Time format of the clock in clock mode."
 	},
 
+	{ .name = "display-panes-active-colour",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "themered",
+	  .text = "Colour of the active pane for 'display-panes'."
+	},
+
+	{ .name = "display-panes-border-style",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .default_str = "bg=themedarkgrey,fg=themelightgrey",
+	  .flags = OPTIONS_TABLE_IS_STYLE,
+	  .separator = ",",
+	  .text = "Style of the pane borders in 'display-panes'."
+	},
+
+	{ .name = "display-panes-colour",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .flags = OPTIONS_TABLE_IS_COLOUR,
+	  .default_str = "themeblue",
+	  .text = "Colour of not active panes for 'display-panes'."
+	},
+
+	{ .name = "display-panes-format",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .default_str = "#[align=right]"
+	                 "#{pane_unzoomed_width}x#{pane_unzoomed_height}",
+	  .text = "Format of text shown by 'display-panes', expanded for each "
+		  "pane."
+	},
+
+	{ .name = "display-panes-time",
+	  .type = OPTIONS_TABLE_NUMBER,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .minimum = 1,
+	  .maximum = INT_MAX,
+	  .default_num = 1000,
+	  .unit = "milliseconds",
+	  .text = "Time for which 'display-panes' should show pane numbers."
+	},
+
 	{ .name = "copy-mode-match-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "bg=cyan,fg=black",
+	  .default_str = "bg=themecyan,fg=themeblack",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of search matches in copy mode."
@@ -1252,7 +1533,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "copy-mode-current-match-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "bg=magenta,fg=black",
+	  .default_str = "bg=thememagenta,fg=themeblack",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of the current search match in copy mode."
@@ -1261,7 +1542,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "copy-mode-mark-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "bg=red,fg=black",
+	  .default_str = "bg=themeyellow,fg=themeblack",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of the marked line in copy mode."
@@ -1272,7 +1553,7 @@ const struct options_table_entry options_table[] = {
 	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
 	  .default_str = "#[align=right]"
 			 "#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}"
-			 "[#{scroll_position}/#{history_size}]"
+			 "[#{copy_position}/#{copy_position_limit}]"
 			 "#{?search_timed_out, (timed out),"
 			 "#{?search_count, (#{search_count}"
 			 "#{?search_count_partial,+,} results),}}",
@@ -1297,11 +1578,46 @@ const struct options_table_entry options_table[] = {
 	  .text = "Style of selection in copy mode."
 	},
 
+	{ .name = "copy-mode-current-line-number-style",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .default_str = "fg=themeyellow",
+	  .flags = OPTIONS_TABLE_IS_STYLE,
+	  .separator = ",",
+	  .text = "Style of current line number in copy mode."
+	},
+
+	{ .name = "copy-mode-current-line-style",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .default_str = "default",
+	  .flags = OPTIONS_TABLE_IS_STYLE,
+	  .separator = ",",
+	  .text = "Style of the line containing the cursor in copy mode."
+	},
+
+	{ .name = "copy-mode-line-number-style",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .default_str = "fg=themelightgrey,dim",
+	  .flags = OPTIONS_TABLE_IS_STYLE,
+	  .separator = ",",
+	  .text = "Style of line numbers in copy mode."
+	},
+
+	{ .name = "copy-mode-line-numbers",
+	  .type = OPTIONS_TABLE_CHOICE,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .choices = options_table_copy_mode_line_numbers_list,
+	  .default_num = 0,
+	  .text = "Line number mode in copy mode."
+	},
+
 	{ .name = "fill-character",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "",
-	  .text = "Character used to fill unused parts of window."
+	  .default_str = "#{?is_inside,#[bg=themedarkgrey] ,#[fg=themelightgrey]#[acs]~}",
+	  .text = "Format used to fill unused parts of window."
 	},
 
 	{ .name = "main-pane-height",
@@ -1332,7 +1648,7 @@ const struct options_table_entry options_table[] = {
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
 	  .flags = OPTIONS_TABLE_IS_STYLE,
-	  .default_str = "noattr,bg=yellow,fg=black",
+	  .default_str = "noattr,bg=themeyellow,fg=themeblack",
 	  .separator = ",",
 	  .text = "Style of indicators and highlighting in modes."
 	},
@@ -1380,8 +1696,11 @@ const struct options_table_entry options_table[] = {
 
 	{ .name = "pane-active-border-style",
 	  .type = OPTIONS_TABLE_STRING,
-	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "#{?pane_in_mode,fg=yellow,#{?synchronize-panes,fg=red,fg=green}}",
+	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
+	  .default_str = "fg=#{?pane_modal_flag,themeblue,"
+			 "#{?pane_marked,thememagenta,"
+			 "#{?synchronize-panes,themered,"
+			 "#{?pane_in_mode,themeyellow,themegreen}}}}",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of the active pane border."
@@ -1400,7 +1719,17 @@ const struct options_table_entry options_table[] = {
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
 	  .default_str = "#{?pane_active,#[reverse],}#{pane_index}#[default] "
-			 "\"#{pane_title}\"",
+			 "\"#{pane_title}\""
+			 "#{?#{mouse},"
+				"#[align=right]"
+				"#[range=control|7]["
+					"#{?#{pane_floating_flag},t,f}"
+				"]#[norange]"
+				"#[range=control|8]["
+					"#{?#{window_zoomed_flag},u,z}"
+				"]#[norange]"
+				"#[range=control|9][x]#[norange]"
+			",}",
 	  .text = "Format of text in the pane status lines."
 	},
 
@@ -1415,7 +1744,7 @@ const struct options_table_entry options_table[] = {
 
 	{ .name = "pane-border-lines",
 	  .type = OPTIONS_TABLE_CHOICE,
-	  .scope = OPTIONS_TABLE_WINDOW,
+	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
 	  .choices = options_table_pane_border_lines_list,
 	  .default_num = PANE_LINES_SINGLE,
 	  .text = "Type of characters used to draw pane border lines. Some of "
@@ -1424,7 +1753,7 @@ const struct options_table_entry options_table[] = {
 
 	{ .name = "pane-border-status",
 	  .type = OPTIONS_TABLE_CHOICE,
-	  .scope = OPTIONS_TABLE_WINDOW,
+	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
 	  .choices = options_table_pane_status_list,
 	  .default_num = PANE_STATUS_OFF,
 	  .text = "Position of the pane status lines."
@@ -1432,8 +1761,8 @@ const struct options_table_entry options_table[] = {
 
 	{ .name = "pane-border-style",
 	  .type = OPTIONS_TABLE_STRING,
-	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "default",
+	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
+	  .default_str = "fg=themelightgrey",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of the pane status lines."
@@ -1452,13 +1781,23 @@ const struct options_table_entry options_table[] = {
 	  .scope = OPTIONS_TABLE_WINDOW,
 	  .choices = options_table_pane_scrollbars_list,
 	  .default_num = PANE_SCROLLBARS_OFF,
-	  .text = "Pane scrollbar state."
+	  .text = "Pane scrollbar state: off, on, modal, or auto-hide."
+	},
+
+	{ .name = "pane-scrollbars-timeout",
+	  .type = OPTIONS_TABLE_NUMBER,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .minimum = 0,
+	  .maximum = INT_MAX,
+	  .default_num = 500,
+	  .unit = "milliseconds",
+	  .text = "Time before modal and auto-hide pane scrollbars disappear."
 	},
 
 	{ .name = "pane-scrollbars-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
-	  .default_str = "bg=black,fg=white,width=1,pad=0",
+	  .default_str = "bg=themedarkgrey,fg=themelightgrey,width=1,pad=0",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of the pane scrollbar."
@@ -1475,7 +1814,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "popup-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "default",
+	  .default_str = "bg=themedarkgrey,fg=themewhite",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Default style of popups."
@@ -1484,7 +1823,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "popup-border-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "default",
+	  .default_str = "bg=themedarkgrey,fg=themelightgrey",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Default style of popup borders."
@@ -1504,8 +1843,10 @@ const struct options_table_entry options_table[] = {
 	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
 	  .choices = options_table_remain_on_exit_list,
 	  .default_num = 0,
-	  .text = "Whether panes should remain ('on') or be automatically "
-		  "killed ('off' or 'failed') when the program inside exits."
+	  .text = "Whether panes should remain ('on'), remain until a key is "
+		  "pressed after any exit ('key') or after a failure "
+		  "('failed-key'), or be automatically killed ('off' or "
+		  "'failed') when the program inside exits."
 	},
 
 	{ .name = "remain-on-exit-format",
@@ -1529,6 +1870,15 @@ const struct options_table_entry options_table[] = {
 		  "history when clearing the whole screen."
 	},
 
+	{ .name = "switch-mode-match-style",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
+	  .default_str = "bg=cyan fg=black",
+	  .flags = OPTIONS_TABLE_IS_STYLE,
+	  .separator = ",",
+	  .text = "Style of matched characters in switch mode."
+	},
+
 	{ .name = "synchronize-panes",
 	  .type = OPTIONS_TABLE_FLAG,
 	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
@@ -1546,6 +1896,46 @@ const struct options_table_entry options_table[] = {
 		  "A value of 0 means no limit."
 	},
 
+	{ .name = "tree-mode-border-style",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .default_str = "bg=themedarkgrey,fg=themelightgrey",
+	  .flags = OPTIONS_TABLE_IS_STYLE,
+	  .separator = ",",
+	  .text = "Style of borders in tree mode."
+	},
+
+	{ .name = "tree-mode-preview-format",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
+	  .default_str = "#{?pane_format,"
+			 "#{pane_index}:#{pane_title},"
+			 "#{window_index}:#{window_name}}",
+	  .text = "Format of the preview indicator in tree mode."
+	},
+
+	{ .name = "tree-mode-preview-style",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .default_str = "fg=#{?#{||:"
+			 "#{&&:#{pane_format},#{pane_active}},"
+			 "#{&&:#{window_format},#{window_active}}},"
+			 "themered,"
+			 "themeblue}",
+	  .flags = OPTIONS_TABLE_IS_STYLE,
+	  .separator = ",",
+	  .text = "Style of preview indicator in tree mode."
+	},
+
+	{ .name = "tree-mode-selection-style",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .default_str = "#{E:mode-style}",
+	  .flags = OPTIONS_TABLE_IS_STYLE,
+	  .separator = ",",
+	  .text = "Style of the selected line in tree mode."
+	},
+
 	{ .name = "window-active-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE,
@@ -1553,6 +1943,21 @@ const struct options_table_entry options_table[] = {
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Default style of the active pane."
+	},
+
+	{ .name = "window-pane-current-status-format",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .default_str = "#P:[#T]#{?pane_flags,#{pane_flags}, }",
+	  .text = "Format of the current window pane in the status line."
+	},
+
+	{ .name = "window-pane-status-format",
+	  .type = OPTIONS_TABLE_STRING,
+	  .scope = OPTIONS_TABLE_WINDOW,
+	  .default_str = "#P:[#T]#{?pane_flags,#{pane_flags}, }",
+	  .text = "Format of window panes in the status line, except the "
+		  "current pane."
 	},
 
 	{ .name = "window-size",
@@ -1604,7 +2009,7 @@ const struct options_table_entry options_table[] = {
 	{ .name = "window-status-current-style",
 	  .type = OPTIONS_TABLE_STRING,
 	  .scope = OPTIONS_TABLE_WINDOW,
-	  .default_str = "default",
+	  .default_str = "underscore",
 	  .flags = OPTIONS_TABLE_IS_STYLE,
 	  .separator = ",",
 	  .text = "Style of the current window in the status line."
@@ -1661,74 +2066,152 @@ const struct options_table_entry options_table[] = {
 	},
 
 	/* Hook options. */
-	OPTIONS_TABLE_HOOK("after-bind-key", ""),
-	OPTIONS_TABLE_HOOK("after-capture-pane", ""),
-	OPTIONS_TABLE_HOOK("after-copy-mode", ""),
-	OPTIONS_TABLE_HOOK("after-display-message", ""),
-	OPTIONS_TABLE_HOOK("after-display-panes", ""),
-	OPTIONS_TABLE_HOOK("after-kill-pane", ""),
-	OPTIONS_TABLE_HOOK("after-list-buffers", ""),
-	OPTIONS_TABLE_HOOK("after-list-clients", ""),
-	OPTIONS_TABLE_HOOK("after-list-keys", ""),
-	OPTIONS_TABLE_HOOK("after-list-panes", ""),
-	OPTIONS_TABLE_HOOK("after-list-sessions", ""),
-	OPTIONS_TABLE_HOOK("after-list-windows", ""),
-	OPTIONS_TABLE_HOOK("after-load-buffer", ""),
-	OPTIONS_TABLE_HOOK("after-lock-server", ""),
-	OPTIONS_TABLE_HOOK("after-new-session", ""),
-	OPTIONS_TABLE_HOOK("after-new-window", ""),
-	OPTIONS_TABLE_HOOK("after-paste-buffer", ""),
-	OPTIONS_TABLE_HOOK("after-pipe-pane", ""),
-	OPTIONS_TABLE_HOOK("after-queue", ""),
-	OPTIONS_TABLE_HOOK("after-refresh-client", ""),
-	OPTIONS_TABLE_HOOK("after-rename-session", ""),
-	OPTIONS_TABLE_HOOK("after-rename-window", ""),
-	OPTIONS_TABLE_HOOK("after-resize-pane", ""),
-	OPTIONS_TABLE_HOOK("after-resize-window", ""),
-	OPTIONS_TABLE_HOOK("after-save-buffer", ""),
-	OPTIONS_TABLE_HOOK("after-select-layout", ""),
-	OPTIONS_TABLE_HOOK("after-select-pane", ""),
-	OPTIONS_TABLE_HOOK("after-select-window", ""),
-	OPTIONS_TABLE_HOOK("after-send-keys", ""),
-	OPTIONS_TABLE_HOOK("after-set-buffer", ""),
-	OPTIONS_TABLE_HOOK("after-set-environment", ""),
-	OPTIONS_TABLE_HOOK("after-set-hook", ""),
-	OPTIONS_TABLE_HOOK("after-set-option", ""),
-	OPTIONS_TABLE_HOOK("after-show-environment", ""),
-	OPTIONS_TABLE_HOOK("after-show-messages", ""),
-	OPTIONS_TABLE_HOOK("after-show-options", ""),
-	OPTIONS_TABLE_HOOK("after-split-window", ""),
-	OPTIONS_TABLE_HOOK("after-unbind-key", ""),
-	OPTIONS_TABLE_HOOK("alert-activity", ""),
-	OPTIONS_TABLE_HOOK("alert-bell", ""),
-	OPTIONS_TABLE_HOOK("alert-silence", ""),
-	OPTIONS_TABLE_HOOK("client-active", ""),
-	OPTIONS_TABLE_HOOK("client-attached", ""),
-	OPTIONS_TABLE_HOOK("client-detached", ""),
-	OPTIONS_TABLE_HOOK("client-focus-in", ""),
-	OPTIONS_TABLE_HOOK("client-focus-out", ""),
-	OPTIONS_TABLE_HOOK("client-resized", ""),
-	OPTIONS_TABLE_HOOK("client-session-changed", ""),
-	OPTIONS_TABLE_HOOK("client-light-theme", ""),
-	OPTIONS_TABLE_HOOK("client-dark-theme", ""),
-	OPTIONS_TABLE_HOOK("command-error", ""),
-	OPTIONS_TABLE_PANE_HOOK("pane-died", ""),
-	OPTIONS_TABLE_PANE_HOOK("pane-exited", ""),
-	OPTIONS_TABLE_PANE_HOOK("pane-focus-in", ""),
-	OPTIONS_TABLE_PANE_HOOK("pane-focus-out", ""),
-	OPTIONS_TABLE_PANE_HOOK("pane-mode-changed", ""),
-	OPTIONS_TABLE_PANE_HOOK("pane-set-clipboard", ""),
-	OPTIONS_TABLE_PANE_HOOK("pane-title-changed", ""),
-	OPTIONS_TABLE_HOOK("session-closed", ""),
-	OPTIONS_TABLE_HOOK("session-created", ""),
-	OPTIONS_TABLE_HOOK("session-renamed", ""),
-	OPTIONS_TABLE_HOOK("session-window-changed", ""),
-	OPTIONS_TABLE_WINDOW_HOOK("window-layout-changed", ""),
-	OPTIONS_TABLE_HOOK("window-linked", ""),
-	OPTIONS_TABLE_WINDOW_HOOK("window-pane-changed", ""),
-	OPTIONS_TABLE_WINDOW_HOOK("window-renamed", ""),
-	OPTIONS_TABLE_WINDOW_HOOK("window-resized", ""),
-	OPTIONS_TABLE_HOOK("window-unlinked", ""),
+	OPTIONS_TABLE_AFTER_HOOK("bind-key"),
+	OPTIONS_TABLE_AFTER_HOOK("capture-pane"),
+	OPTIONS_TABLE_AFTER_HOOK("copy-mode"),
+	OPTIONS_TABLE_AFTER_HOOK("display-message"),
+	OPTIONS_TABLE_AFTER_HOOK("display-panes"),
+	OPTIONS_TABLE_AFTER_HOOK("kill-pane"),
+	OPTIONS_TABLE_AFTER_HOOK("list-buffers"),
+	OPTIONS_TABLE_AFTER_HOOK("list-clients"),
+	OPTIONS_TABLE_AFTER_HOOK("list-keys"),
+	OPTIONS_TABLE_AFTER_HOOK("list-panes"),
+	OPTIONS_TABLE_AFTER_HOOK("list-sessions"),
+	OPTIONS_TABLE_AFTER_HOOK("list-windows"),
+	OPTIONS_TABLE_AFTER_HOOK("load-buffer"),
+	OPTIONS_TABLE_AFTER_HOOK("lock-server"),
+	OPTIONS_TABLE_AFTER_HOOK("new-session"),
+	OPTIONS_TABLE_AFTER_HOOK("new-window"),
+	OPTIONS_TABLE_AFTER_HOOK("paste-buffer"),
+	OPTIONS_TABLE_AFTER_HOOK("pipe-pane"),
+	OPTIONS_TABLE_AFTER_HOOK("refresh-client"),
+	OPTIONS_TABLE_AFTER_HOOK("rename-session"),
+	OPTIONS_TABLE_AFTER_HOOK("rename-window"),
+	OPTIONS_TABLE_AFTER_HOOK("resize-pane"),
+	OPTIONS_TABLE_AFTER_HOOK("resize-window"),
+	OPTIONS_TABLE_AFTER_HOOK("save-buffer"),
+	OPTIONS_TABLE_AFTER_HOOK("select-layout"),
+	OPTIONS_TABLE_AFTER_HOOK("select-pane"),
+	OPTIONS_TABLE_AFTER_HOOK("select-window"),
+	OPTIONS_TABLE_AFTER_HOOK("send-keys"),
+	OPTIONS_TABLE_AFTER_HOOK("set-buffer"),
+	OPTIONS_TABLE_AFTER_HOOK("set-environment"),
+	OPTIONS_TABLE_AFTER_HOOK("set-hook"),
+	OPTIONS_TABLE_AFTER_HOOK("set-option"),
+	OPTIONS_TABLE_AFTER_HOOK("show-environment"),
+	OPTIONS_TABLE_AFTER_HOOK("show-messages"),
+	OPTIONS_TABLE_AFTER_HOOK("show-options"),
+	OPTIONS_TABLE_AFTER_HOOK("split-window"),
+	OPTIONS_TABLE_AFTER_HOOK("swap-window"),
+	OPTIONS_TABLE_AFTER_HOOK("unbind-key"),
+	OPTIONS_TABLE_HOOK("alert-activity", "",
+	    "Run when a window has activity."),
+	OPTIONS_TABLE_HOOK("alert-bell", "",
+	    "Run when a window has received a bell."),
+	OPTIONS_TABLE_HOOK("alert-silence", "",
+	    "Run when a window has been silent."),
+	OPTIONS_TABLE_HOOK("client-active", "",
+	    "Run when a client becomes the latest active client of its "
+	    "session."),
+	OPTIONS_TABLE_HOOK("client-attached", "",
+	    "Run when a client is attached."),
+	OPTIONS_TABLE_HOOK("client-created", "",
+	    "Run when a client is created."),
+	OPTIONS_TABLE_HOOK("client-closed", "",
+	    "Run when a client is closed."),
+	OPTIONS_TABLE_HOOK("client-detached", "",
+	    "Run when a client is detached."),
+	OPTIONS_TABLE_HOOK("client-focus-in", "",
+	    "Run when focus enters a client."),
+	OPTIONS_TABLE_HOOK("client-focus-out", "",
+	    "Run when focus exits a client."),
+	OPTIONS_TABLE_HOOK("client-resized", "",
+	    "Run when a client is resized."),
+	OPTIONS_TABLE_HOOK("client-session-changed", "",
+	    "Run when a client's attached session is changed."),
+	OPTIONS_TABLE_HOOK("client-light-theme", "",
+	    "Run when a client switches to a light theme."),
+	OPTIONS_TABLE_HOOK("client-dark-theme", "",
+	    "Run when a client switches to a dark theme."),
+	OPTIONS_TABLE_HOOK("command-error", "",
+	    "Run when a command fails."),
+	OPTIONS_TABLE_HOOK("marked-pane-changed", "",
+	    "Run when the marked pane is set or cleared."),
+	OPTIONS_TABLE_PANE_HOOK("pane-activity", "",
+	    "Run when there is new output in a pane."),
+	OPTIONS_TABLE_PANE_HOOK("pane-bell", "",
+	    "Run when a pane receives a bell."),
+	OPTIONS_TABLE_PANE_HOOK("pane-command-finished", "",
+	    "Run when an OSC 133 command finishes in a pane."),
+	OPTIONS_TABLE_PANE_HOOK("pane-command-started", "",
+	    "Run when an OSC 133 command starts in a pane."),
+	OPTIONS_TABLE_PANE_HOOK("pane-created", "",
+	    "Run when a pane is created or respawned."),
+	OPTIONS_TABLE_PANE_HOOK("pane-died", "",
+	    "Run when the program running in a pane exits, but remain-on-exit "
+	    "is on so the pane has not closed."),
+	OPTIONS_TABLE_PANE_HOOK("pane-exited", "",
+	    "Run when the program running in a pane exits."),
+	OPTIONS_TABLE_PANE_HOOK("pane-focus-in", "",
+	    "Run when the focus enters a pane, if the focus-events option is "
+	    "on."),
+	OPTIONS_TABLE_PANE_HOOK("pane-focus-out", "",
+	    "Run when the focus exits a pane, if the focus-events option is "
+	    "on."),
+	OPTIONS_TABLE_PANE_HOOK("pane-mode-changed", "",
+	    "Run when a pane changes mode."),
+	OPTIONS_TABLE_PANE_HOOK("pane-mode-entered", "",
+	    "Run when a pane enters a mode."),
+	OPTIONS_TABLE_PANE_HOOK("pane-mode-exited", "",
+	    "Run when a pane exits a mode."),
+	OPTIONS_TABLE_PANE_HOOK("pane-moved", "",
+	    "Run when a pane is moved to another window."),
+	OPTIONS_TABLE_PANE_HOOK("pane-prompt-closed", "",
+	    "Run when a prompt in a pane is closed."),
+	OPTIONS_TABLE_PANE_HOOK("pane-prompt-opened", "",
+	    "Run when a prompt is opened in a pane."),
+	OPTIONS_TABLE_PANE_HOOK("pane-resized", "",
+	    "Run when a pane is resized."),
+	OPTIONS_TABLE_PANE_HOOK("pane-set-clipboard", "",
+	    "Run when the terminal clipboard is set using the xterm escape "
+	    "sequence."),
+	OPTIONS_TABLE_PANE_HOOK("pane-shell-prompt", "",
+	    "Run when an OSC 133 shell prompt starts in a pane."),
+	OPTIONS_TABLE_PANE_HOOK("pane-title-changed", "",
+	    "Run when a pane title is changed."),
+	OPTIONS_TABLE_HOOK("session-closed", "",
+	    "Run when a session is closed."),
+	OPTIONS_TABLE_HOOK("session-created", "",
+	    "Run when a new session is created."),
+	OPTIONS_TABLE_HOOK("session-added-to-group", "",
+	    "Run when a session is added to a session group."),
+	OPTIONS_TABLE_HOOK("session-renamed", "",
+	    "Run when a session is renamed."),
+	OPTIONS_TABLE_HOOK("session-removed-from-group", "",
+	    "Run when a session is removed from a session group."),
+	OPTIONS_TABLE_HOOK("session-window-changed", "",
+	    "Run when a session changes its active window."),
+	OPTIONS_TABLE_WINDOW_HOOK("window-created", "",
+	    "Run when a window is created."),
+	OPTIONS_TABLE_WINDOW_HOOK("window-closed", "",
+	    "Run when a window is closed."),
+	OPTIONS_TABLE_WINDOW_HOOK("window-layout-changed", "",
+	    "Run when a window layout is changed."),
+	OPTIONS_TABLE_HOOK("window-linked", "",
+	    "Run when a window is linked into a session."),
+	OPTIONS_TABLE_WINDOW_HOOK("window-pane-changed", "",
+	    "Run when a window changes its active pane."),
+	OPTIONS_TABLE_WINDOW_HOOK("window-renamed", "",
+	    "Run when a window is renamed."),
+	OPTIONS_TABLE_WINDOW_HOOK("window-resized", "",
+	    "Run when a window is resized. This may be after the "
+	    "client-resized hook is run."),
+	OPTIONS_TABLE_WINDOW_HOOK("window-unzoomed", "",
+	    "Run when a window is unzoomed."),
+	OPTIONS_TABLE_WINDOW_HOOK("window-zoomed", "",
+	    "Run when a window is zoomed."),
+	OPTIONS_TABLE_HOOK("window-unlinked", "",
+	    "Run when a window is unlinked from a session."),
 
 	{ .name = NULL }
 };

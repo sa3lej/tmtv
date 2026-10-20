@@ -1,4 +1,4 @@
-/* $OpenBSD$ */
+/* $OpenBSD: grid-view.c,v 1.39 2026/08/03 12:58:53 nicm Exp $ */
 
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicholas.marriott@gmail.com>
@@ -47,9 +47,9 @@ grid_view_set_cell(struct grid *gd, u_int px, u_int py,
 
 /* Set padding. */
 void
-grid_view_set_padding(struct grid *gd, u_int px, u_int py)
+grid_view_set_padding(struct grid *gd, u_int px, u_int py, int bg)
 {
-	grid_set_padding(gd, grid_view_x(gd, px), grid_view_y(gd, py));
+	grid_set_padding(gd, grid_view_x(gd, px), grid_view_y(gd, py), bg);
 }
 
 /* Set cells. */
@@ -82,7 +82,7 @@ grid_view_clear_history(struct grid *gd, u_int bg)
 
 	/* Scroll the lines into the history. */
 	for (yy = 0; yy < last; yy++) {
-		grid_collect_history(gd);
+		grid_collect_history(gd, 0);
 		grid_scroll_history(gd, bg);
 	}
 	if (last < gd->sy)
@@ -107,7 +107,7 @@ grid_view_scroll_region_up(struct grid *gd, u_int rupper, u_int rlower,
     u_int bg)
 {
 	if (gd->flags & GRID_HISTORY) {
-		grid_collect_history(gd);
+		grid_collect_history(gd, 0);
 		if (rupper == 0 && rlower == gd->sy - 1)
 			grid_scroll_history(gd, bg);
 		else {
