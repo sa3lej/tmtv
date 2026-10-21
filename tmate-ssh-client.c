@@ -527,8 +527,22 @@ SSH_NEW_CHANNEL:
 			client->state = SSH_READY;
 			client->tmate_session->reconnect_attempts = 0;
 
-			if (client->tmate_session->reconnected)
+			/* Capability belongs to this transport, never to a previous relay. */
+			client->tmate_session->layout_capability = false;
+			free(client->tmate_session->layout_sent);
+			client->tmate_session->layout_sent = NULL;
+			client->tmate_session->layout_sent_len = 0;
+			if (client->tmate_session->reconnected) {
+				/* Send only bootstrap/config until the peer acknowledges layout v1. */
 				tmate_send_reconnection_state(client->tmate_session);
+			}
+			if (client->tmate_session->ev_layout_capability != NULL)
+				event_free(client->tmate_session->ev_layout_capability);
+			client->tmate_session->ev_layout_capability = evtimer_new(
+			    client->tmate_session->ev_base, tmate_layout_capability_timeout,
+			    client->tmate_session);
+			{ struct timeval tv = {5, 0};
+			  evtimer_add(client->tmate_session->ev_layout_capability, &tv); }
 
 			tmate_encoder_set_ready_callback(&client->tmate_session->encoder,
 							 on_encoder_write, client);
@@ -578,6 +592,11 @@ static void kill_ssh_client(struct tmate_ssh_client *client,
 	}
 
 	if (client->state == SSH_READY) {
+		if (client->tmate_session->ev_layout_capability != NULL) {
+			event_free(client->tmate_session->ev_layout_capability);
+			client->tmate_session->ev_layout_capability = NULL;
+		}
+		client->tmate_session->layout_capability = false;
 		tmate_encoder_set_ready_callback(&client->tmate_session->encoder, NULL, NULL);
 		tmate_decoder_destroy(&client->tmate_session->decoder);
 

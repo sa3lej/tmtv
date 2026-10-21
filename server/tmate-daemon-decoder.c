@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include "tmate.h"
 #include "tmate-protocol.h"
+#include "../tmate-layout.h"
 
 char *tmate_left_status, *tmate_right_status;
 
@@ -96,6 +97,10 @@ static void tmate_send_session_urls(struct tmate_session *session)
 static void tmate_ready(struct tmate_session *session,
 			__unused struct tmate_unpacker *uk)
 {
+	if (session->client_protocol_version >= 7 && !session->layout_ready) {
+		session->layout_ready_pending = true;
+		return;
+	}
 	/* This message is also used by the websocket server */
 	if (session->awaiting_identity) {
 		session->identity_ready_pending = true;
@@ -179,6 +184,7 @@ static void tmate_header(struct tmate_session *session,
 		return;
 	}
 
+	tmate_set_env("tmtv_layout_capability", "1");
 	if (tmate_has_websocket())
 		tmate_send_websocket_header(session);
 
@@ -660,6 +666,196 @@ static void tmate_sync_layout(__unused struct tmate_session *session,
 	/* Resize the virtual PTY client to match the host's dimensions */
 	if (tmate_has_websocket())
 		sse_vpty_resize(session, sx, sy);
+}
+
+/* Install a fully decoded plan. No callbacks can observe a partial graph. */
+static struct window_pane *
+layout_plan_pane(int id)
+{
+	return (id < 0 ? NULL : window_pane_find_by_id(id));
+}
+
+static void
+layout_plan_clear_window(struct window *w)
+{
+	struct window_pane *wp;
+	layout_free_cell(w->layout_root, 0);
+	layout_free_cell(w->saved_layout_root, 0);
+	w->layout_root = w->saved_layout_root = NULL;
+	w->active = w->modal = w->modal_last = w->was_zoomed = NULL;
+	while ((wp = TAILQ_FIRST(&w->last_panes)) != NULL)
+		window_pane_stack_remove(&w->last_panes, wp);
+	TAILQ_FOREACH(wp, &w->panes, entry)
+		wp->layout_cell = wp->saved_layout_cell = NULL;
+}
+
+static struct layout_cell *
+layout_plan_take_tree(struct tmtv_layout_tree *tree, int saved)
+{
+	struct layout_cell *root;
+	struct window_pane *wp;
+	u_int i;
+	if (tree->count == 0) return (NULL);
+	root = tree->cells[0];
+	for (i = 0; i < tree->count; i++) {
+		if (tree->panes[i] < 0) continue;
+		wp = layout_plan_pane(tree->panes[i]);
+		tree->cells[i]->wp = wp;
+		if (saved) wp->saved_layout_cell = tree->cells[i];
+		else wp->layout_cell = tree->cells[i];
+	}
+	/* The window now owns every cell, including both leaf-link sets. */
+	tree->count = 0;
+	return (root);
+}
+
+static void
+tmate_sync_layout_v1(struct tmate_session *session, struct tmate_unpacker *uk)
+{
+	msgpack_object payload;
+	struct tmtv_layout *plan;
+	struct tmtv_layout_window *state;
+	struct tmtv_layout_pane *pane;
+	struct session *s;
+	struct window *w, *old;
+	struct window_pane *wp, *next;
+	struct winlink *wl, *tmp;
+	u_int i, j, k;
+	int found;
+
+	if (session != NULL && session->client_protocol_version < 7)
+		return;
+	payload.type = MSGPACK_OBJECT_ARRAY;
+	payload.via.array.ptr = uk->argv;
+	payload.via.array.size = uk->argc;
+	plan = tmtv_layout_decode(payload);
+	if (plan == NULL) {
+		tmate_debug("Ignoring invalid exact layout v1");
+		return;
+	}
+	s = RB_MIN(sessions, &sessions);
+	/* Reject IDs owned by an unrelated session before any mutation. */
+	for (i = 0; i < plan->count; i++)
+		for (j = 0; j < plan->windows[i].count; j++) {
+			wp = layout_plan_pane(plan->windows[i].panes[j].id);
+			if (wp != NULL && (s == NULL || winlink_find_by_window(&s->windows, wp->window) == NULL)) {
+				tmtv_layout_free(plan);
+				return;
+			}
+		}
+	if (s == NULL)
+		s = session_create(NULL, "default", "/", environ_create(),
+		    options_create(global_s_options), NULL);
+	if (s == NULL) tmate_fatal("can't create exact-layout session");
+	/* Release both trees while every old leaf's pane is still alive. */
+	RB_FOREACH(wl, winlinks, &s->windows)
+		layout_plan_clear_window(wl->window);
+
+	/* Create the destination windows before moving any persistent pane. */
+	for (i = 0; i < plan->count; i++) {
+		state = &plan->windows[i];
+		wl = winlink_find_by_index(&s->windows, state->index);
+		if (wl == NULL) {
+			w = window_create(state->sx, state->sy, 0, 0);
+			wl = session_attach(s, w, state->index, NULL);
+			if (wl == NULL) tmate_fatal("can't attach exact-layout window");
+		}
+		w = wl->window;
+		w->sx = w->manual_sx = state->sx;
+		w->sy = w->manual_sy = state->sy;
+		w->flags &= ~(WINDOW_RESIZE|WINDOW_ZOOMED|WINDOW_WASZOOMED);
+		options_set_number(w->options, "window-size", WINDOW_SIZE_MANUAL);
+		options_set_number(w->options, "automatic-rename", 0);
+		options_set_number(w->options, "pane-border-lines", state->border);
+		options_set_number(w->options, "pane-border-status", state->status);
+		window_set_name(w, state->name, 0);
+		for (j = 0; j < state->count; j++) {
+			pane = &state->panes[j];
+			wp = layout_plan_pane(pane->id);
+			if (wp == NULL) {
+				next_window_pane_id = pane->id;
+				/* Active is intentionally unset during the atomic install. */
+				wp = window_add_pane(w, NULL, TMATE_HLIMIT, SPAWN_FULLSIZE);
+				wp->ictx = input_init(wp, NULL, &wp->palette, NULL);
+			} else if (wp->window != w) {
+				old = wp->window;
+				TAILQ_REMOVE(&old->panes, wp, entry);
+				TAILQ_REMOVE(&old->z_index, wp, zentry);
+				wp->window = w;
+				options_set_parent(wp->options, w->options);
+				TAILQ_INSERT_TAIL(&w->panes, wp, entry);
+				TAILQ_INSERT_TAIL(&w->z_index, wp, zentry);
+			}
+			wp->xoff = pane->xoff; wp->yoff = pane->yoff;
+			if (wp->sx != pane->sx || wp->sy != pane->sy)
+				window_pane_resize(wp, pane->sx, pane->sy);
+			tmtv_layout_set_pane_flags(wp, pane->flags);
+			options_set_number(wp->options, "pane-border-lines", pane->border);
+			options_set_number(wp->options, "pane-border-status", pane->status);
+			wp->flags |= PANE_REDRAW|PANE_CHANGED|PANE_STYLECHANGED;
+		}
+	}
+	/* Remove panes absent from the complete plan only after all moves. */
+	RB_FOREACH(wl, winlinks, &s->windows) {
+		w = wl->window;
+		TAILQ_FOREACH_SAFE(wp, &w->panes, entry, next) {
+			found = 0;
+			for (i = 0; i < plan->count; i++)
+				for (j = 0; j < plan->windows[i].count; j++)
+					if ((u_int)plan->windows[i].panes[j].id == wp->id) found = 1;
+			if (!found) window_remove_pane(w, wp);
+		}
+	}
+	for (i = 0; i < plan->count; i++) {
+		state = &plan->windows[i];
+		w = winlink_find_by_index(&s->windows, state->index)->window;
+		/* Canonical pane order is independent of stacking order. */
+		for (j = 0; j < state->count; j++) {
+			wp = layout_plan_pane(state->panes[j].id);
+			TAILQ_REMOVE(&w->panes, wp, entry);
+			TAILQ_INSERT_TAIL(&w->panes, wp, entry);
+		}
+		for (j = 0; j < state->count; j++) {
+			wp = layout_plan_pane(state->zorder[j]);
+			TAILQ_REMOVE(&w->z_index, wp, zentry);
+			TAILQ_INSERT_TAIL(&w->z_index, wp, zentry);
+		}
+		for (j = state->last_count; j > 0; j--)
+			window_pane_stack_push(&w->last_panes, layout_plan_pane(state->last[j-1]));
+		w->layout_root = layout_plan_take_tree(&state->current, 0);
+		w->saved_layout_root = layout_plan_take_tree(&state->saved, 1);
+		w->active = layout_plan_pane(state->active);
+		w->modal = layout_plan_pane(state->modal);
+		w->modal_last = layout_plan_pane(state->modal_last);
+		w->was_zoomed = layout_plan_pane(state->was_zoomed);
+		if (state->flags & 1) w->flags |= WINDOW_ZOOMED;
+		if (state->flags & 2) w->flags |= WINDOW_WASZOOMED;
+		redraw_invalidate_scene(w);
+		server_redraw_window(w);
+	}
+	RB_FOREACH_SAFE(wl, winlinks, &s->windows, tmp) {
+		found = 0;
+		for (i = 0; i < plan->count; i++) if (plan->windows[i].index == wl->idx) found = 1;
+		if (!found) session_detach(s, wl);
+	}
+	session_set_current(s, winlink_find_by_index(&s->windows, plan->active));
+	/* Replay after every graph, pane and input target has been installed. */
+	for (i = 0; i < plan->count; i++)
+		for (k = 0; k < plan->windows[i].count; k++)
+			pty_pending_replay(plan->windows[i].panes[k].id);
+	pty_pending_flush_stale();
+	if (session != NULL) {
+		session->layout_ready = true;
+		if (tmate_has_websocket()) {
+			sse_vpty_resize(session, s->curw->window->sx, s->curw->window->sy);
+			sse_force_vpty_redraw(session);
+		}
+		if (session->layout_ready_pending) {
+			session->layout_ready_pending = false;
+			tmate_ready(session, uk);
+		}
+	}
+	tmtv_layout_free(plan);
 }
 
 /*
@@ -1396,7 +1592,12 @@ void tmate_dispatch_daemon_message(struct tmate_session *session,
 	switch (cmd) {
 #define dispatch(c, f) case c: f(session, uk); break
 	dispatch(TMATE_OUT_HEADER,		tmate_header);
-	dispatch(TMATE_OUT_SYNC_LAYOUT,		tmate_sync_layout);
+	case TMATE_OUT_SYNC_LAYOUT:
+		/* Protocol 7 hosts must never silently fall back to rectangles. */
+		if (session == NULL || session->client_protocol_version < 7)
+			tmate_sync_layout(session, uk);
+		break;
+	dispatch(TMATE_OUT_LAYOUT_V1,		tmate_sync_layout_v1);
 	dispatch(TMATE_OUT_PTY_DATA,		tmate_pty_data);
 	dispatch(TMATE_OUT_EXEC_CMD_STR,	tmate_exec_cmd_str);
 	dispatch(TMATE_OUT_FAILED_CMD,		tmate_failed_cmd);

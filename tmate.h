@@ -79,10 +79,13 @@ extern void unpack_array(struct tmate_unpacker *uk, struct tmate_unpacker *neste
 
 /* tmate-encoder.c */
 
-#define TMATE_PROTOCOL_VERSION 6
+#define TMATE_PROTOCOL_VERSION 7
 
 struct tmate_session;
 
+extern int tmate_encoder_write_frame(struct tmate_encoder *, const void *, size_t);
+extern void tmate_layout_capability_timeout(evutil_socket_t, short, void *);
+extern void tmate_layout_negotiated(struct tmate_session *);
 extern void tmate_write_header(struct tmate_session *session);
 extern void tmate_write_uname(struct tmate_session *session);
 extern void tmate_write_ready(struct tmate_session *session);
@@ -108,6 +111,7 @@ extern void tmate_write_copy_mode(struct tmate_session *session,
 extern void tmate_clipboard_broadcast(struct tmate_session *session,
 				       const char *data, size_t len);
 extern void tmate_write_fin(struct tmate_session *session);
+extern void tmate_send_reconnection_snapshot(struct tmate_session *);
 extern void tmate_send_reconnection_state(struct tmate_session *session);
 extern void tmate_expand_status(void);
 extern void tmate_start_status_timer(struct tmate_session *session);
@@ -205,6 +209,10 @@ struct tmate_session {
 	int need_passphrase;
 	char *passphrase;
 
+	bool layout_required, layout_capability, layout_failed, layout_ready_pending;
+	char *layout_sent;
+	size_t layout_sent_len;
+	struct event *ev_layout_capability;
 	bool reconnected;
 	char reconnect_secret[65]; /* host-only, never persisted or put in options */
 	char *reconnect_name;      /* actual assigned name, including a suffix */

@@ -3,6 +3,7 @@
 #include <openssl/crypto.h>
 #include "tmate.h"
 #include "tmate-protocol.h"
+#include "tmate-layout.h"
 
 /*
  * The pack() macro is defined locally in each function scope via the session
@@ -60,6 +61,10 @@ void tmate_write_uname(struct tmate_session *session)
 
 void tmate_write_ready(struct tmate_session *session)
 {
+	if (session->layout_required && !session->layout_capability) {
+		session->layout_ready_pending = true;
+		return;
+	}
 	PACK(session);
 	pack(array, 1);
 	pack(int, TMATE_OUT_READY);
@@ -75,6 +80,27 @@ void tmate_sync_layout(struct tmate_session *session, struct session *s)
 	int num_windows = 0;
 	int active_pane_id;
 	int active_window_idx = -1;
+
+	if (session->layout_required) {
+		msgpack_sbuffer frame;
+		if (!session->layout_capability)
+			return;
+		if (s == NULL) s = tmate_find_session(session);
+		msgpack_sbuffer_init(&frame);
+		if (tmtv_layout_encode(s, &frame) == 0 &&
+		    (frame.size != session->layout_sent_len ||
+		    memcmp(frame.data, session->layout_sent, frame.size) != 0) &&
+		    tmate_encoder_write_frame(&session->encoder, frame.data, frame.size) == 0) {
+			free(session->layout_sent);
+			session->layout_sent = xmalloc(frame.size);
+			memcpy(session->layout_sent, frame.data, frame.size);
+			session->layout_sent_len = frame.size;
+			if (s != NULL && s->curw != NULL && tmtv_recording_active())
+				tmtv_recording_resize(s->curw->window->sx, s->curw->window->sy);
+		}
+		msgpack_sbuffer_destroy(&frame);
+		return;
+	}
 
 	/*
 	 * TODO this can get a little heavy.
@@ -666,13 +692,6 @@ tmate_send_view_snapshot(struct tmate_session *session, struct window_pane *wp)
 
 void tmate_send_reconnection_state(struct tmate_session *session)
 {
-	struct session *s;
-	struct winlink *wl;
-	struct window *w;
-	struct window_pane *wp;
-	struct window_mode_entry *wme;
-	int copy_backing = 0;
-
 	/* Start with a fresh encoder */
 	tmate_encoder_destroy(&session->encoder);
 	tmate_encoder_init(&session->encoder, NULL, session);
@@ -683,6 +702,19 @@ void tmate_send_reconnection_state(struct tmate_session *session)
 	/* TODO send all option variables */
 	tmate_write_uname(session);
 	tmate_write_ready(session);
+
+	if (!session->layout_required || session->layout_capability)
+		tmate_send_reconnection_snapshot(session);
+}
+
+void tmate_send_reconnection_snapshot(struct tmate_session *session)
+{
+	struct session *s;
+	struct winlink *wl;
+	struct window *w;
+	struct window_pane *wp;
+	struct window_mode_entry *wme;
+	int copy_backing = 0;
 
 	tmate_sync_layout(session, NULL);
 	s = tmate_find_session(session);

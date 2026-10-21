@@ -1,6 +1,7 @@
 /* Complete relay production objects: real streaming decoder and mode lifecycle. */
 #include "../server/tmate.h"
 #include "../server/tmate-protocol.h"
+#include "../tmate-layout.h"
 #include "test-harness.h"
 #include <locale.h>
 
@@ -1448,6 +1449,8 @@ TEST(host_encoder_output_routes_without_feedback)
 	destroy_pane(first);
 }
 
+#include "test-layout-v1.h"
+
 int
 main(int argc, char **argv)
 {
@@ -1499,6 +1502,11 @@ main(int argc, char **argv)
 		else
 			RUN_TEST(host_copy_state_routes_and_preserves_clock);
 	} else {
+		RUN_TEST(exact_layout_preserves_floating_state_and_pane_identity);
+		RUN_TEST(exact_layout_creates_all_panes_before_activation);
+		RUN_TEST(exact_layout_moves_panes_between_windows_without_recreating);
+		RUN_TEST(exact_layout_preserves_zoom_and_saved_tree);
+		RUN_TEST(exact_layout_rejects_invalid_graphs_atomically);
 		RUN_TEST(maximum_panes_recover_spatial_tree);
 		RUN_TEST(non_tiled_rectangles_preserve_legacy_fallback);
 		RUN_TEST(malformed_layout_preserves_session_geometry_and_following_message);

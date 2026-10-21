@@ -2000,6 +2000,12 @@ server_client_loop(void)
 #endif
 	}
 
+#ifndef TMATE_SERVER_BUILD
+	/* Exact comparison includes hierarchy, modal state and layer-only moves. */
+	if (tmate_session.layout_required)
+		tmate_sync_layout(&tmate_session, NULL);
+#endif
+
 	/* Send theme updates. */
 	RB_FOREACH(w, windows, &windows) {
 		TAILQ_FOREACH(wp, &w->panes, entry)

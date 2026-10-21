@@ -267,6 +267,15 @@ set -g invalid-option-E2E_VIEW yes
         finally:
             os.close(master)
         sessions = Path("/tmp/tmtv/sessions")
+        if os.environ.get("TMTV_E2E_EXPECT_LAYOUT_REJECTION") == "1":
+            wait_for(lambda: "Relay update required" in host("display-message", "-p", "#{tmtv_layout_error}"), "unsupported relay reports required update")
+            assert host("display-message", "-p", "#{tmtv_ssh}|#{tmtv_web}") == "|"
+            assert "e2e" not in [p.name for p in sessions.iterdir()]
+            host("send-keys", "-l", "printf 'LOCAL_STILL_WORKS\\n'")
+            host("send-keys", "Enter")
+            wait_for(lambda: "LOCAL_STILL_WORKS" in host("capture-pane", "-p"), "local terminal remains usable")
+            print("PASS unsupported relay gets explicit update requirement, no sharing URL, and usable local terminal", flush=True)
+            return
         wait_for(lambda: any(p.name.endswith("-e2e") and not p.name.startswith("ro-") for p in sessions.iterdir()), "authenticated host registration")
         rw = next(p.name for p in sessions.iterdir() if p.name.endswith("-e2e") and not p.name.startswith("ro-"))
         ro = "ro-e2e"
@@ -429,6 +438,53 @@ set -g invalid-option-E2E_VIEW yes
         for viewer in viewers:
             viewer.sees("VIEW_EXIT_RESTORED")
         print("PASS view exit returns all viewers to the preserved live shell", flush=True)
+
+        # Same rectangles and active pane, different stacking order. This was
+        # invisible to the legacy layout hash. Observe composed terminal output.
+        base = host("display-message", "-p", "#{pane_id}")
+        def floating(marker, *flags):
+            script = "import time; print('\\033[2J\\033[H" + marker + "',flush=True); time.sleep(300)"
+            if "-O" in flags:
+                script = ("import time; print('\\033[2J\\033[H" + marker + "',flush=True); "
+                          "value=input(); open('/tmp/e2e/modal-input','w').write(value); time.sleep(300)")
+            return host("new-pane", "-d", "-P", "-F", "#{pane_id}", "-x", "32", "-y", "8",
+                        "-X", "4", "-Y", "3", *flags, "python3 -c " + shlex.quote(script))
+        back = floating("FLOAT_BACK")
+        front = floating("FLOAT_FRONT")
+        def top_is(viewer, marker, hidden):
+            text = viewer.text()
+            return marker in text and hidden not in text
+        for viewer in viewers:
+            wait_for(lambda v=viewer: top_is(v, "FLOAT_FRONT", "FLOAT_BACK"), "front floating pane covers back")
+        host("move-pane", "-t", back, "-P", "front")
+        assert host("display-message", "-p", "#{pane_id}") == base
+        for viewer in viewers:
+            wait_for(lambda v=viewer: top_is(v, "FLOAT_BACK", "FLOAT_FRONT"), "layer-only change reaches viewer")
+        print("PASS overlapping floats and layer-only changes reach SSH/SSE RW/RO viewers", flush=True)
+        reconnect_host(lambda v: top_is(v, "FLOAT_BACK", "FLOAT_FRONT"), "reconnect restores floating layer order")
+        print("PASS real reconnect restores exact floating geometry and layer order", flush=True)
+        host("kill-pane", "-t", front)
+        host("kill-pane", "-t", back)
+        host("split-window", "-d", "-h", "-t", base, "/bin/sh -i")
+        tiled = host("display-message", "-p", "-t", base, "#{window_panes}")
+        assert tiled == "2", tiled
+        host("resize-pane", "-Z", "-t", base)
+        modal = floating("FLOAT_MODAL", "-O")
+        for viewer in viewers:
+            viewer.sees("FLOAT_MODAL")
+        reconnect_host(lambda v: "FLOAT_MODAL" in v.text(), "modal float over zoom survives reconnect")
+        viewers[2].send(b"RO_FORBIDDEN\r")
+        viewers[0].send(b"MODAL_INPUT\r")
+        wait_for(lambda: (ROOT / "modal-input").exists(), "RW input reaches modal pane after reconnect")
+        assert (ROOT / "modal-input").read_text() == "MODAL_INPUT"
+        host("kill-pane", "-t", modal)
+        assert host("display-message", "-p", "-t", base, "#{window_zoomed_flag}") == "1"
+        host("resize-pane", "-Z", "-t", base)
+        assert host("display-message", "-p", "-t", base, "#{window_panes}") == "2"
+        other = next(p for p in host("list-panes", "-F", "#{pane_id}").splitlines() if p != base)
+        host("kill-pane", "-t", other)
+        host("select-pane", "-t", base)
+        print("PASS modal input/RO isolation, float over zoom, reconnect and saved tiled layout", flush=True)
         for viewer in viewers:
             viewer.close()
         for viewer in local_viewers:
@@ -443,7 +499,7 @@ set -g invalid-option-E2E_VIEW yes
             viewers.append(viewer)
             viewer.sees("LATE_VIEWER_READY")
         print("PASS fresh SSH/SSE RO viewers reconstruct the current screen", flush=True)
-        print("14 end-to-end checks passed; browser DOM, parsed view styles, full-fidelity SIXEL and platforms remain separate coverage.", flush=True)
+        print("17 end-to-end checks passed; browser DOM, parsed view styles, full-fidelity SIXEL and platforms remain separate coverage.", flush=True)
     except BaseException:
         with open(ROOT / "diagnostics.log", "w") as out:
             out.write("session entries: " + repr([p.name for p in Path('/tmp/tmtv/sessions').iterdir()]) + "\n")

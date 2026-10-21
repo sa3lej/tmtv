@@ -2838,14 +2838,15 @@ void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 {
 	struct ws_client *wc, *tmp;
 	msgpack_sbuffer sbuf;
-	msgpack_packer pk;
+	struct tmate_encoder encoder = { .mpac_version = 5 };
+	msgpack_packer *pk = &encoder.pk;
 	int i;
 
 	/* Host configuration and identity are private, including in replay.
 	 * Browsers render state, not host-side tmux commands. */
 	if (uk->argc > 0 && uk->argv[0].type == MSGPACK_OBJECT_POSITIVE_INTEGER) {
 		int cmd = (int)uk->argv[0].via.u64;
-		if (cmd == TMATE_OUT_SESSION_IDENTITY ||
+		if (cmd == TMATE_OUT_SESSION_IDENTITY || cmd == TMATE_OUT_LAYOUT_V1 ||
 		    cmd == TMATE_OUT_EXEC_CMD || cmd == TMATE_OUT_EXEC_CMD_STR)
 			return;
 	}
@@ -2885,14 +2886,16 @@ void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 	 * to all SSE clients, bypassing the encoder event mechanism
 	 * which can be broken by fork/event_reinit. */
 	msgpack_sbuffer_init(&sbuf);
-	msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+	msgpack_packer_init(pk, &sbuf, msgpack_sbuffer_write);
 
-	msgpack_pack_array(&pk, 2);
-	msgpack_pack_int(&pk, TMATE_CTL_DEAMON_OUT_MSG);
+	msgpack_pack_array(pk, 2);
+	msgpack_pack_int(pk, TMATE_CTL_DEAMON_OUT_MSG);
 
-	msgpack_pack_array(&pk, uk->argc);
+	msgpack_pack_array(pk, uk->argc);
 	for (i = 0; i < uk->argc; i++)
-		_msgpack_pack_object(&pk, uk->argv[i]);
+		/* SSE always uses MessagePack 5. The SSH compatibility helper
+		 * requires a full tmate_encoder, not this standalone packer. */
+		msgpack_pack_object(pk, uk->argv[i]);
 
 	/* Store in replay buffer */
 	pty_replay_append((unsigned char *)sbuf.data, sbuf.size);

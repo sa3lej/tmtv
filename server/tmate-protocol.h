@@ -1,7 +1,7 @@
 #ifndef TMATE_PROTOCOL_H
 #define TMATE_PROTOCOL_H
 
-#define TMATE_PROTOCOL_VERSION 6
+#define TMATE_PROTOCOL_VERSION 7
 
 enum tmate_control_out_msg_types {
 	TMATE_CTL_HEADER,
@@ -64,6 +64,7 @@ enum tmate_daemon_out_msg_types {
 	TMATE_OUT_INPUT_MODE,
 	TMATE_OUT_CLIPBOARD,
 	TMATE_OUT_SESSION_IDENTITY, /* private; never forwarded to viewers */
+	TMATE_OUT_LAYOUT_V1 = 19, /* explicit capability; never forward as a legacy viewer message */
 };
 
 /*

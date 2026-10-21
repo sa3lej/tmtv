@@ -201,6 +201,12 @@ static void handle_set_env(struct tmate_session *session,
 	char *name = unpack_string(uk);
 	char *value = unpack_string(uk);
 
+	if (!strcmp(name, "tmtv_layout_capability")) {
+		if (!strcmp(value, "1")) tmate_layout_negotiated(session);
+		else tmate_layout_capability_timeout(-1, 0, session);
+		free(name); free(value); return;
+	}
+
 	if (!strcmp(name, "tmtv_reconnect_capability") && !strcmp(value, "1")) {
 		tmate_write_session_identity(session);
 		free(name);

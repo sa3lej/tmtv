@@ -83,6 +83,15 @@ static int on_encoder_write(void *userdata, const char *buf, size_t len)
 	return 0;
 }
 
+/* Complete control frames must never be partially queued or head-truncated. */
+int tmate_encoder_write_frame(struct tmate_encoder *encoder, const void *data, size_t len)
+{
+	size_t limit = encoder->ready_callback ? ENCODER_BUFFER_CONNECTED : ENCODER_BUFFER_MAX;
+	if (len > limit || evbuffer_get_length(encoder->buffer) > limit - len)
+		return (-1);
+	return (on_encoder_write(encoder, data, len));
+}
+
 /* Really sad hack, but we can get away with it */
 #define tmate_encoder_from_pk(pk) ((struct tmate_encoder *)pk)
 

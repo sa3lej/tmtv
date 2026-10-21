@@ -298,6 +298,7 @@ struct tmate_session {
 	const char *client_version;
 	int client_protocol_version;
 	struct event *ev_notify_timer;	/* libevent2: heap-allocated */
+	bool layout_ready, layout_ready_pending;
 	bool fin_received;
 
 	/* websocket listener for browser viewers */

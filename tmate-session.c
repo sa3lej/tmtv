@@ -202,8 +202,39 @@ static void send_authorized_keys(void)
 	free(path);
 }
 
+void tmate_layout_capability_timeout(__unused evutil_socket_t fd,
+    __unused short events, void *arg)
+{
+	struct tmate_session *session = arg;
+	if (session->layout_capability || session->layout_failed) return;
+	session->layout_failed = true;
+	tmate_set_env(session, "tmtv_layout_error", "Relay update required: exact layout protocol v1 is unsupported");
+	tmate_write_fin(session);
+	tmate_status_message("Relay update required: exact layout protocol v1 is unsupported");
+	/* Do not publish an inaccurate layout or repeatedly reconnect this peer. */
+}
+
+void tmate_layout_negotiated(struct tmate_session *session)
+{
+	if (session->layout_failed) return;
+	if (session->ev_layout_capability != NULL) {
+		event_free(session->ev_layout_capability);
+		session->ev_layout_capability = NULL;
+	}
+	if (session->layout_capability) return;
+	session->layout_capability = true;
+	tmate_set_env(session, "tmtv_layout_error", "");
+	free(session->layout_sent); session->layout_sent = NULL; session->layout_sent_len = 0;
+	tmate_send_reconnection_snapshot(session);
+	if (session->layout_ready_pending) {
+		session->layout_ready_pending = false;
+		tmate_write_ready(session);
+	}
+}
+
 void tmate_session_start(void)
 {
+	tmate_session.layout_required = true;
 	/*
 	 * We split init and start because:
 	 * - We need to process the tmux config file during the connection as
@@ -305,7 +336,7 @@ void tmate_reconnect_session(struct tmate_session *session, const char *message)
 	int delay, i;
 	struct timeval tv;
 
-	if (session->ev_connection_retry)
+	if (session->layout_failed || session->ev_connection_retry)
 		return;
 
 	session->reconnect_attempts++;

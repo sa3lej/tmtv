@@ -2,6 +2,7 @@
 #include "../tmate.h"
 #include "../tmate-protocol.h"
 #include "../tmate-key.h"
+#include "../tmate-layout.h"
 #include "test-harness.h"
 #include <locale.h>
 
@@ -237,8 +238,8 @@ TEST(host_exit_only_emits_for_last_copy_mode)
 
 struct reconnect_messages {
 	int count;
-	int opcode[4];
-	int argc[4];
+	int opcode[16];
+	int argc[16];
 };
 
 static void
@@ -247,7 +248,7 @@ read_reconnect_message(void *userdata, struct tmate_unpacker *uk)
 	struct reconnect_messages *messages = userdata;
 	int n = messages->count++;
 
-	if (n < 4) {
+	if (n < 16) {
 		messages->argc[n] = uk->argc;
 		messages->opcode[n] = unpack_int(uk);
 	}
@@ -763,6 +764,83 @@ emit_split_reconnect(int vertical, int mixed)
 	return (result);
 }
 
+TEST(layout_negotiation_holds_ready_and_sends_state_once)
+{
+	struct window_pane *wp = create_pane();
+	struct session *s;
+	struct tmate_env *env;
+	struct tmate_decoder decoder;
+	struct reconnect_messages messages = { 0 };
+	struct winlink *wl;
+
+	s = session_create(NULL, "negotiation", "/", environ_create(),
+	    options_create(global_s_options), NULL);
+	wl = winlink_add(&s->windows, 0);
+	wl->session = s;
+	winlink_set_window(wl, wp->window);
+	s->curw = wl;
+	window_set_active_pane(wp->window, wp, 0);
+	TAILQ_INIT(&tmate_session.env);
+	tmate_session.layout_required = true;
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	tmate_write_ready(&tmate_session);
+	tmate_sync_layout(&tmate_session, s);
+	ASSERT(tmate_session.layout_ready_pending);
+	ASSERT_EQ(evbuffer_get_length(tmate_session.encoder.buffer), 0);
+	tmate_layout_negotiated(&tmate_session);
+	ASSERT(tmate_session.layout_capability);
+	tmate_decoder_init(&decoder, read_reconnect_message, &messages);
+	decode_reconnect_buffer(&decoder, 1);
+	ASSERT(messages.count > 2 && messages.count < 16);
+	ASSERT_EQ(messages.opcode[0], TMTV_LAYOUT_OPCODE);
+	ASSERT_EQ(messages.opcode[messages.count-1], TMATE_OUT_READY);
+	tmate_layout_negotiated(&tmate_session);
+	tmate_sync_layout(&tmate_session, s);
+	ASSERT_EQ(evbuffer_get_length(tmate_session.encoder.buffer), 0);
+	tmate_decoder_destroy(&decoder);
+	tmate_encoder_destroy(&tmate_session.encoder);
+	tmate_session.encoder.buffer = NULL;
+	free(tmate_session.layout_sent);
+	tmate_session.layout_sent = NULL; tmate_session.layout_sent_len = 0;
+	tmate_session.layout_required = tmate_session.layout_capability = false;
+	while ((env = TAILQ_FIRST(&tmate_session.env)) != NULL) {
+		TAILQ_REMOVE(&tmate_session.env, env, entry);
+		free(env->name); free(env->value); free(env);
+	}
+	session_destroy(s, 0, __func__);
+	while (cmdq_next(NULL) != 0) ;
+	event_loop(EVLOOP_NONBLOCK);
+	destroy_pane(wp);
+}
+
+TEST(layout_timeout_cannot_be_revived_by_late_capability)
+{
+	struct tmate_env *env;
+	struct tmate_decoder decoder;
+	struct reconnect_messages messages = { 0 };
+	TAILQ_INIT(&tmate_session.env);
+	tmate_session.layout_required = true;
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	tmate_write_ready(&tmate_session);
+	tmate_layout_capability_timeout(-1, 0, &tmate_session);
+	ASSERT(tmate_session.layout_failed && !tmate_session.layout_capability);
+	tmate_layout_negotiated(&tmate_session);
+	ASSERT(!tmate_session.layout_capability);
+	tmate_decoder_init(&decoder, read_reconnect_message, &messages);
+	decode_reconnect_buffer(&decoder, 1);
+	ASSERT_EQ(messages.count, 1);
+	ASSERT_EQ(messages.opcode[0], TMATE_OUT_FIN);
+	tmate_decoder_destroy(&decoder);
+	tmate_encoder_destroy(&tmate_session.encoder);
+	tmate_session.encoder.buffer = NULL;
+	tmate_session.layout_required = tmate_session.layout_failed = false;
+	tmate_session.layout_ready_pending = false;
+	while ((env = TAILQ_FIRST(&tmate_session.env)) != NULL) {
+		TAILQ_REMOVE(&tmate_session.env, env, entry);
+		free(env->name); free(env->value); free(env);
+	}
+}
+
 int
 main(int argc, char **argv)
 {
@@ -810,6 +888,8 @@ main(int argc, char **argv)
 	}
 	TEST_SUITE_BEGIN("Production mode lifecycle");
 	RUN_TEST(sharing_key_numbers_stay_compatible);
+	RUN_TEST(layout_negotiation_holds_ready_and_sends_state_once);
+	RUN_TEST(layout_timeout_cannot_be_revived_by_late_capability);
 	RUN_TEST(context_and_duplicate_entry);
 	RUN_TEST(declined_mode_preserves_base_and_previous_mode);
 	RUN_TEST(no_stack_replacement_restores_underlying_mode_on_decline);
