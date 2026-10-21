@@ -5,6 +5,7 @@
 #include "../tmate-layout.h"
 #include "test-harness.h"
 #include <locale.h>
+#include "snapshot-parser-fixture.h"
 
 /* Frozen protocol 6 values from the pre-port header, not internal enum math. */
 TEST(sharing_key_numbers_stay_compatible)
@@ -841,6 +842,20 @@ TEST(layout_timeout_cannot_be_revived_by_late_capability)
 	}
 }
 
+TEST(host_parser_snapshot_preserves_colours_attributes_and_unicode)
+{
+	msgpack_sbuffer sb;
+	msgpack_unpacked un;
+	struct grid *gd;
+	msgpack_sbuffer_init(&sb);
+	ASSERT_EQ(snapshot_parser_frame(&sb), 0);
+	msgpack_unpacked_init(&un);
+	ASSERT_EQ(msgpack_unpack_next(&un, sb.data, sb.size, NULL), MSGPACK_UNPACK_SUCCESS);
+	gd = tmtv_snapshot_grid_decode(un.data, 2000);
+	ASSERT(snapshot_parser_expected(gd));
+	grid_destroy(gd); msgpack_unpacked_destroy(&un); msgpack_sbuffer_destroy(&sb);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -859,6 +874,15 @@ main(int argc, char **argv)
 			options_default(global_s_options, oe);
 		if (oe->scope & OPTIONS_TABLE_WINDOW)
 			options_default(global_w_options, oe);
+	}
+	if (argc == 2 && strcmp(argv[1], "--emit-grid-snapshot") == 0) {
+		msgpack_sbuffer sb;
+		int result;
+		msgpack_sbuffer_init(&sb);
+		result = snapshot_parser_frame(&sb);
+		if (result == 0 && fwrite(sb.data, 1, sb.size, stdout) != sb.size) result = -1;
+		msgpack_sbuffer_destroy(&sb);
+		return (result != 0);
 	}
 	if (argc == 2 && (strcmp(argv[1], "--emit-copy-output") == 0 ||
 	    strcmp(argv[1], "--emit-copy-exit") == 0 ||
@@ -887,6 +911,7 @@ main(int argc, char **argv)
 		return (result);
 	}
 	TEST_SUITE_BEGIN("Production mode lifecycle");
+	RUN_TEST(host_parser_snapshot_preserves_colours_attributes_and_unicode);
 	RUN_TEST(sharing_key_numbers_stay_compatible);
 	RUN_TEST(layout_negotiation_holds_ready_and_sends_state_once);
 	RUN_TEST(layout_timeout_cannot_be_revived_by_late_capability);

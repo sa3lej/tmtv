@@ -187,7 +187,10 @@ relay-copy-output:
 	$(MAKE) -C .. tests/test-relay-copy-output tests/test-mode-lifecycle
 	./test-relay-copy-output
 	@set -eu; wire=$$(mktemp); trap 'rm -f "$$wire"' EXIT HUP INT TERM; \
-	./test-mode-lifecycle --emit-copy-output > "$$wire"; \
+	./test-mode-lifecycle --emit-grid-snapshot > "$$wire"; \
+	    ./test-relay-copy-output --host-grid-codec < "$$wire"; \
+	    ./test-relay-copy-output --host-grid-codec-bulk < "$$wire"; \
+	    ./test-mode-lifecycle --emit-copy-output > "$$wire"; \
 	    ./test-relay-copy-output --host-output < "$$wire"; \
 	    ./test-mode-lifecycle --emit-copy-exit > "$$wire"; \
 	    ./test-relay-copy-output --host-exit < "$$wire"; \

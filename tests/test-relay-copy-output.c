@@ -1450,6 +1450,7 @@ TEST(host_encoder_output_routes_without_feedback)
 }
 
 #include "test-layout.h"
+#include "test-snapshot.h"
 
 int
 main(int argc, char **argv)
@@ -1471,7 +1472,11 @@ main(int argc, char **argv)
 			options_default(global_w_options, oe);
 	}
 	TEST_SUITE_BEGIN("Production relay copy output");
-	if (argc == 2 && (strcmp(argv[1], "--host-frozen-copy") == 0 ||
+	if (argc == 2 && (strcmp(argv[1], "--host-grid-codec") == 0 ||
+	    strcmp(argv[1], "--host-grid-codec-bulk") == 0)) {
+		snapshot_bulk = strstr(argv[1], "-bulk") != NULL;
+		RUN_TEST(host_grid_codec_stream_roundtrip);
+	} else if (argc == 2 && (strcmp(argv[1], "--host-frozen-copy") == 0 ||
 	    strcmp(argv[1], "--host-frozen-copy-bulk") == 0)) {
 		host_bulk = strcmp(argv[1], "--host-frozen-copy-bulk") == 0;
 		RUN_TEST(host_frozen_copy_and_live_base_restore_independently);
@@ -1502,6 +1507,46 @@ main(int argc, char **argv)
 		else
 			RUN_TEST(host_copy_state_routes_and_preserves_clock);
 	} else {
+		RUN_TEST(snapshot_maximum_combined_cell_roundtrips);
+		RUN_TEST(snapshot_mutated_objects_remain_bounded_and_reencodable);
+		RUN_TEST(snapshot_preserves_host_width_and_full_style_bits);
+		RUN_TEST(snapshot_output_limit_is_atomic);
+		RUN_TEST(snapshot_history_limit_is_atomic);
+		RUN_TEST(snapshot_grid_roundtrip_preserves_text_and_styles);
+		RUN_TEST(snapshot_history_is_explicitly_bounded);
+		RUN_TEST(snapshot_old_width_rows_survive_resize);
+		RUN_TEST(snapshot_cost_bounds_both_encoder_and_decoder);
+		RUN_TEST(snapshot_rejected_encode_preserves_destination);
+		RUN_TEST(snapshot_rejects_version);
+		RUN_TEST(snapshot_rejects_zero_width);
+		RUN_TEST(snapshot_rejects_overflow_height);
+		RUN_TEST(snapshot_rejects_history_overflow);
+		RUN_TEST(snapshot_rejects_scrolled_overflow);
+		RUN_TEST(snapshot_rejects_grid_flags);
+		RUN_TEST(snapshot_rejects_row_count);
+		RUN_TEST(snapshot_rejects_used_overflow);
+		RUN_TEST(snapshot_rejects_storage_flags);
+		RUN_TEST(snapshot_rejects_osc_overflow);
+		RUN_TEST(snapshot_rejects_nonbinary_cell);
+		RUN_TEST(snapshot_rejects_oversized_cell);
+		RUN_TEST(snapshot_rejects_unsupported_width);
+		RUN_TEST(snapshot_rejects_cell_storage_flags);
+		RUN_TEST(snapshot_rejects_attribute_overflow);
+		RUN_TEST(snapshot_rejects_mixed_colour_types);
+		RUN_TEST(snapshot_rejects_negative_colour);
+		RUN_TEST(snapshot_rejects_unknown_theme_slot);
+		RUN_TEST(snapshot_rejects_missing_padding);
+		RUN_TEST(snapshot_rejects_orphan_padding);
+		RUN_TEST(snapshot_rejects_overlong_utf8);
+		RUN_TEST(snapshot_rejects_surrogate);
+		RUN_TEST(snapshot_rejects_out_of_range_scalar);
+		RUN_TEST(snapshot_rejects_truncated_utf8);
+		RUN_TEST(snapshot_rejects_escape);
+		RUN_TEST(snapshot_rejects_c1_control);
+		RUN_TEST(snapshot_rejects_del);
+		RUN_TEST(snapshot_rejects_nul);
+		RUN_TEST(snapshot_rejects_empty_text);
+		RUN_TEST(snapshot_rejects_extra_padding);
 		RUN_TEST(exact_layout_preserves_floating_state_and_pane_identity);
 		RUN_TEST(exact_aliases_create_one_shared_window_and_keep_active_index);
 		RUN_TEST(exact_alias_canonical_removal_and_index_reuse_preserve_objects);
