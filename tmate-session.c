@@ -208,9 +208,9 @@ void tmate_layout_capability_timeout(__unused evutil_socket_t fd,
 	struct tmate_session *session = arg;
 	if (session->layout_capability || session->layout_failed) return;
 	session->layout_failed = true;
-	tmate_set_env(session, "tmtv_layout_error", "Relay update required: exact layout protocol v1 is unsupported");
+	tmate_set_env(session, "tmtv_layout_error", "Relay update required: exact layout protocol v2 is unsupported");
 	tmate_write_fin(session);
-	tmate_status_message("Relay update required: exact layout protocol v1 is unsupported");
+	tmate_status_message("Relay update required: exact layout protocol v2 is unsupported");
 	/* Do not publish an inaccurate layout or repeatedly reconnect this peer. */
 }
 

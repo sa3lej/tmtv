@@ -83,6 +83,23 @@ pack_tree(msgpack_packer *pk, struct layout_cell *root)
 	return (0);
 }
 
+u_int
+tmtv_layout_window_id(struct window *w)
+{
+	return (w->tmate_remote_window_id_valid ? w->tmate_remote_window_id : w->id);
+}
+
+int
+tmtv_layout_first_link(struct session *s, struct winlink *wl)
+{
+	struct winlink *previous;
+	RB_FOREACH(previous, winlinks, &s->windows) {
+		if (previous == wl) return (1);
+		if (previous->window == wl->window) return (0);
+	}
+	return (0);
+}
+
 int
 tmtv_layout_encode(struct session *s, msgpack_sbuffer *buffer)
 {
@@ -108,11 +125,18 @@ tmtv_layout_encode(struct session *s, msgpack_sbuffer *buffer)
 	msgpack_pack_array(&pk, nw);
 	RB_FOREACH(wl, winlinks, &s->windows) {
 		w = wl->window;
+		if (tmtv_layout_window_id(w) > INT_MAX) return (-1);
+		if (!tmtv_layout_first_link(s, wl)) {
+			msgpack_pack_array(&pk, 2);
+			msgpack_pack_int(&pk, wl->idx);
+			msgpack_pack_unsigned_int(&pk, tmtv_layout_window_id(w));
+			continue;
+		}
 		count = window_count_panes(w, 1);
 		if (count == 0 || count > TMTV_LAYOUT_MAX_PANES - total)
 			return (-1);
 		total += count;
-		msgpack_pack_array(&pk, 15);
+		msgpack_pack_array(&pk, 16);
 		msgpack_pack_int(&pk, wl->idx);
 		msgpack_pack_str(&pk, strlen(w->name));
 		msgpack_pack_str_body(&pk, w->name, strlen(w->name));
@@ -150,6 +174,7 @@ tmtv_layout_encode(struct session *s, msgpack_sbuffer *buffer)
 		msgpack_pack_array(&pk, 2);
 		msgpack_pack_int(&pk, options_get_number(w->options, "pane-border-lines"));
 		msgpack_pack_int(&pk, options_get_number(w->options, "pane-border-status"));
+		msgpack_pack_unsigned_int(&pk, tmtv_layout_window_id(w));
 	}
 	return (buffer->size <= 2 * 1024 * 1024 ? 0 : -1);
 }
@@ -303,8 +328,18 @@ tmtv_layout_decode(msgpack_object obj)
 	windows = a[2].via.array.ptr;
 	for (i = 0; i < n; i++) {
 		w = &plan->windows[i];
-		if (!array(windows[i], 15)) goto fail;
+		if (!array(windows[i], 16) && !array(windows[i], 2)) goto fail;
 		a = windows[i].via.array.ptr;
+		if (!number(a[0], 0, INT_MAX, &w->index)) goto fail;
+		for (j = 0; j < i; j++) if (plan->windows[j].index == w->index) goto fail;
+		if (array(windows[i], 2)) {
+			if (!number(a[1], 0, INT_MAX, &w->id)) goto fail;
+			w->alias = -1; /* resolve after all canonical records are validated */
+			continue;
+		}
+		if (!number(a[15], 0, INT_MAX, &w->id)) goto fail;
+		for (j = 0; j < i; j++)
+			if (!plan->windows[j].alias && plan->windows[j].id == w->id) goto fail;
 		if (!number(a[0], 0, INT_MAX, &w->index) ||
 		    a[1].type != MSGPACK_OBJECT_STR || a[1].via.str.size > 4096 ||
 		    (a[1].via.str.size != 0 && memchr(a[1].via.str.ptr, 0, a[1].via.str.size) != NULL) ||
@@ -314,7 +349,6 @@ tmtv_layout_decode(msgpack_object obj)
 		    !number(a[6], -1, INT_MAX, &w->modal_last) ||
 		    !number(a[7], -1, INT_MAX, &w->was_zoomed) ||
 		    !number(a[8], 0, 3, &w->flags) || a[9].type != MSGPACK_OBJECT_ARRAY) goto fail;
-		for (j = 0; j < i; j++) if (plan->windows[j].index == w->index) goto fail;
 		w->sx = sx; w->sy = sy;
 		w->name = a[1].via.str.size == 0 ? xstrdup("") :
 		    xstrndup(a[1].via.str.ptr, a[1].via.str.size);
@@ -353,6 +387,14 @@ tmtv_layout_decode(msgpack_object obj)
 			for (k = 0; k < tree->count; k++) if (tree->panes[k] == w->panes[j].id) break;
 			if (k == tree->count) goto fail;
 		}
+	}
+	for (i = 0; i < n; i++) {
+		w = &plan->windows[i];
+		if (!w->alias) continue;
+		for (j = 0; j < n; j++)
+			if (!plan->windows[j].alias && plan->windows[j].id == w->id) break;
+		if (j == n) goto fail;
+		w->alias = j + 1;
 	}
 	for (i = 0; i < n; i++) if (plan->windows[i].index == plan->active) return (plan);
 fail:

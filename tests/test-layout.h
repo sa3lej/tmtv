@@ -1,4 +1,16 @@
 /* Production core -> shared codec -> streaming relay dispatcher. */
+/* Preserve MessagePack STR when mutating valid frames. The relay's legacy
+ * forwarding helper deliberately rewrites strings as BIN. */
+#undef msgpack_pack_object
+static void
+exact_pack_object(msgpack_sbuffer *sb, msgpack_object obj)
+{
+	struct tmate_encoder encoder = { .mpac_version = 5 };
+	msgpack_sbuffer_init(sb);
+	msgpack_packer_init(&encoder.pk, sb, msgpack_sbuffer_write);
+	msgpack_pack_object(&encoder.pk, obj);
+}
+
 static struct session *
 exact_fixture(struct window_pane **base, struct window_pane **floating)
 {
@@ -74,6 +86,153 @@ TEST(exact_layout_preserves_floating_state_and_pane_identity)
 	ASSERT_EQ(window_count_panes(w, 1), 2);
 	ASSERT(TAILQ_NEXT(TAILQ_FIRST(&floating->modes), entry) == NULL);
 	msgpack_sbuffer_destroy(&before); msgpack_sbuffer_destroy(&after);
+	exact_cleanup(s, base);
+}
+
+TEST(exact_aliases_create_one_shared_window_and_keep_active_index)
+{
+	struct window_pane *base, *floating;
+	struct session *s = exact_fixture(&base, &floating);
+	struct window *w = base->window;
+	msgpack_sbuffer before, after, forward;
+	msgpack_unpacked result;
+	msgpack_object *records, tmp;
+	size_t offset = 0;
+	u_int id = base->id, fid = floating->id;
+	ASSERT(session_attach(s, w, 9, NULL) != NULL);
+	session_set_current(s, winlink_find_by_index(&s->windows, 9));
+	msgpack_sbuffer_init(&before); msgpack_sbuffer_init(&after);
+	ASSERT_EQ(tmtv_layout_encode(s, &before), 0);
+	msgpack_unpacked_init(&result);
+	ASSERT(msgpack_unpack_next(&result, before.data, before.size, &offset));
+	records = result.data.via.array.ptr[3].via.array.ptr;
+	tmp = records[0]; records[0] = records[1]; records[1] = tmp;
+	exact_pack_object(&forward, result.data);
+	msgpack_unpacked_destroy(&result);
+	exact_cleanup(s, base);
+	/* An alias may precede its full record on the wire. */
+	exact_dispatch(&forward, 1);
+	s = RB_MIN(sessions, &sessions);
+	base = window_pane_find_by_id(id);
+	floating = window_pane_find_by_id(fid);
+	w = base->window;
+	window_add_ref(w, __func__);
+	ASSERT(winlink_find_by_index(&s->windows, 9)->window == w);
+	ASSERT(winlink_find_by_index(&s->windows, 0)->window == w);
+	ASSERT_EQ(s->curw->idx, 9);
+	ASSERT_EQ(window_count_panes(w, 1), 2);
+	ASSERT(floating->window == w && window_pane_is_floating(floating));
+	ASSERT_EQ(tmtv_layout_encode(s, &after), 0);
+	ASSERT_EQ(before.size, after.size);
+	ASSERT(memcmp(before.data, after.data, before.size) == 0);
+	exact_dispatch(&before, 0);
+	ASSERT_EQ(window_count_panes(w, 1), 2);
+	msgpack_sbuffer_destroy(&before); msgpack_sbuffer_destroy(&after);
+	msgpack_sbuffer_destroy(&forward);
+	exact_cleanup(s, base);
+}
+
+TEST(exact_alias_canonical_removal_and_index_reuse_preserve_objects)
+{
+	struct window_pane *base, *floating, *other;
+	struct session *s = exact_fixture(&base, &floating);
+	struct window *w = base->window, *ow;
+	struct grid *grid = floating->base.grid;
+	msgpack_sbuffer before, update;
+	msgpack_unpacked result;
+	msgpack_object *frame, *records;
+	size_t offset = 0;
+
+	ASSERT(session_attach(s, w, 9, NULL) != NULL);
+	session_set_current(s, winlink_find_by_index(&s->windows, 9));
+	window_pane_set_mode(floating, NULL, &window_clock_mode, NULL, NULL, NULL);
+	msgpack_sbuffer_init(&before);
+	ASSERT_EQ(tmtv_layout_encode(s, &before), 0);
+	msgpack_unpacked_init(&result);
+	ASSERT(msgpack_unpack_next(&result, before.data, before.size, &offset));
+	frame = result.data.via.array.ptr;
+	frame[3].via.array.size = 1;
+	frame[3].via.array.ptr[0].via.array.ptr[0].via.u64 = 9;
+	{
+		msgpack_object payload = result.data;
+		struct tmtv_layout *plan;
+		payload.via.array.ptr++; payload.via.array.size--;
+		plan = tmtv_layout_decode(payload);
+		ASSERT(plan != NULL);
+		tmtv_layout_free(plan);
+	}
+	exact_pack_object(&update, result.data);
+	ASSERT(RB_MIN(sessions, &sessions) == s);
+	exact_dispatch(&update, 1);
+	ASSERT(winlink_find_by_index(&s->windows, 0) == NULL);
+	ASSERT(s->curw->window == w && s->curw->idx == 9);
+	ASSERT(floating->base.grid == grid);
+	ASSERT(TAILQ_FIRST(&floating->modes)->mode == &window_clock_mode);
+	msgpack_unpacked_destroy(&result);
+	msgpack_sbuffer_destroy(&before); msgpack_sbuffer_destroy(&update);
+
+	other = create_pane(); ow = other->window;
+	window_set_active_pane(ow, other, 0);
+	ASSERT(session_attach(s, ow, 0, NULL) != NULL);
+	msgpack_sbuffer_init(&before);
+	ASSERT_EQ(tmtv_layout_encode(s, &before), 0);
+	msgpack_unpacked_init(&result); offset = 0;
+	ASSERT(msgpack_unpack_next(&result, before.data, before.size, &offset));
+	frame = result.data.via.array.ptr; records = frame[3].via.array.ptr;
+	records[0].via.array.ptr[0].via.u64 = 9;
+	records[1].via.array.ptr[0].via.u64 = 0;
+	frame[2].via.u64 = 0;
+	exact_pack_object(&update, result.data);
+	exact_dispatch(&update, 0);
+	ASSERT(s->curw->idx == 0 && s->curw->window == w);
+	ASSERT(winlink_find_by_index(&s->windows, 9)->window == ow);
+	ASSERT(other->window == ow && floating->window == w);
+	ASSERT(floating->base.grid == grid);
+	msgpack_unpacked_destroy(&result);
+	msgpack_sbuffer_destroy(&before); msgpack_sbuffer_destroy(&update);
+	exact_cleanup(s, base); destroy_pane(other);
+}
+
+TEST(exact_invalid_aliases_leave_all_links_and_panes_untouched)
+{
+	struct window_pane *base, *floating;
+	struct session *s = exact_fixture(&base, &floating);
+	struct window *w = base->window;
+	struct layout_cell *root = w->layout_root;
+	msgpack_sbuffer valid, invalid;
+	msgpack_unpacked result;
+	msgpack_object *frame, *records;
+	msgpack_object duplicate[16];
+	size_t offset;
+	int variant;
+	ASSERT(session_attach(s, w, 9, NULL) != NULL);
+	msgpack_sbuffer_init(&valid);
+	ASSERT_EQ(tmtv_layout_encode(s, &valid), 0);
+	for (variant = 0; variant < 6; variant++) {
+		msgpack_unpacked_init(&result); offset = 0;
+		ASSERT(msgpack_unpack_next(&result, valid.data, valid.size, &offset));
+		frame = result.data.via.array.ptr; records = frame[3].via.array.ptr;
+		switch (variant) {
+		case 0: records[1].via.array.ptr[1].via.u64 = INT_MAX; break;
+		case 1: records[1].via.array.ptr[0].via.u64 = 0; break;
+		case 2: records[0] = records[1]; frame[3].via.array.size = 1;
+			frame[2].via.u64 = 9; break; /* alias without any full record */
+		case 3: memcpy(duplicate, records[0].via.array.ptr, sizeof duplicate);
+			duplicate[0].via.u64 = 9;
+			records[1] = records[0]; records[1].via.array.ptr = duplicate;
+			break; /* distinct indices must not duplicate a full window ID */
+		case 4: records[1].via.array.size = 1; break;
+		case 5: frame[1].via.u64 = 1; break; /* obsolete v1 must not be accepted */
+		}
+		exact_pack_object(&invalid, result.data);
+		exact_dispatch(&invalid, 1);
+		ASSERT(w->layout_root == root && base->window == w && floating->window == w);
+		ASSERT(winlink_find_by_index(&s->windows, 9)->window == w);
+		ASSERT(winlink_find_by_index(&s->windows, 0)->window == w);
+		ASSERT_EQ(window_count_panes(w, 1), 2);
+		msgpack_sbuffer_destroy(&invalid); msgpack_unpacked_destroy(&result);
+	}
+	msgpack_sbuffer_destroy(&valid);
 	exact_cleanup(s, base);
 }
 
@@ -186,7 +345,7 @@ TEST(exact_layout_rejects_invalid_graphs_atomically)
 		panes = window[9].via.array.ptr;
 		cells = window[10].via.array.ptr;
 		switch (variant) {
-		case 0: frame[1].via.u64 = 2; break; /* unknown version */
+		case 0: frame[1].via.u64 = TMTV_LAYOUT_VERSION + 1; break;
 		case 1: frame[2].via.u64 = 999; break; /* absent window */
 		case 2: panes[1].via.array.ptr[0] = panes[0].via.array.ptr[0]; break;
 		case 3: window[4].via.u64 = 999; break; /* active pane */

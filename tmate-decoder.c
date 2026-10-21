@@ -1,6 +1,7 @@
 #include "tmate.h"
 #include "tmate-key.h"
 #include "tmate-protocol.h"
+#include "tmate-layout.h"
 
 /*
  * Find the tmux session associated with a tmate_session.
@@ -202,7 +203,7 @@ static void handle_set_env(struct tmate_session *session,
 	char *value = unpack_string(uk);
 
 	if (!strcmp(name, "tmtv_layout_capability")) {
-		if (!strcmp(value, "1")) tmate_layout_negotiated(session);
+		if (!strcmp(value, TMTV_LAYOUT_CAPABILITY)) tmate_layout_negotiated(session);
 		else tmate_layout_capability_timeout(-1, 0, session);
 		free(name); free(value); return;
 	}

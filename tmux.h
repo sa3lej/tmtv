@@ -1515,6 +1515,9 @@ struct window {
 	u_int			 tmate_last_sync_sx;
 	u_int			 tmate_last_sync_sy;
 	u_int			 tmate_last_layout_hash;
+	/* Relay identity is independent of the host's session link indices. */
+	u_int			 tmate_remote_window_id;
+	int			 tmate_remote_window_id_valid;
 
 	RB_ENTRY(window)	 entry;
 };

@@ -1449,7 +1449,7 @@ TEST(host_encoder_output_routes_without_feedback)
 	destroy_pane(first);
 }
 
-#include "test-layout-v1.h"
+#include "test-layout.h"
 
 int
 main(int argc, char **argv)
@@ -1503,6 +1503,9 @@ main(int argc, char **argv)
 			RUN_TEST(host_copy_state_routes_and_preserves_clock);
 	} else {
 		RUN_TEST(exact_layout_preserves_floating_state_and_pane_identity);
+		RUN_TEST(exact_aliases_create_one_shared_window_and_keep_active_index);
+		RUN_TEST(exact_alias_canonical_removal_and_index_reuse_preserve_objects);
+		RUN_TEST(exact_invalid_aliases_leave_all_links_and_panes_untouched);
 		RUN_TEST(exact_layout_creates_all_panes_before_activation);
 		RUN_TEST(exact_layout_moves_panes_between_windows_without_recreating);
 		RUN_TEST(exact_layout_preserves_zoom_and_saved_tree);

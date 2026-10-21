@@ -2846,7 +2846,7 @@ void tmate_send_websocket_daemon_msg(__unused struct tmate_session *session,
 	 * Browsers render state, not host-side tmux commands. */
 	if (uk->argc > 0 && uk->argv[0].type == MSGPACK_OBJECT_POSITIVE_INTEGER) {
 		int cmd = (int)uk->argv[0].via.u64;
-		if (cmd == TMATE_OUT_SESSION_IDENTITY || cmd == TMATE_OUT_LAYOUT_V1 ||
+		if (cmd == TMATE_OUT_SESSION_IDENTITY || cmd == TMATE_OUT_LAYOUT ||
 		    cmd == TMATE_OUT_EXEC_CMD || cmd == TMATE_OUT_EXEC_CMD_STR)
 			return;
 	}

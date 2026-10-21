@@ -627,6 +627,8 @@ static void tmate_send_session_snapshot(struct tmate_session *session,
 
 	num_panes = 0;
 	RB_FOREACH(wl, winlinks, &s->windows) {
+		if (session->layout_required && !tmtv_layout_first_link(s, wl))
+			continue;
 		w = wl->window;
 		if (!w)
 			continue;
@@ -637,6 +639,8 @@ static void tmate_send_session_snapshot(struct tmate_session *session,
 
 	pack(array, num_panes);
 	RB_FOREACH(wl, winlinks, &s->windows) {
+		if (session->layout_required && !tmtv_layout_first_link(s, wl))
+			continue;
 		w = wl->window;
 		if (!w)
 			continue;
@@ -719,12 +723,15 @@ void tmate_send_reconnection_snapshot(struct tmate_session *session)
 	tmate_sync_layout(session, NULL);
 	s = tmate_find_session(session);
 	if (s != NULL)
-		RB_FOREACH(wl, winlinks, &s->windows)
+		RB_FOREACH(wl, winlinks, &s->windows) {
+			if (session->layout_required && !tmtv_layout_first_link(s, wl))
+				continue;
 			TAILQ_FOREACH(wp, &wl->window->panes, entry) {
 				wme = TAILQ_FIRST(&wp->modes);
 				if (wme != NULL && wme->mode == &window_copy_mode)
 					copy_backing = 1;
 			}
+		}
 	/* Clone the frozen copy grid first using existing snapshot/state
 	 * messages, then restore the independent live base below. */
 	tmate_send_session_snapshot(session, NULL,
@@ -733,6 +740,8 @@ void tmate_send_reconnection_snapshot(struct tmate_session *session)
 	s = tmate_find_session(session);
 	if (s != NULL)
 		RB_FOREACH(wl, winlinks, &s->windows) {
+			if (session->layout_required && !tmtv_layout_first_link(s, wl))
+				continue;
 			w = wl->window;
 			TAILQ_FOREACH(wp, &w->panes, entry) {
 				tmate_send_view_snapshot(session, wp);

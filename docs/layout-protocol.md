@@ -1,7 +1,9 @@
-# Exact layout protocol v1
+# Exact layout protocol v2
 
 This is the implemented host/relay wire contract. Both components require a
-coordinated upgrade to host protocol 7. The SSH terminal and SSE viewer continue
+coordinated upgrade with layout capability 2 over host protocol 7. Capability 1
+peers cannot represent aliases and are explicitly rejected; there is no implicit
+change to the meaning of a capability-1 frame. The SSH terminal and SSE viewer continue
 to receive the relay's composed terminal output; opcode 19 is private to the
 host/relay connection and is excluded from browser broadcasts and replay.
 
@@ -9,14 +11,14 @@ host/relay connection and is excluded from browser broadcasts and replay.
 
 The host sends its protocol-7 header and existing configuration messages. A
 protocol-7 relay replies with the existing SET_ENV message containing
-`tmtv_layout_capability=1`. Only after that acknowledgement does the host send
+`tmtv_layout_capability=2`. Only after that acknowledgement does the host send
 the new layout frame, existing screen/mode snapshots, and READY. The relay also
 holds READY until a complete valid layout has been installed and the existing
 reconnect-identity gate has passed. It rejects hosts below protocol 7 and ignores
 legacy rectangle layouts from protocol-7 hosts.
 
 An unsupported capability or a missing acknowledgement after five seconds ends
-sharing with `Relay update required: exact layout protocol v1 is unsupported`.
+sharing with `Relay update required: exact layout protocol v2 is unsupported`.
 The message is available in the host format `#{tmtv_layout_error}` as well as
 normal status/log output. Local terminals remain usable. There is no lossy
 fallback and no automatic retry of an unsupported peer. Restart sharing after
@@ -30,11 +32,11 @@ nonnegative signed-32-bit integers. Wire enums and flags are independent of
 internal tmux enum and flag values.
 
 ```text
-frame = [19, 1, active_window_index, [window, ...]]
+frame = [19, 2, active_window_index, [window, ...]]
 window = [index, name, width, height, active_pane, modal_pane, modal_last_pane,
           was_zoomed_pane, flags, [pane, ...], [cell, ...], [saved_cell, ...],
           [pane_id_in_front_to_back_order, ...], [last_active_pane_id, ...],
-          [border_lines, border_status]]
+          [border_lines, border_status], window_id]
 pane = [id, width, height, x_offset, y_offset, flags, border_lines, border_status]
 cell = [parent_index, type, floating, geometry, remembered_float_geometry, pane_id]
 geometry = [width, height, signed_x_offset, signed_y_offset]
@@ -74,14 +76,22 @@ z order, tree topology and leaf coverage. Limits are 512 windows, 1000 total
 panes, 4000 cells per tree, depth 1000, names up to 4096 bytes, and an encoded
 host frame up to 2 MiB. Dimensions are 1..WINDOW_MAXIMUM; offsets may be signed
 within that bound. Invalid frames leave the existing session untouched.
-Window records currently require distinct pane IDs; aliases linking the same
-window at multiple session indices are not yet representable by this schema.
+Canonical window records require globally unique pane IDs and window IDs.
+Each later link to the same physical window is `[index, window_id]`, referencing
+a canonical record rather than duplicating panes or trees. References must resolve
+to a full record; dangling aliases, duplicate indices and duplicate full window IDs
+are rejected. The selected index may refer to an alias. Window IDs remain stable
+when the first link is removed, windows are renumbered or indices are reused.
 
-Installation runs synchronously before returning to the event loop. It retains
+Installation runs synchronously before returning to the event loop. Each physical
+window is pinned and rebuilt once; links are rebound by stable host window ID,
+so index reuse cannot move a surviving window onto a different graph. It retains
 existing panes by ID, including grid/mode/input state, moves them between target
 windows if needed, creates missing panes, removes absent panes, installs both
 trees and their leaf links, then applies order/active/modal state and redraws.
-Pending PTY data is replayed only after the complete graph exists.
+Pending PTY data is replayed only after the complete graph exists. Reconnect
+screen/mode snapshots likewise visit each physical window once, avoiding duplicate
+pane records and repeated literal-view contents through aliases.
 
 This extension transports layout state. It does not change the existing cell
 snapshot's history, colour/attribute or image fidelity limits. Full browser DOM

@@ -292,6 +292,9 @@ set -g invalid-option-E2E_VIEW yes
         rejected.close()
         viewers.remove(rejected)
         print("PASS invalid SSH token cannot open a viewer session", flush=True)
+        host("link-window", "-s", "main:0", "-t", "main:9")
+        host("select-window", "-t", "main:9")
+        host("rename-window", "ALIAS_SHARED")
         ssh_rw = Viewer(rw)
         ssh_ro = Viewer(ro)
         web_rw = Viewer(rw, web=True)
@@ -301,6 +304,9 @@ set -g invalid-option-E2E_VIEW yes
         host("send-keys", "Enter")
         for viewer in viewers:
             viewer.sees("BASE_READY")
+            viewer.sees("9:ALIAS_SHARED*")
+        assert host("list-windows", "-F", "#{window_id}").splitlines()[0] == host("list-windows", "-F", "#{window_id}").splitlines()[1]
+        print("PASS linked window aliases share one graph and preserve the selected index in SSH/SSE", flush=True)
         assert web_rw.viewer_id and web_rw.readonly is False and web_rw.input_enabled is True
         assert web_ro.viewer_id and web_ro.readonly is True and web_ro.input_enabled is False
         print("PASS SSH and SSE RW/RO viewers render parsed terminal output", flush=True)
@@ -485,6 +491,28 @@ set -g invalid-option-E2E_VIEW yes
         host("kill-pane", "-t", other)
         host("select-pane", "-t", base)
         print("PASS modal input/RO isolation, float over zoom, reconnect and saved tiled layout", flush=True)
+        host("unlink-window", "-t", "main:0")
+        host("move-window", "-s", "main:9", "-t", "main:3")
+        host("new-window", "-d", "-t", "main:9", "-n", "REUSED_INDEX", "/bin/sh -i")
+        host("select-window", "-t", "main:9")
+        host("send-keys", "-l", "printf 'NEW_WINDOW_AT_REUSED_INDEX\\n'")
+        host("send-keys", "Enter")
+        for viewer in viewers:
+            viewer.sees("NEW_WINDOW_AT_REUSED_INDEX")
+        host("select-window", "-t", "main:3")
+        assert host("display-message", "-p", "#{pane_id}") == base
+        host("link-window", "-s", "main:3", "-t", "main:7")
+        host("select-window", "-t", "main:7")
+        host("send-keys", "-l", "printf 'ALIASED_WINDOW_RETAINED\\n'")
+        host("send-keys", "Enter")
+        def alias_matches(viewer):
+            text = viewer.text()
+            return "ALIASED_WINDOW_RETAINED" in text and "7:ALIAS_SHARED*" in text and "NEW_WINDOW_AT_REUSED_INDEX" not in text
+        for viewer in viewers:
+            wait_for(lambda v=viewer: alias_matches(v), "canonical removal, renumber and index reuse preserve correct window")
+        print("PASS canonical link removal, renumbering and index reuse retain the correct window", flush=True)
+        reconnect_host(alias_matches, "reconnect restores aliases and selected index after index reuse")
+        print("PASS reconnect restores shared aliases and selected index after link churn", flush=True)
         for viewer in viewers:
             viewer.close()
         for viewer in local_viewers:
@@ -499,7 +527,7 @@ set -g invalid-option-E2E_VIEW yes
             viewers.append(viewer)
             viewer.sees("LATE_VIEWER_READY")
         print("PASS fresh SSH/SSE RO viewers reconstruct the current screen", flush=True)
-        print("17 end-to-end checks passed; browser DOM, parsed view styles, full-fidelity SIXEL and platforms remain separate coverage.", flush=True)
+        print("20 end-to-end checks passed; browser DOM, parsed view styles, full-fidelity SIXEL and platforms remain separate coverage.", flush=True)
     except BaseException:
         with open(ROOT / "diagnostics.log", "w") as out:
             out.write("session entries: " + repr([p.name for p in Path('/tmp/tmtv/sessions').iterdir()]) + "\n")
