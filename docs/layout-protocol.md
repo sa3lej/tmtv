@@ -1,7 +1,8 @@
 # Exact layout protocol v2
 
 This is the implemented host/relay wire contract. Both components require a
-coordinated upgrade with layout capability 2 over host protocol 7. Capability 1
+coordinated upgrade with layout capability 2 (introduced in protocol 7, retained
+in protocol 8). Capability 1
 peers cannot represent aliases and are explicitly rejected; there is no implicit
 change to the meaning of a capability-1 frame. The SSH terminal and SSE viewer continue
 to receive the relay's composed terminal output; opcode 19 is private to the
@@ -9,13 +10,14 @@ host/relay connection and is excluded from browser broadcasts and replay.
 
 ## Negotiation and readiness
 
-The host sends its protocol-7 header and existing configuration messages. A
-protocol-7 relay replies with the existing SET_ENV message containing
-`tmtv_layout_capability=2`. Only after that acknowledgement does the host send
-the new layout frame, existing screen/mode snapshots, and READY. The relay also
-holds READY until a complete valid layout has been installed and the existing
-reconnect-identity gate has passed. It rejects hosts below protocol 7 and ignores
-legacy rectangle layouts from protocol-7 hosts.
+The host sends its protocol-8 header and existing configuration messages. A
+protocol-8 relay replies using SET_ENV with `tmtv_layout_capability=2` and
+`tmtv_snapshot_capability=1`. After both acknowledgements, the host sends exact
+layout, the bounded screen/parser snapshot and READY. The relay holds READY
+until both valid frames are installed and the reconnect identity gate passes.
+It refuses mismatched host protocols and ignores legacy rectangle layouts from
+protocol-7-or-later hosts. The complete snapshot handshake and delivered update
+notice are specified in [snapshot-protocol.md](snapshot-protocol.md).
 
 An unsupported capability or a missing acknowledgement after five seconds ends
 sharing with `Relay update required: exact layout protocol v2 is unsupported`.
@@ -93,7 +95,7 @@ Pending PTY data is replayed only after the complete graph exists. Reconnect
 screen/mode snapshots likewise visit each physical window once, avoiding duplicate
 pane records and repeated literal-view contents through aliases.
 
-This extension transports layout state. It does not change the existing cell
-snapshot's history, colour/attribute or image fidelity limits. Full browser DOM
+This extension transports layout state. The companion snapshot protocol defines
+history, colour/attribute and image limits. Full browser DOM
 and non-Linux platform validation remain separate coverage from the isolated
 SSH/SSE integration tests.

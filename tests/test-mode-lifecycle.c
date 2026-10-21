@@ -7,6 +7,7 @@
 #include <locale.h>
 #include "snapshot-parser-fixture.h"
 #include "snapshot-pane-fixture.h"
+#include "test-snapshot-parser.h"
 
 /* Frozen protocol 6 values from the pre-port header, not internal enum math. */
 TEST(sharing_key_numbers_stay_compatible)
@@ -766,7 +767,8 @@ emit_split_reconnect(int vertical, int mixed)
 	return (result);
 }
 
-TEST(layout_negotiation_holds_ready_and_sends_state_once)
+static void
+negotiation_order(int order)
 {
 	struct window_pane *wp = create_pane();
 	struct session *s;
@@ -784,17 +786,29 @@ TEST(layout_negotiation_holds_ready_and_sends_state_once)
 	window_set_active_pane(wp->window, wp, 0);
 	TAILQ_INIT(&tmate_session.env);
 	tmate_session.layout_required = true;
+	tmate_session.snapshot_required = order != 0;
 	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
 	tmate_write_ready(&tmate_session);
 	tmate_sync_layout(&tmate_session, s);
 	ASSERT(tmate_session.layout_ready_pending);
 	ASSERT_EQ(evbuffer_get_length(tmate_session.encoder.buffer), 0);
-	tmate_layout_negotiated(&tmate_session);
+	if (order == 1) tmate_snapshot_negotiated(&tmate_session);
+	else tmate_layout_negotiated(&tmate_session);
+	if (order) {
+		ASSERT_EQ(evbuffer_get_length(tmate_session.encoder.buffer), 0);
+		tmate_pty_data(&tmate_session, wp, "WITHHELD", 8);
+		tmate_sync_copy_mode(&tmate_session, wp);
+		tmate_write_copy_mode(&tmate_session, wp, "WITHHELD");
+		ASSERT_EQ(evbuffer_get_length(tmate_session.encoder.buffer), 0);
+		if (order == 1) tmate_layout_negotiated(&tmate_session);
+		else tmate_snapshot_negotiated(&tmate_session);
+	}
 	ASSERT(tmate_session.layout_capability);
 	tmate_decoder_init(&decoder, read_reconnect_message, &messages);
 	decode_reconnect_buffer(&decoder, 1);
 	ASSERT(messages.count > 2 && messages.count < 16);
 	ASSERT_EQ(messages.opcode[0], TMTV_LAYOUT_OPCODE);
+	if (order) ASSERT_EQ(messages.opcode[1], TMTV_SNAPSHOT_OPCODE);
 	ASSERT_EQ(messages.opcode[messages.count-1], TMATE_OUT_READY);
 	tmate_layout_negotiated(&tmate_session);
 	tmate_sync_layout(&tmate_session, s);
@@ -805,6 +819,7 @@ TEST(layout_negotiation_holds_ready_and_sends_state_once)
 	free(tmate_session.layout_sent);
 	tmate_session.layout_sent = NULL; tmate_session.layout_sent_len = 0;
 	tmate_session.layout_required = tmate_session.layout_capability = false;
+	tmate_session.snapshot_required = tmate_session.snapshot_capability = false;
 	while ((env = TAILQ_FIRST(&tmate_session.env)) != NULL) {
 		TAILQ_REMOVE(&tmate_session.env, env, entry);
 		free(env->name); free(env->value); free(env);
@@ -814,6 +829,10 @@ TEST(layout_negotiation_holds_ready_and_sends_state_once)
 	event_loop(EVLOOP_NONBLOCK);
 	destroy_pane(wp);
 }
+
+TEST(layout_negotiation_holds_ready_and_sends_state_once) { negotiation_order(0); }
+TEST(snapshot_negotiation_waits_for_layout_after_snapshot) { negotiation_order(1); }
+TEST(snapshot_negotiation_waits_for_snapshot_after_layout) { negotiation_order(2); }
 
 TEST(layout_timeout_cannot_be_revived_by_late_capability)
 {
@@ -827,7 +846,9 @@ TEST(layout_timeout_cannot_be_revived_by_late_capability)
 	tmate_layout_capability_timeout(-1, 0, &tmate_session);
 	ASSERT(tmate_session.layout_failed && !tmate_session.layout_capability);
 	tmate_layout_negotiated(&tmate_session);
-	ASSERT(!tmate_session.layout_capability);
+	tmate_snapshot_negotiated(&tmate_session);
+	tmate_write_ready(&tmate_session);
+	ASSERT(!tmate_session.layout_capability && !tmate_session.snapshot_capability);
 	tmate_decoder_init(&decoder, read_reconnect_message, &messages);
 	decode_reconnect_buffer(&decoder, 1);
 	ASSERT_EQ(messages.count, 1);
@@ -941,10 +962,19 @@ main(int argc, char **argv)
 		return (result);
 	}
 	TEST_SUITE_BEGIN("Production mode lifecycle");
+	RUN_TEST(parser_snapshot_preserves_split_sgr_and_saved_cursor);
+	RUN_TEST(parser_snapshot_preserves_partial_unicode_and_repeat);
+	RUN_TEST(parser_snapshot_preserves_character_sets);
+	RUN_TEST(parser_snapshot_preserves_osc_and_c0_without_replaying);
+	RUN_TEST(parser_snapshot_preserves_partial_dcs);
+	RUN_TEST(parser_snapshot_does_not_read_inert_completed_large_osc);
+	RUN_TEST(parser_snapshot_absent_palette_clears_stale_overrides);
 	RUN_TEST(host_pane_snapshot_preserves_alternate_state_and_exit);
 	RUN_TEST(host_parser_snapshot_preserves_colours_attributes_and_unicode);
 	RUN_TEST(sharing_key_numbers_stay_compatible);
 	RUN_TEST(layout_negotiation_holds_ready_and_sends_state_once);
+	RUN_TEST(snapshot_negotiation_waits_for_layout_after_snapshot);
+	RUN_TEST(snapshot_negotiation_waits_for_snapshot_after_layout);
 	RUN_TEST(layout_timeout_cannot_be_revived_by_late_capability);
 	RUN_TEST(context_and_duplicate_entry);
 	RUN_TEST(declined_mode_preserves_base_and_previous_mode);

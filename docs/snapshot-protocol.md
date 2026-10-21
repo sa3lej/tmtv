@@ -1,8 +1,8 @@
-# Reconnect text-grid codec, version 1
+# Negotiated reconnect snapshots
 
-The grid and pane-screen codecs are built into host and relay but are not yet
-wired to a transport opcode or capability. The required-upgrade compatibility
-decision was agreed on 2026-10-21; transport negotiation is a subsequent stage.
+Protocol 8 requires exact layout capability `2` and reconnect snapshot capability
+`1`. Both host and relay must be upgraded. These codecs are active on initial
+sharing and host reconnect; there is no lossy legacy fallback for a new peer.
 
 The legacy snapshot conflates text bytes with cells and truncates style fields.
 The new representation gives every cell explicit bytes and width, keeps RGB,
@@ -41,7 +41,7 @@ data. Failed encoding appends no bytes to the caller's buffer.
 
 ## Limits and scope
 
-- Default proposed history retention remains 100 rows, explicitly truncated at
+- Default history retention is 100 rows, explicitly truncated at
   the oldest end. The codec allows at most 2000 history rows, matching the relay.
 - Width, height and individual row cell counts are at most 10,000. A grid's total
   cell allocation cost is at most 262,144, including minimum row allocations at
@@ -57,17 +57,19 @@ data. Failed encoding appends no bytes to the caller's buffer.
 - Colour identifiers are preserved; theme definitions, terminal capabilities and
   actual browser rendering are separate session/viewer concerns.
 
-## Pane-screen envelope, version 1
+## Pane-screen envelope, version 2
 
 ```
-pane = [1, pane_id, current_grid, cursor, modes, cursor_style, scroll_region,
-        tabs, saved_grid_or_nil, saved_cursor, saved_cell_or_nil, saved_flags]
+pane = [2, pane_id, current_grid, cursor, modes, cursor_style, scroll_region,
+        tabs, saved_grid_or_nil, saved_cursor, saved_cell_or_nil, saved_flags, metadata]
 cursor = [x, y]
 modes = [current_mode, default_mode]
 cursor_style = [current_style, default_style, current_colour, default_colour]
 scroll_region = [top, bottom]
 tabs = [sorted_unique_column_indices]
 saved_cursor = [x, y]
+metadata = [BIN title, BIN path_or_nil, [progress_state, progress], title_stack]
+title_stack = [BIN most_recent_saved_title, ...]
 ```
 
 The two grids share one 262,144 allocation-cell budget and one 16 MiB envelope
@@ -88,26 +90,71 @@ A source containing current/saved SIXEL images or nonportable hyperlink handles
 is explicitly rejected, with no partial append. Applying a validated image-free
 snapshot disposes of stale base-screen images, including saved alternate images.
 
-This screen-only envelope does not contain terminal-parser escape buffers,
-current parser SGR state, or DECSC parser state. Transport integration must handle
-parser continuation before enabling the live path. Pane/window metadata such as
-title, path, progress and mode-specific selection remain outside this envelope.
-An all-pane transport frame must also impose an aggregate budget across panes;
-per-pane validation is not a complete session budget.
+Titles, path and the ten-entry title stack are bounded to 16 KiB per string;
+embedded NUL is rejected. Progress is -1 or 0..100, with state 0..4.
 
-## Required-upgrade decision, agreed 2026-10-21
+## Parser continuation and all-pane frame
 
-The new snapshot path requires upgraded host and relay, without a lossy legacy
-fallback. Permit enough handshake for an outdated host to receive a clear
-new-version/update-required notice before refusing sharing. Release-version
-comparison is separate from negotiated protocol support: the existing normal
-update notice runs in relay `tmate_ready`, while old-protocol rejection runs
-in `tmate_header` and currently queues a notice before terminating. Notice
-delivery before refusal must be verified in the negotiation stage, rather than
-assuming a queued message has reached the client. The local terminal remains
-usable after refusal. No release/deployment is implied by this local decision.
+```
+frame = [20, 1, [[pane, parser, modes], ...]]
+modes = [[1_or_2, backing_pane, copy_state], [3, nil, nil], ...]
+copy_state = [scroll_offset, cursor_x, cursor_y, selection, selection_x,
+              selection_distance_from_bottom, rectangle]
+```
 
-Grid and pane-screen codec tests exercise real terminal-parser state and full
-production host/relay objects, including bytewise/bulk streams and alternate
-screen exit after resize. Authenticated transport/browser rendering for the NEW
-snapshot path is not active or validated yet.
+Modes are ordered top first. Copy (1), literal view (2) and clock (3) can appear
+once each. Copy/view own independent backing screens, so live output beneath a
+frozen selection remains separate. Backing history expands beyond the default
+100 rows to include the viewport and selected line, up to 2000 rows; an excessive
+selection or unknown mode is refused explicitly.
+
+Parser version 1 contains current and DECSC-saved cell styles/character sets,
+saved cursor/origin mode, a portable state-table index, intermediate/raw parameter
+buffers, collected OSC/DCS bytes and terminator, parsed parameters, partial UTF-8,
+last character for REP, flags, pending control-client bytes and palette overrides.
+The layout is a fixed 15-field array; no pointers or internal struct bytes cross
+the wire. Logical buffered input plus pending bytes is bounded to 64 KiB, parsed
+parameters to 24 and their strings to 63 bytes. The encoder bounds the complete
+parser object to 64 KiB. State is installed directly, without replaying already
+executed C0 controls or replies. Outstanding device/clipboard requests are
+cancelled; a partial escape receives a fresh five-second parser timeout.
+Completed ground-state scratch buffers are omitted because their lengths may be
+stale after the normal parser shrinks its allocation.
+
+One frame must contain each pane in the current layout exactly once, with matching
+IDs and geometry. Linked window aliases do not duplicate screens. All base/saved
+grids and mode backings share a 262,144-cell allocation budget and a 16 MiB frame
+budget, with at most 1000 panes. Nesting and object counts are bounded too. The
+relay validates the entire frame before grid allocation/interning or replacing
+any live pane. A malformed later pane leaves earlier panes unchanged. Valid
+frames replace screens and parser state together, then restore mode stacks.
+
+## Required-upgrade handshake
+
+The relay advertises `tmtv_snapshot_capability=1` and
+`tmtv_layout_capability=2`. The host withholds PTY/mode traffic and READY until
+both capabilities arrive, then sends exact layout and the complete snapshot.
+The relay withholds sharing URLs until it has both valid layout and snapshot.
+Capabilities reset for every transport; late capability messages cannot revive
+a failed negotiation. Missing/unsupported capability refuses sharing and leaves
+the local terminal usable.
+
+An incompatible host may complete SSH and send its header. The relay sends the
+normal NOTIFY plus `tmtv_update_required`, including required/actual protocol and
+an install command. It stops dispatching that client's messages, drains its
+encoder with bounded retries and flushes SSH before closing outside the data
+callback. A genuine previous protocol-7 host is tested receiving and displaying
+the notice before refusal. A new host against the previous relay reports a relay
+update requirement without publishing links. The normal release-version checker
+in `tmate_ready` remains separate and unchanged.
+
+The private opcode 20 is excluded from raw web/replay forwarding; SSH and SSE
+viewers render the restored relay screens through the existing terminal path.
+No staging, production activation or release is implied by local protocol work.
+
+Validation uses full production host/relay objects, every-byte parser split
+points, malformed frame mutations and authenticated isolated SSH/SSE viewers.
+RGB foreground/background, italics, strike, combining/wide Unicode and partial
+CSI/UTF-8 continuations are parsed through real reconnects. Browser DOM rendering,
+other terminal attributes, full-fidelity SIXEL, portable hyperlink tables and
+supported-platform validation remain separate work.

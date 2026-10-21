@@ -6322,18 +6322,18 @@ window_copy_clear_selection(struct window_mode_entry *wme)
 int
 window_copy_get_state(struct window_pane *wp, struct window_copy_state *state)
 {
-	struct window_mode_entry		*wme;
-	struct window_copy_mode_data	*data;
-	u_int				 last_line;
+	struct window_mode_entry *wme;
+	TAILQ_FOREACH(wme, &wp->modes, entry)
+		if (wme->mode == &window_copy_mode || wme->mode == &window_view_mode)
+			return (window_copy_get_mode_state(wme, state));
+	return (0);
+}
 
-	TAILQ_FOREACH(wme, &wp->modes, entry) {
-		if (wme->mode == &window_copy_mode ||
-		    wme->mode == &window_view_mode)
-			break;
-	}
-	if (wme == NULL)
-		return (0);
-
+int
+window_copy_get_mode_state(struct window_mode_entry *wme, struct window_copy_state *state)
+{
+	struct window_copy_mode_data *data;
+	u_int last_line;
 	data = wme->data;
 	memset(state, 0, sizeof *state);
 	state->view_mode = wme->mode == &window_view_mode;
@@ -7439,4 +7439,23 @@ window_copy_acquire_cursor_down(struct window_mode_entry *wme, u_int hsize,
 		window_copy_update_cursor(wme, px, cy);
 	if (window_copy_update_selection(wme, 1, no_reset))
 		window_copy_redraw_lines(wme, oldy, nd);
+}
+
+/* A negotiated snapshot owns its backing independently of the live base. */
+void
+window_copy_restore_snapshot(struct window_pane *wp, struct screen *backing,
+    const struct window_copy_state *state)
+{
+	const struct window_mode *mode = state->view_mode ? &window_view_mode : &window_copy_mode;
+	struct args *args = args_create();
+	struct window_mode_entry *wme;
+	struct window_copy_mode_data *data;
+	window_pane_set_mode(wp, wp, mode, NULL, NULL, args);
+	args_free(args);
+	wme = TAILQ_FIRST(&wp->modes);
+	if (wme == NULL || wme->mode != mode) fatalx("snapshot mode init failed");
+	data = wme->data;
+	screen_free(data->backing); free(data->backing); data->backing = backing;
+	window_copy_sync_snapshot(data, wp->base.grid);
+	window_copy_restore_state(wp, state);
 }

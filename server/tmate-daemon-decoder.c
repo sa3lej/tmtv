@@ -4,6 +4,7 @@
 #include "tmate.h"
 #include "tmate-protocol.h"
 #include "../tmate-layout.h"
+#include "../tmate-snapshot.h"
 
 char *tmate_left_status, *tmate_right_status;
 
@@ -97,7 +98,8 @@ static void tmate_send_session_urls(struct tmate_session *session)
 static void tmate_ready(struct tmate_session *session,
 			__unused struct tmate_unpacker *uk)
 {
-	if (session->client_protocol_version >= 7 && !session->layout_ready) {
+	if ((session->client_protocol_version >= 7 && !session->layout_ready) ||
+	    (session->client_protocol_version >= 8 && !session->snapshot_ready)) {
 		session->layout_ready_pending = true;
 		return;
 	}
@@ -173,16 +175,13 @@ static void tmate_header(struct tmate_session *session,
 	tmate_info("tmtv client version=%s, protocol=%d",
 		   session->client_version, session->client_protocol_version);
 
-	if (session->client_protocol_version < TMATE_PROTOCOL_VERSION) {
-		tmate_notify("Client too old (protocol %d, need %d). "
-			     "Please update: curl -fsSL https://tmtv.se/install.sh | sh",
-			     session->client_protocol_version,
-			     TMATE_PROTOCOL_VERSION);
-		tmate_fatal("Rejecting client with protocol version %d (minimum %d)",
-			    session->client_protocol_version,
-			    TMATE_PROTOCOL_VERSION);
-		return;
+	if (session->client_protocol_version != TMATE_PROTOCOL_VERSION) {
+		char *message;
+		xasprintf(&message, "Client update required: server tmtv %s requires sharing protocol %d (client %s uses %d). curl -fsSL https://tmtv.se/install.sh | sh",
+		    TMTV_VERSION, TMATE_PROTOCOL_VERSION, session->client_version, session->client_protocol_version);
+		tmate_refuse_client(session, message); free(message); return;
 	}
+	tmate_set_env("tmtv_snapshot_capability", TMTV_SNAPSHOT_CAPABILITY);
 
 	tmate_set_env("tmtv_layout_capability", TMTV_LAYOUT_CAPABILITY);
 	if (tmate_has_websocket())
@@ -1510,6 +1509,133 @@ static void tmate_snapshot(__unused struct tmate_session *session,
 	}
 }
 
+/* All panes, parser states and independent mode backings are validated before
+ * any live screen changes. Capability/readiness is transport-specific. */
+struct snapshot_entry_plan {
+	struct window_pane *wp;
+	struct tmtv_snapshot_pane *base, *backing[3];
+	struct input_snapshot *parser;
+	struct window_copy_state copy[3];
+	u_int kinds[3], count;
+};
+static int
+snapshot_copy_state(msgpack_object o, u_int kind, msgpack_object pane,
+    struct window_copy_state *s)
+{
+	msgpack_object *v, *g;
+	u_int selection, rect;
+	int64_t transformed;
+	if (o.type != MSGPACK_OBJECT_ARRAY || o.via.array.size != 7) return (0);
+	v = o.via.array.ptr; g = pane.via.array.ptr[2].via.array.ptr;
+	if (!snapshot_uint(v[0], &s->oy) || !snapshot_uint(v[1], &s->cx) ||
+	    !snapshot_uint(v[2], &s->cy) || !snapshot_uint(v[3], &selection) || selection > 1 ||
+	    !snapshot_uint(v[4], &s->selx) || !snapshot_uint(v[6], &rect) || rect > 1) return (0);
+	if (v[5].type == MSGPACK_OBJECT_POSITIVE_INTEGER && v[5].via.u64 <= INT64_MAX)
+		transformed = v[5].via.u64;
+	else return (0);
+	s->selection = selection; s->rectangle = rect; s->transformed_sely = transformed;
+	s->view_mode = kind == 2;
+	return (s->oy <= g[3].via.u64 && s->cx <= g[1].via.u64 && s->cy < g[2].via.u64 &&
+	    (!selection || (s->selx <= g[1].via.u64 && transformed < (int64_t)(g[2].via.u64 + g[3].via.u64))));
+}
+static void
+tmate_snapshot_exact(struct tmate_session *session, struct tmate_unpacker *uk)
+{
+	struct snapshot_entry_plan *plans = NULL;
+	struct session *s = RB_MIN(sessions, &sessions);
+	struct winlink *wl;
+	struct window_pane *wp;
+	msgpack_object object, fields[3] = {0}, *entries, *v, *modes, *m;
+	u_int count, i, j, k, version, id, cost, total = 0, actual = 0, kind, seen;
+	struct screen *back;
+	int good = 0;
+	if (session != NULL && (session->client_protocol_version < 8 || !session->layout_ready)) return;
+	if (uk->argc != 2 || !snapshot_uint(uk->argv[0], &version) || version != TMTV_SNAPSHOT_VERSION ||
+	    uk->argv[1].type != MSGPACK_OBJECT_ARRAY || s == NULL) goto done;
+	count = uk->argv[1].via.array.size;
+	if (!count || count > TMTV_LAYOUT_MAX_PANES) goto done;
+	fields[0].type = MSGPACK_OBJECT_POSITIVE_INTEGER; fields[0].via.u64 = TMTV_SNAPSHOT_OPCODE;
+	fields[1] = uk->argv[0]; fields[2] = uk->argv[1];
+	object.type = MSGPACK_OBJECT_ARRAY; object.via.array.size = 3; object.via.array.ptr = fields;
+	if (!tmtv_snapshot_object_bounded(object)) goto done;
+	RB_FOREACH(wl, winlinks, &s->windows) if (tmtv_layout_first_link(s, wl))
+		TAILQ_FOREACH(wp, &wl->window->panes, entry) actual++;
+	if (count != actual) goto done;
+	plans = xcalloc(count, sizeof *plans); entries = uk->argv[1].via.array.ptr;
+	for (i = 0; i < count; i++) {
+		if (entries[i].type != MSGPACK_OBJECT_ARRAY || entries[i].via.array.size != 3) goto done;
+		v = entries[i].via.array.ptr;
+		if (!tmtv_snapshot_pane_validate(v[0], &cost)) goto done;
+		total += cost; id = v[0].via.array.ptr[1].via.u64;
+		wp = window_pane_find_by_id(id);
+		if (wp == NULL || winlink_find_by_window(&s->windows, wp->window) == NULL ||
+		    v[0].via.array.ptr[2].via.array.ptr[1].via.u64 != wp->sx ||
+		    v[0].via.array.ptr[2].via.array.ptr[2].via.u64 != wp->sy) goto done;
+		for (j = 0; j < i; j++) if (plans[j].wp == wp) goto done;
+		plans[i].wp = wp;
+		if (v[2].type != MSGPACK_OBJECT_ARRAY || v[2].via.array.size > 3) goto done;
+		plans[i].count = v[2].via.array.size; modes = v[2].via.array.ptr; seen = 0;
+		for (j = 0; j < plans[i].count; j++) {
+			if (modes[j].type != MSGPACK_OBJECT_ARRAY || modes[j].via.array.size != 3) goto done;
+			m = modes[j].via.array.ptr;
+			if (!snapshot_uint(m[0], &kind) || kind < 1 || kind > 3 || (seen & (1U << kind))) goto done;
+			seen |= 1U << kind; plans[i].kinds[j] = kind;
+			if (kind == 3) { if (m[1].type != MSGPACK_OBJECT_NIL || m[2].type != MSGPACK_OBJECT_NIL) goto done; continue; }
+			if (!tmtv_snapshot_pane_validate(m[1], &cost) || m[1].via.array.ptr[1].via.u64 != id ||
+			    m[1].via.array.ptr[2].via.array.ptr[1].via.u64 != wp->sx ||
+			    m[1].via.array.ptr[2].via.array.ptr[2].via.u64 != wp->sy ||
+			    !snapshot_copy_state(m[2], kind, m[1], &plans[i].copy[j])) goto done;
+			total += cost;
+		}
+		if (total > TMTV_SNAPSHOT_MAX_CELLS) goto done;
+	}
+	/* Parser validation allocates bounded plans, never replays their bytes. */
+	for (i = 0; i < count; i++) {
+		v = entries[i].via.array.ptr;
+		plans[i].parser = input_snapshot_decode(v[1]);
+		if (plans[i].parser == NULL) goto done;
+	}
+	/* Every object is valid before any grid data is interned or installed. */
+	for (i = 0; i < count; i++) {
+		v = entries[i].via.array.ptr; plans[i].base = tmtv_snapshot_pane_decode(v[0]);
+		modes = v[2].via.array.ptr;
+		for (j = 0; j < plans[i].count; j++) if (plans[i].kinds[j] != 3)
+			plans[i].backing[j] = tmtv_snapshot_pane_decode(modes[j].via.array.ptr[1]);
+	}
+	for (i = 0; i < count; i++) {
+		wp = plans[i].wp;
+		window_pane_reset_mode_all(wp);
+		if (tmtv_snapshot_pane_apply(wp, plans[i].base)) fatalx("validated snapshot geometry changed");
+		if (wp->ictx == NULL) wp->ictx = input_init(wp, NULL, &wp->palette, NULL);
+		input_snapshot_apply(wp->ictx, plans[i].parser);
+		wp->flags |= PANE_STYLECHANGED;
+		for (j = plans[i].count; j > 0; j--) {
+			k = j - 1;
+			if (plans[i].kinds[k] == 3) {
+				window_pane_set_mode(wp, wp, &window_clock_mode, NULL, NULL, NULL); continue;
+			}
+			back = xcalloc(1, sizeof *back);
+			screen_init(back, wp->sx, wp->sy, TMTV_SNAPSHOT_MAX_HISTORY);
+			tmtv_snapshot_screen_apply(back, plans[i].backing[k]);
+			window_copy_restore_snapshot(wp, back, &plans[i].copy[k]);
+		}
+	}
+	good = 1;
+	if (session != NULL) {
+		session->snapshot_ready = true;
+		if (session->layout_ready_pending) { session->layout_ready_pending = false; tmate_ready(session, uk); }
+	}
+done:
+	if (plans != NULL) {
+		for (i = 0; i < count; i++) {
+			tmtv_snapshot_pane_free(plans[i].base); input_snapshot_free(plans[i].parser);
+			for (j = 0; j < 3; j++) tmtv_snapshot_pane_free(plans[i].backing[j]);
+		}
+		free(plans);
+	}
+	if (!good && session != NULL) tmate_refuse_client(session, "Snapshot state unsupported or over the session limit; sharing refused");
+}
+
 /*
  * Handle clipboard data from the host.
  * Phase 1: Deliver to RW SSH viewers via OSC 52 (direct tty write).
@@ -1629,6 +1755,7 @@ void tmate_dispatch_daemon_message(struct tmate_session *session,
 	uk = &uk_copy;
 
 	int cmd = unpack_int(uk);
+	if (session != NULL && session->update_required) return;
 	switch (cmd) {
 #define dispatch(c, f) case c: f(session, uk); break
 	dispatch(TMATE_OUT_HEADER,		tmate_header);
@@ -1647,7 +1774,10 @@ void tmate_dispatch_daemon_message(struct tmate_session *session,
 	dispatch(TMATE_OUT_FIN,			tmate_fin);
 	dispatch(TMATE_OUT_READY,		tmate_ready);
 	dispatch(TMATE_OUT_RECONNECT,		tmate_reconnect);
-	dispatch(TMATE_OUT_SNAPSHOT,		tmate_snapshot);
+	case TMATE_OUT_SNAPSHOT:
+		if (session == NULL || session->client_protocol_version < 8) tmate_snapshot(session, uk);
+		break;
+	dispatch(TMATE_OUT_SNAPSHOT_EXACT, tmate_snapshot_exact);
 	dispatch(TMATE_OUT_EXEC_CMD,		tmate_exec_cmd);
 	dispatch(TMATE_OUT_UNAME,		tmate_uname);
 	dispatch(TMATE_OUT_INPUT_MODE,		tmate_input_mode);

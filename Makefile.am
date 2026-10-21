@@ -498,7 +498,7 @@ install-exec-hook:
 		$(DESTDIR)$(mandir)/man1/tmtv.1
 
 # Exercise pane lifetimes with all host production objects, without its entrypoint.
-tests/test-window-tmux.o: tmux.c tmux.h
+tests/test-window-tmux.o: tmux.c tmux.h tmate.h
 	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -Dmain=tmtv_program_main -c $(srcdir)/tmux.c -o $@
 
 tests/test-window-lifetime.o: tests/test-window-lifetime.c tmux.h
@@ -571,7 +571,7 @@ tests/test-control-subscriptions: tests/test-control-subscriptions.o tests/test-
 CLEANFILES += tests/test-control-subscriptions tests/test-control-subscriptions.o
 EXTRA_DIST += tests/test-control-subscriptions.c
 
-tests/test-mode-lifecycle.o: tests/test-mode-lifecycle.c tests/snapshot-pane-fixture.h tests/snapshot-parser-fixture.h tmate-snapshot.h tmux.h tmate-key.h
+tests/test-mode-lifecycle.o: tests/test-snapshot-parser.h tmate.h tests/test-mode-lifecycle.c tests/snapshot-pane-fixture.h tests/snapshot-parser-fixture.h tmate-snapshot.h tmux.h tmate-key.h
 	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-mode-lifecycle.c -o $@
 
 tests/test-mode-lifecycle: tests/test-mode-lifecycle.o tests/test-window-tmux.o $(tmtv_OBJECTS) $(tmtv_DEPENDENCIES)
@@ -581,10 +581,10 @@ CLEANFILES += tests/test-mode-lifecycle tests/test-mode-lifecycle.o
 EXTRA_DIST += tests/test-mode-lifecycle.c
 
 # Link the complete relay, including its actual MessagePack dispatcher.
-tests/test-relay-tmux.o: tmux.c tmux.h
+tests/test-relay-tmux.o: tmux.c tmux.h tmate.h server/tmate.h
 	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(tmtv_server_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -Dmain=tmtv_program_main -c $(srcdir)/tmux.c -o $@
 
-tests/test-relay-copy-output.o: tests/test-relay-copy-output.c tests/test-layout.h tests/test-snapshot.h tests/test-snapshot-pane.h tests/snapshot-pane-fixture.h tests/snapshot-parser-fixture.h tmate-snapshot.h tmux.h server/tmate.h tmate-layout.h
+tests/test-relay-copy-output.o: tests/test-relay-copy-output.c tests/test-snapshot-wire.h tests/test-layout.h tests/test-snapshot.h tests/test-snapshot-pane.h tests/snapshot-pane-fixture.h tests/snapshot-parser-fixture.h tmate-snapshot.h tmux.h server/tmate.h tmate-layout.h
 	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(tmtv_server_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-relay-copy-output.c -o $@
 
 tests/test-relay-main.o: server/tmate-main.c tmux.h server/tmate.h
@@ -594,7 +594,7 @@ tests/test-relay-copy-output: tests/test-relay-copy-output.o tests/test-relay-tm
 	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-relay-copy-output.o tests/test-relay-tmux.o tests/test-relay-main.o $(filter-out tmtv_server-tmux.o server/tmtv_server-tmate-main.o,$(tmtv_server_OBJECTS)) $(tmtv_server_LDADD) $(LIBS)
 
 CLEANFILES += tests/test-relay-copy-output tests/test-relay-copy-output.o tests/test-relay-tmux.o tests/test-relay-main.o
-EXTRA_DIST += tests/test-relay-copy-output.c tests/test-layout.h tests/test-snapshot.h
+EXTRA_DIST += tests/test-relay-copy-output.c tests/test-snapshot-wire.h tests/test-layout.h tests/test-snapshot.h
 
 EXTRA_DIST += tests/test-core38-commands.py tests/run-tmux38-regress.sh
 EXTRA_DIST += docs/layout-protocol.md
@@ -602,3 +602,5 @@ EXTRA_DIST += docs/layout-protocol.md
 EXTRA_DIST += tests/snapshot-parser-fixture.h docs/snapshot-protocol.md
 
 EXTRA_DIST += tests/test-snapshot-pane.h tests/snapshot-pane-fixture.h
+
+EXTRA_DIST += tests/test-snapshot-parser.h

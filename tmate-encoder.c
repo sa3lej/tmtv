@@ -4,6 +4,7 @@
 #include "tmate.h"
 #include "tmate-protocol.h"
 #include "tmate-layout.h"
+#include "tmate-snapshot.h"
 
 /*
  * The pack() macro is defined locally in each function scope via the session
@@ -61,7 +62,9 @@ void tmate_write_uname(struct tmate_session *session)
 
 void tmate_write_ready(struct tmate_session *session)
 {
-	if (session->layout_required && !session->layout_capability) {
+	if (session->layout_failed) return;
+	if ((session->layout_required && !session->layout_capability) ||
+	    (session->snapshot_required && !session->snapshot_capability)) {
 		session->layout_ready_pending = true;
 		return;
 	}
@@ -203,6 +206,7 @@ void tmate_sync_layout(struct tmate_session *session, struct session *s)
 void tmate_pty_data(struct tmate_session *session, struct window_pane *wp,
 		    const char *buf, size_t len)
 {
+	if (session->snapshot_required && (!session->snapshot_capability || !session->layout_capability || session->layout_failed)) return;
 	PACK(session);
 	size_t to_write;
 
@@ -441,6 +445,7 @@ void tmate_start_status_timer(struct tmate_session *session)
 void tmate_sync_copy_mode(struct tmate_session *session,
 			  struct window_pane *wp)
 {
+	if (session->snapshot_required && (!session->snapshot_capability || !session->layout_capability || session->layout_failed)) return;
 	PACK(session);
 	struct window_mode_entry *wme;
 	struct window_copy_state state;
@@ -476,6 +481,7 @@ void tmate_sync_copy_mode(struct tmate_session *session,
 void tmate_write_copy_mode(struct tmate_session *session,
 			   struct window_pane *wp, const char *str)
 {
+	if (session->snapshot_required && (!session->snapshot_capability || !session->layout_capability || session->layout_failed)) return;
 	PACK(session);
 	pack(array, 3);
 	pack(int, TMATE_OUT_WRITE_COPY_MODE);
@@ -719,6 +725,19 @@ void tmate_send_reconnection_snapshot(struct tmate_session *session)
 	struct window_pane *wp;
 	struct window_mode_entry *wme;
 	int copy_backing = 0;
+	if (session->snapshot_required) {
+		msgpack_sbuffer frame;
+		if (!session->snapshot_capability || !session->layout_capability || session->layout_failed) return;
+		tmate_sync_layout(session, NULL);
+		msgpack_sbuffer_init(&frame);
+		if (tmate_snapshot_encode(tmate_find_session(session), &frame) != 0 ||
+		    tmate_encoder_write_frame(&session->encoder, frame.data, frame.size) != 0)
+			tmate_snapshot_error(session, "Cannot share this bounded snapshot (unsupported state or size limit)");
+		msgpack_sbuffer_destroy(&frame);
+		tmate_expand_status();
+		return;
+	}
+
 
 	tmate_sync_layout(session, NULL);
 	s = tmate_find_session(session);
@@ -754,4 +773,89 @@ void tmate_send_reconnection_snapshot(struct tmate_session *session)
 
 	/* Send current status so late-joining viewers get it immediately */
 	tmate_expand_status();
+}
+
+/* Complete, private session snapshot. A single frame is either queued or absent. */
+static int snapshot_write(void *data, const char *bytes, size_t len)
+{
+	msgpack_sbuffer *sb = data;
+	if (len > TMTV_SNAPSHOT_MAX_BYTES - sb->size) return (-1);
+	return (msgpack_sbuffer_write(sb, bytes, len));
+}
+int
+tmate_snapshot_encode(struct session *s, msgpack_sbuffer *out)
+{
+	msgpack_sbuffer sb;
+	msgpack_packer pk;
+	struct winlink *wl;
+	struct window_pane *wp;
+	struct window_mode_entry *wme;
+	struct window_copy_state cs;
+	struct screen *backing, capture;
+	msgpack_unpacked un;
+	msgpack_object *entries, *entry, *modes, *mode;
+	u_int count = 0, nm, kind, history, i, j, cost, total = 0;
+	int ok = 0;
+	if (s == NULL) return (-1);
+	RB_FOREACH(wl, winlinks, &s->windows) if (tmtv_layout_first_link(s, wl))
+		TAILQ_FOREACH(wp, &wl->window->panes, entry) count++;
+	if (!count || count > TMTV_LAYOUT_MAX_PANES) return (-1);
+	msgpack_sbuffer_init(&sb); msgpack_packer_init(&pk, &sb, snapshot_write);
+#define SPACK(type, ...) do { if (msgpack_pack_##type(&pk, ##__VA_ARGS__)) goto done; } while (0)
+	SPACK(array, 3); SPACK(int, TMTV_SNAPSHOT_OPCODE); SPACK(int, TMTV_SNAPSHOT_VERSION); SPACK(array, count);
+	RB_FOREACH(wl, winlinks, &s->windows) if (tmtv_layout_first_link(s, wl)) {
+		TAILQ_FOREACH(wp, &wl->window->panes, entry) {
+			SPACK(array, 3);
+			if (tmtv_snapshot_pane_encode(wp->id, &wp->base, TMTV_SNAPSHOT_HISTORY, &sb) ||
+			    input_snapshot_encode(wp->ictx, &sb)) goto done;
+			nm = 0; TAILQ_FOREACH(wme, &wp->modes, entry) nm++;
+			if (nm > 3) goto done;
+			SPACK(array, nm);
+			TAILQ_FOREACH(wme, &wp->modes, entry) {
+				kind = wme->mode == &window_copy_mode ? 1 : wme->mode == &window_view_mode ? 2 :
+				    wme->mode == &window_clock_mode ? 3 : 0;
+				if (!kind) goto done;
+				SPACK(array, 3); SPACK(int, kind);
+				if (kind == 3) { SPACK(nil); SPACK(nil); continue; }
+				if (!window_copy_get_mode_state(wme, &cs)) goto done;
+				backing = wme->mode->get_screen(wme);
+				history = TMTV_SNAPSHOT_HISTORY;
+				if (cs.oy > history) history = cs.oy;
+				if (cs.selection && cs.transformed_sely >= (int64_t)backing->grid->sy &&
+				    cs.transformed_sely - backing->grid->sy + 1 > history)
+					history = cs.transformed_sely - backing->grid->sy + 1;
+				capture = *backing;
+				capture.rupper = 0; capture.rlower = capture.grid->sy - 1;
+				if (history > TMTV_SNAPSHOT_MAX_HISTORY ||
+				    tmtv_snapshot_pane_encode(wp->id, &capture, history, &sb)) goto done;
+				SPACK(array, 7); SPACK(unsigned_int, cs.oy); SPACK(unsigned_int, cs.cx);
+				SPACK(unsigned_int, cs.cy); SPACK(int, cs.selection); SPACK(unsigned_int, cs.selx);
+				SPACK(int64, cs.transformed_sely); SPACK(int, cs.rectangle);
+			}
+		}
+	}
+	msgpack_unpacked_init(&un);
+	if (msgpack_unpack_next(&un, sb.data, sb.size, NULL) == MSGPACK_UNPACK_SUCCESS &&
+	    tmtv_snapshot_object_bounded(un.data)) {
+		entries = un.data.via.array.ptr[2].via.array.ptr;
+		for (i = 0; i < count; i++) {
+			entry = entries[i].via.array.ptr;
+			if (!tmtv_snapshot_pane_validate(entry[0], &cost)) break;
+			total += cost;
+			modes = entry[2].via.array.ptr;
+			for (j = 0; j < entry[2].via.array.size; j++) {
+				mode = modes[j].via.array.ptr;
+				if (mode[1].type == MSGPACK_OBJECT_NIL) continue;
+				if (!tmtv_snapshot_pane_validate(mode[1], &cost)) break;
+				total += cost;
+			}
+			if (j != entry[2].via.array.size || total > TMTV_SNAPSHOT_MAX_CELLS) break;
+		}
+		if (i == count && out->size <= TMTV_SNAPSHOT_MAX_BYTES - sb.size &&
+		    msgpack_sbuffer_write(out, sb.data, sb.size) == 0) ok = 1;
+	}
+	msgpack_unpacked_destroy(&un);
+done:
+	msgpack_sbuffer_destroy(&sb); return (ok ? 0 : -1);
+#undef SPACK
 }

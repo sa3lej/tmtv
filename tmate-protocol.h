@@ -62,6 +62,7 @@ enum tmate_daemon_out_msg_types {
 	TMATE_OUT_INPUT_MODE,
 	TMATE_OUT_CLIPBOARD,
 	TMATE_OUT_SESSION_IDENTITY, /* private; sent only after capability negotiation */
+	TMATE_OUT_SNAPSHOT_EXACT = 20,
 	TMATE_OUT_LAYOUT = 19, /* explicit capability; never forward as a legacy viewer message */
 };
 

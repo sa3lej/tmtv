@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--host-binary", type=Path, help="explicit local host binary")
     parser.add_argument("--relay-binary", type=Path, help="explicit local relay binary")
     parser.add_argument("--expect-layout-rejection", action="store_true", help="verify new host rejects an old relay")
+    parser.add_argument("--expect-host-rejection", action="store_true", help="verify old host receives update notice before refusal")
     args = parser.parse_args()
     if sys.platform != "linux":
         parser.error("this native-binary fixture requires Linux and Docker")
@@ -120,6 +121,7 @@ def main():
                  *(["-e", "TMTV_E2E_TRACE=1"] if args.trace else []),
                  *(["-e", "TMTV_E2E_GDB=1"] if args.gdb else []),
                  *(["-e", "TMTV_E2E_EXPECT_LAYOUT_REJECTION=1"] if args.expect_layout_rejection else []),
+                 *(["-e", "TMTV_E2E_EXPECT_HOST_REJECTION=1"] if args.expect_host_rejection else []),
                  "-e", "ASAN_OPTIONS=detect_leaks=0:abort_on_error=1", "-e", "UBSAN_OPTIONS=halt_on_error=1",
                  "--pids-limit", "128", "--memory", "512m", "--cpus", "2",
                  "--mount", "type=volume,src=" + name + ",dst=/tmp", name])

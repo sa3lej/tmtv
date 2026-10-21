@@ -102,6 +102,8 @@ extern msgpack_object_type unpack_peek_type(struct tmate_unpacker *uk);
 /* tmate-protocol.h — protocol version and message types */
 #include "tmate-protocol.h"
 
+void tmate_refuse_client(struct tmate_session *, const char *);
+
 /* tmate-daemon-encoder.c */
 
 extern void printflike(1, 2) tmate_notify(const char *fmt, ...);
@@ -298,7 +300,9 @@ struct tmate_session {
 	const char *client_version;
 	int client_protocol_version;
 	struct event *ev_notify_timer;	/* libevent2: heap-allocated */
-	bool layout_ready, layout_ready_pending;
+	bool layout_ready, layout_ready_pending, snapshot_ready, update_required;
+	struct event *ev_update_close;
+	u_int update_close_ticks;
 	bool fin_received;
 
 	/* websocket listener for browser viewers */

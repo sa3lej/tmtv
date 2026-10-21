@@ -38,12 +38,12 @@ cursor_colour(msgpack_object o, int *out)
  * The aggregate cell budget covers current AND saved grids.
  */
 static int
-validate(msgpack_object o, struct tmtv_snapshot_pane *p)
+validate(msgpack_object o, struct tmtv_snapshot_pane *p, u_int *allocation)
 {
 	msgpack_object *v, *cursor, *modes, *style, *region, *saved, *tabs, *g;
 	u_int version, mode, default_mode, cstyle, default_cstyle, saved_flags;
 	u_int sx, sy, saved_sx, saved_sy, cost, saved_cost = 0, i, tab, last = 0;
-	if (!array(o, 12)) return (0);
+	if (!array(o, 13)) return (0);
 	v = o.via.array.ptr;
 	if (!number(v[0], TMTV_SNAPSHOT_PANE_VERSION, &version) ||
 	    version != TMTV_SNAPSHOT_PANE_VERSION || !number(v[1], INT_MAX, &p->id) ||
@@ -93,7 +93,39 @@ validate(msgpack_object o, struct tmtv_snapshot_pane *p)
 		if (!number(tabs[i], sx - 1, &tab) || (i && tab <= last)) return (0);
 		last = tab;
 	}
+	/* Completed OSC metadata is part of the screen, not parser scratch. */
+	if (!array(v[12], 4)) return (0);
+	msgpack_object *meta = v[12].via.array.ptr;
+	u_int progress_state, progress;
+	if (meta[0].type != MSGPACK_OBJECT_BIN || meta[0].via.bin.size > 16384 ||
+	    memchr(meta[0].via.bin.ptr, 0, meta[0].via.bin.size) != NULL ||
+	    (meta[1].type != MSGPACK_OBJECT_NIL &&
+	     (meta[1].type != MSGPACK_OBJECT_BIN || meta[1].via.bin.size > 16384 ||
+	      memchr(meta[1].via.bin.ptr, 0, meta[1].via.bin.size) != NULL)) ||
+	    !array(meta[2], 2) ||
+	    !number(meta[2].via.array.ptr[0], PROGRESS_BAR_PAUSED, &progress_state)) return (0);
+	msgpack_object value = meta[2].via.array.ptr[1];
+	if (value.type == MSGPACK_OBJECT_NEGATIVE_INTEGER && value.via.i64 == -1)
+		p->progress_bar.progress = -1;
+	else if (number(value, 100, &progress)) p->progress_bar.progress = progress;
+	else return (0);
+	p->progress_bar.state = progress_state;
+	if (meta[3].type != MSGPACK_OBJECT_ARRAY || meta[3].via.array.size > 10) return (0);
+	p->ntitles = meta[3].via.array.size;
+	for (i = 0; i < p->ntitles; i++) {
+		msgpack_object title = meta[3].via.array.ptr[i];
+		if (title.type != MSGPACK_OBJECT_BIN || title.via.bin.size > 16384 ||
+		    memchr(title.via.bin.ptr, 0, title.via.bin.size)) return (0);
+	}
+	if (allocation != NULL) *allocation = cost + saved_cost;
 	return (1);
+}
+
+int
+tmtv_snapshot_pane_validate(msgpack_object o, u_int *allocation)
+{
+	struct tmtv_snapshot_pane p = {0};
+	return (validate(o, &p, allocation));
 }
 
 struct tmtv_snapshot_pane *
@@ -103,12 +135,20 @@ tmtv_snapshot_pane_decode(msgpack_object o)
 	msgpack_object *v;
 	u_int i, sx;
 	memset(&values, 0, sizeof values);
-	if (!validate(o, &values)) return (NULL);
+	if (!validate(o, &values, NULL)) return (NULL);
 	p = xmalloc(sizeof *p); *p = values;
 	v = o.via.array.ptr;
 	p->grid = tmtv_snapshot_grid_decode(v[2], TMTV_SNAPSHOT_MAX_HISTORY);
 	if (v[8].type != MSGPACK_OBJECT_NIL)
 		p->saved_grid = tmtv_snapshot_grid_decode(v[8], 0);
+	msgpack_object *meta = v[12].via.array.ptr;
+	p->title = xstrndup(meta[0].via.bin.ptr, meta[0].via.bin.size);
+	if (meta[1].type != MSGPACK_OBJECT_NIL)
+		p->path = xstrndup(meta[1].via.bin.ptr, meta[1].via.bin.size);
+	for (i = 0; i < p->ntitles; i++) {
+		msgpack_object title = meta[3].via.array.ptr[i];
+		p->titles[i] = xstrndup(title.via.bin.ptr, title.via.bin.size);
+	}
 	sx = p->grid->sx;
 	if ((p->tabs = bit_alloc(sx)) == NULL) fatal("bit_alloc failed");
 	for (i = 0; i < v[7].via.array.size; i++)
@@ -119,10 +159,12 @@ tmtv_snapshot_pane_decode(msgpack_object o)
 void
 tmtv_snapshot_pane_free(struct tmtv_snapshot_pane *p)
 {
+	u_int i;
 	if (p == NULL) return;
 	if (p->grid != NULL) grid_destroy(p->grid);
 	if (p->saved_grid != NULL) grid_destroy(p->saved_grid);
-	free(p->tabs); free(p);
+	for (i = 0; i < p->ntitles; i++) free(p->titles[i]);
+	free(p->tabs); free(p->title); free(p->path); free(p);
 }
 
 static int
@@ -153,7 +195,7 @@ tmtv_snapshot_pane_encode(u_int id, const struct screen *s, u_int history,
 		for (i = 0; i < s->grid->sx; i++) if (bit_test(s->tabs, i)) count++;
 	msgpack_sbuffer_init(&sb); msgpack_packer_init(&pk, &sb, write_bytes);
 #define PACK(type, value) do { if (msgpack_pack_##type(&pk, value)) goto done; } while (0)
-	PACK(array, 12); PACK(unsigned_int, TMTV_SNAPSHOT_PANE_VERSION); PACK(unsigned_int, id);
+	PACK(array, 13); PACK(unsigned_int, TMTV_SNAPSHOT_PANE_VERSION); PACK(unsigned_int, id);
 	if (tmtv_snapshot_grid_encode(s->grid, history, &sb)) goto done;
 	PACK(array, 2); PACK(unsigned_int, s->cx); PACK(unsigned_int, s->cy);
 	PACK(array, 2); PACK(int, s->mode); PACK(int, s->default_mode);
@@ -171,10 +213,30 @@ tmtv_snapshot_pane_encode(u_int id, const struct screen *s, u_int history,
 		if (tmtv_snapshot_cell_encode(&s->saved_cell, &pk)) goto done;
 	} else if (msgpack_pack_nil(&pk)) goto done;
 	PACK(int, s->saved_grid == NULL ? 0 : s->saved_flags);
+	PACK(array, 4);
+	if (s->title == NULL || strlen(s->title) > 16384 ||
+	    (s->path != NULL && strlen(s->path) > 16384)) goto done;
+	PACK(bin, strlen(s->title));
+	if (msgpack_pack_bin_body(&pk, s->title, strlen(s->title))) goto done;
+	if (s->path == NULL) {
+		if (msgpack_pack_nil(&pk)) goto done;
+	} else {
+		PACK(bin, strlen(s->path));
+		if (msgpack_pack_bin_body(&pk, s->path, strlen(s->path))) goto done;
+	}
+	PACK(array, 2); PACK(int, s->progress_bar.state); PACK(int, s->progress_bar.progress);
+	if (s->ntitles > 10) goto done;
+	PACK(array, s->ntitles);
+	for (i = 0; i < s->ntitles; i++) {
+		const char *title = screen_title_at(s, i);
+		if (title == NULL || strlen(title) > 16384) goto done;
+		PACK(bin, strlen(title));
+		if (msgpack_pack_bin_body(&pk, title, strlen(title))) goto done;
+	}
 	msgpack_unpacked_init(&un);
 	memset(&values, 0, sizeof values);
 	if (msgpack_unpack_next(&un, sb.data, sb.size, NULL) == MSGPACK_UNPACK_SUCCESS &&
-	    validate(un.data, &values) && out->size <= TMTV_SNAPSHOT_MAX_BYTES - sb.size &&
+	    validate(un.data, &values, NULL) && out->size <= TMTV_SNAPSHOT_MAX_BYTES - sb.size &&
 	    msgpack_sbuffer_write(out, sb.data, sb.size) == 0) ok = 1;
 	msgpack_unpacked_destroy(&un);
 done:
@@ -187,15 +249,27 @@ int
 tmtv_snapshot_pane_apply(struct window_pane *wp, struct tmtv_snapshot_pane *p)
 {
 	struct screen *s;
-#ifdef ENABLE_SIXEL
-	struct image *im;
-#endif
 	if (wp == NULL || p == NULL || p->grid == NULL || p->id != wp->id ||
 	    p->grid->sx != wp->sx || p->grid->sy != wp->sy) return (-1);
 	s = &wp->base;
 	/* Only after identity/geometry checks: discard queued writes to old grids. */
 	if (event_initialized(&wp->sync_timer)) evtimer_del(&wp->sync_timer);
 	free(wp->sync_dirty); wp->sync_dirty = NULL; wp->sync_dirty_size = 0;
+	tmtv_snapshot_screen_apply(s, p);
+	if (s->mode & MODE_SYNC) screen_write_start_sync(wp);
+	/* Mode screens and their cloned copy/view backing are separate owners. */
+	wp->flags |= PANE_REDRAW;
+	return (0);
+}
+
+/* The same field transfer is used for independently owned mode backings. */
+void
+tmtv_snapshot_screen_apply(struct screen *s, struct tmtv_snapshot_pane *p)
+{
+#ifdef ENABLE_SIXEL
+	struct image *im;
+#endif
+	u_int i;
 	if (s->write_list != NULL) { screen_write_free_list(s); s->write_list = NULL; }
 	screen_clear_selection(s);
 #ifdef ENABLE_SIXEL
@@ -215,8 +289,11 @@ tmtv_snapshot_pane_apply(struct window_pane *wp, struct tmtv_snapshot_pane *p)
 	s->rupper = p->rupper; s->rlower = p->rlower;
 	s->saved_cx = p->saved_cx; s->saved_cy = p->saved_cy;
 	s->saved_cell = p->saved_cell; s->saved_flags = p->saved_flags;
-	if (s->mode & MODE_SYNC) screen_write_start_sync(wp);
-	/* Mode screens and their cloned copy/view backing are separate owners. */
-	wp->flags |= PANE_REDRAW;
-	return (0);
+	free(s->title); free(s->path); screen_free_titles(s);
+	for (i = p->ntitles; i > 0; i--) {
+		s->title = p->titles[i - 1]; screen_push_title(s);
+		free(s->title); p->titles[i - 1] = NULL;
+	}
+	s->title = p->title; s->path = p->path;
+	p->title = p->path = NULL; s->progress_bar = p->progress_bar;
 }

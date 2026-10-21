@@ -275,3 +275,39 @@ tmtv_snapshot_cell_encode(const struct grid_cell *gc, msgpack_packer *pk)
 	    msgpack_pack_int(pk, gc->us)) return (-1);
 	return (0);
 }
+
+/* Bound the complete session object before constructing any pane/parser plans.
+ * Depth is fixed by this schema; unknown maps/extensions are never accepted. */
+static int
+snapshot_object_size(msgpack_object o, size_t *size, u_int depth, u_int *nodes)
+{
+	u_int i;
+	uint64_t v;
+	size_t n;
+	if (depth > 12 || ++*nodes > TMTV_SNAPSHOT_MAX_CELLS * 10U + 100000) return (0);
+	switch (o.type) {
+	case MSGPACK_OBJECT_ARRAY:
+		n = o.via.array.size < 16 ? 1 : o.via.array.size <= 65535 ? 3 : 5;
+		if (n > TMTV_SNAPSHOT_MAX_BYTES - *size) return (0); *size += n;
+		for (i = 0; i < o.via.array.size; i++)
+			if (!snapshot_object_size(o.via.array.ptr[i], size, depth + 1, nodes)) return (0);
+		return (1);
+	case MSGPACK_OBJECT_BIN:
+		n = (size_t)o.via.bin.size + (o.via.bin.size <= 255 ? 2U : o.via.bin.size <= 65535 ? 3U : 5U); break;
+	case MSGPACK_OBJECT_NIL: n = 1; break;
+	case MSGPACK_OBJECT_POSITIVE_INTEGER:
+		v = o.via.u64; n = v <= 127 ? 1 : v <= 255 ? 2 : v <= 65535 ? 3 : v <= UINT32_MAX ? 5 : 9; break;
+	case MSGPACK_OBJECT_NEGATIVE_INTEGER:
+		n = o.via.i64 >= -32 ? 1 : o.via.i64 >= INT8_MIN ? 2 : o.via.i64 >= INT16_MIN ? 3 : o.via.i64 >= INT32_MIN ? 5 : 9; break;
+	default: return (0);
+	}
+	if (n > TMTV_SNAPSHOT_MAX_BYTES - *size) return (0);
+	*size += n; return (1);
+}
+int
+tmtv_snapshot_object_bounded(msgpack_object o)
+{
+	size_t size = 0;
+	u_int nodes = 0;
+	return (snapshot_object_size(o, &size, 0, &nodes));
+}

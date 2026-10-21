@@ -108,7 +108,7 @@ pane_bad(u_int which)
 	pane_fixture_screen(&source); ASSERT(pane_unpack(1, &source, &sb, &un));
 	v = un.data.via.array.ptr; saved = v[8].via.array.ptr;
 	switch (which) {
-	case 0: v[0].via.u64 = 2; break;
+	case 0: v[0].via.u64 = TMTV_SNAPSHOT_PANE_VERSION + 1; break;
 	case 1: v[1].via.u64 = (uint64_t)INT_MAX + 1; break;
 	case 2: v[3].via.array.ptr[0].via.u64 = 81; break;
 	case 3: v[3].via.array.ptr[1].via.u64 = 24; break;

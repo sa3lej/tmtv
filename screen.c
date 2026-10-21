@@ -53,7 +53,7 @@ static void	screen_resize_y(struct screen *, u_int, int, u_int *);
 static void	screen_reflow(struct screen *, u_int, u_int *, u_int *, int);
 
 /* Free titles stack. */
-static void
+void
 screen_free_titles(struct screen *s)
 {
 	struct screen_title_entry	*title_entry;
@@ -285,6 +285,17 @@ screen_set_path(struct screen *s, const char *path, int untrusted)
 	free(s->path);
 	s->path = new_path;
 	return (1);
+}
+
+/* Read the title stack without exposing its private list representation. */
+const char *
+screen_title_at(const struct screen *s, u_int index)
+{
+	struct screen_title_entry *entry;
+	if (s->titles == NULL) return (NULL);
+	TAILQ_FOREACH(entry, s->titles, entry)
+		if (index-- == 0) return (entry->text);
+	return (NULL);
 }
 
 /* Push the current title onto the stack. */

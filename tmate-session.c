@@ -15,6 +15,7 @@
 #include <assert.h>
 
 #include "tmate.h"
+#include "tmate-snapshot.h"
 
 #define TMATE_DNS_RETRY_TIMEOUT 2
 #define TMATE_RECONNECT_RETRY_TIMEOUT 2
@@ -202,39 +203,58 @@ static void send_authorized_keys(void)
 	free(path);
 }
 
+void tmate_snapshot_error(struct tmate_session *session, const char *message)
+{
+	if (session->layout_failed) return;
+	session->layout_failed = true;
+	tmate_set_env(session, "tmtv_snapshot_error", message);
+	tmate_write_fin(session); tmate_status_message("%s", message);
+}
+
 void tmate_layout_capability_timeout(__unused evutil_socket_t fd,
     __unused short events, void *arg)
 {
 	struct tmate_session *session = arg;
-	if (session->layout_capability || session->layout_failed) return;
-	session->layout_failed = true;
-	tmate_set_env(session, "tmtv_layout_error", "Relay update required: exact layout protocol v2 is unsupported");
-	tmate_write_fin(session);
-	tmate_status_message("Relay update required: exact layout protocol v2 is unsupported");
-	/* Do not publish an inaccurate layout or repeatedly reconnect this peer. */
+	const char *message;
+	if (session->layout_failed || (session->layout_capability &&
+	    (!session->snapshot_required || session->snapshot_capability))) return;
+	message = session->layout_capability ?
+	    "Relay update required: reconnect snapshot protocol v1 is unsupported" :
+	    "Relay update required: exact layout protocol v2 is unsupported";
+	tmate_set_env(session, "tmtv_layout_error", message);
+	tmate_snapshot_error(session, message);
 }
 
-void tmate_layout_negotiated(struct tmate_session *session)
+static void tmate_capabilities_ready(struct tmate_session *session)
 {
-	if (session->layout_failed) return;
+	if (session->layout_failed || !session->layout_capability ||
+	    (session->snapshot_required && !session->snapshot_capability)) return;
 	if (session->ev_layout_capability != NULL) {
-		event_free(session->ev_layout_capability);
-		session->ev_layout_capability = NULL;
+		event_free(session->ev_layout_capability); session->ev_layout_capability = NULL;
 	}
-	if (session->layout_capability) return;
-	session->layout_capability = true;
 	tmate_set_env(session, "tmtv_layout_error", "");
+	tmate_set_env(session, "tmtv_snapshot_error", "");
 	free(session->layout_sent); session->layout_sent = NULL; session->layout_sent_len = 0;
 	tmate_send_reconnection_snapshot(session);
-	if (session->layout_ready_pending) {
-		session->layout_ready_pending = false;
-		tmate_write_ready(session);
+	if (session->layout_ready_pending && !session->layout_failed) {
+		session->layout_ready_pending = false; tmate_write_ready(session);
 	}
+}
+void tmate_layout_negotiated(struct tmate_session *session)
+{
+	if (session->layout_failed || session->layout_capability) return;
+	session->layout_capability = true; tmate_capabilities_ready(session);
+}
+void tmate_snapshot_negotiated(struct tmate_session *session)
+{
+	if (session->layout_failed || session->snapshot_capability) return;
+	session->snapshot_capability = true; tmate_capabilities_ready(session);
 }
 
 void tmate_session_start(void)
 {
 	tmate_session.layout_required = true;
+	tmate_session.snapshot_required = true;
 	/*
 	 * We split init and start because:
 	 * - We need to process the tmux config file during the connection as

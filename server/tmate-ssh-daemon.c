@@ -112,7 +112,7 @@ static void on_daemon_encoder_write(void *userdata, struct evbuffer *buffer)
 		buf = evbuffer_pullup(buffer, -1);
 
 		written = ssh_channel_write(session->ssh_client.channel, buf, len);
-		if (written < 0) {
+		if (written <= 0) {
 			if (!ssh_is_connected(session->ssh_client.session)) {
 				tmate_info("daemon_encoder_write: connection "
 					   "lost (%zd bytes buffered)",
@@ -137,6 +137,35 @@ static void on_daemon_encoder_write(void *userdata, struct evbuffer *buffer)
 		}
 		evbuffer_drain(buffer, written);
 	}
+}
+
+/* Refusal runs after the channel callback, allowing complete notices to flush.
+ * A dead/slow peer cannot keep this pre-sharing session alive indefinitely. */
+static void update_refusal_close(__unused evutil_socket_t fd, __unused short events, void *arg)
+{
+	struct tmate_session *s = arg;
+	struct timeval tv = {0, 10000};
+	if (evbuffer_get_length(s->daemon_encoder.buffer) && ++s->update_close_ticks < 500) {
+		evtimer_add(s->ev_update_close, &tv); return;
+	}
+	if (s->ssh_client.session != NULL && ssh_is_connected(s->ssh_client.session)) {
+		ssh_blocking_flush(s->ssh_client.session, 1000);
+		ssh_channel_send_eof(s->ssh_client.channel);
+		ssh_channel_close(s->ssh_client.channel);
+		ssh_blocking_flush(s->ssh_client.session, 1000);
+	}
+	request_server_termination();
+}
+void tmate_refuse_client(struct tmate_session *s, const char *message)
+{
+	struct timeval tv = {0, 10000};
+	if (s->update_required) return;
+	s->update_required = true;
+	tmate_notify("%s", message);
+	tmate_set_env("tmtv_update_required", message);
+	s->ev_update_close = evtimer_new(s->ev_base, update_refusal_close, s);
+	if (s->ev_update_close == NULL) tmate_fatal("Cannot create refusal timer");
+	evtimer_add(s->ev_update_close, &tv);
 }
 
 static void tmate_daemon_init(struct tmate_session *session)

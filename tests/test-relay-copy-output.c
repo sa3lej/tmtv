@@ -1452,6 +1452,7 @@ TEST(host_encoder_output_routes_without_feedback)
 #include "test-layout.h"
 #include "test-snapshot.h"
 #include "test-snapshot-pane.h"
+#include "test-snapshot-wire.h"
 
 int
 main(int argc, char **argv)
@@ -1515,6 +1516,9 @@ main(int argc, char **argv)
 #ifdef ENABLE_SIXEL
 		RUN_TEST(pane_snapshot_clears_stale_current_and_saved_image_owners);
 #endif
+		RUN_TEST(wire_snapshot_aggregate_byte_and_nesting_bounds);
+		RUN_TEST(wire_snapshot_installs_all_panes_and_partial_parser);
+		RUN_TEST(wire_snapshot_malformed_fields_are_atomic_and_keep_boundaries);
 		RUN_TEST(pane_snapshot_saved_dimensions_survive_alternate_resize);
 		RUN_TEST(pane_snapshot_saved_cursor_style_survives_after_alternate_exit);
 		RUN_TEST(pane_snapshot_both_grids_share_output_byte_limit);

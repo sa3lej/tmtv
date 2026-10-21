@@ -3713,6 +3713,8 @@ void	 screen_set_cursor_colour(struct screen *, int);
 int	 screen_set_title(struct screen *, const char *, int);
 int	 screen_set_path(struct screen *, const char *, int);
 void	 screen_push_title(struct screen *);
+void	 screen_free_titles(struct screen *);
+const char *screen_title_at(const struct screen *, u_int);
 void	 screen_pop_title(struct screen *);
 void	 screen_set_progress_bar(struct screen *, enum progress_bar_state, int);
 void	 screen_resize(struct screen *, u_int, u_int, int);
@@ -4066,6 +4068,8 @@ char		*window_copy_get_line(struct window_pane *, u_int);
 int		 window_copy_get_current_offset(struct window_pane *, u_int *,
 		     u_int *);
 char		*window_copy_get_hyperlink(struct window_pane *, u_int, u_int);
+int window_copy_get_mode_state(struct window_mode_entry *, struct window_copy_state *);
+void window_copy_restore_snapshot(struct window_pane *, struct screen *, const struct window_copy_state *);
 int		 window_copy_get_state(struct window_pane *,
 		     struct window_copy_state *);
 int		 window_copy_state_is_valid(struct window_pane *,

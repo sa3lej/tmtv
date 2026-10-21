@@ -529,6 +529,7 @@ SSH_NEW_CHANNEL:
 
 			/* Capability belongs to this transport, never to a previous relay. */
 			client->tmate_session->layout_capability = false;
+			client->tmate_session->snapshot_capability = false;
 			free(client->tmate_session->layout_sent);
 			client->tmate_session->layout_sent = NULL;
 			client->tmate_session->layout_sent_len = 0;
@@ -597,6 +598,7 @@ static void kill_ssh_client(struct tmate_ssh_client *client,
 			client->tmate_session->ev_layout_capability = NULL;
 		}
 		client->tmate_session->layout_capability = false;
+		client->tmate_session->snapshot_capability = false;
 		tmate_encoder_set_ready_callback(&client->tmate_session->encoder, NULL, NULL);
 		tmate_decoder_destroy(&client->tmate_session->decoder);
 

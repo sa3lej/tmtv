@@ -2,6 +2,7 @@
 #include "tmate-key.h"
 #include "tmate-protocol.h"
 #include "tmate-layout.h"
+#include "tmate-snapshot.h"
 
 /*
  * Find the tmux session associated with a tmate_session.
@@ -202,6 +203,14 @@ static void handle_set_env(struct tmate_session *session,
 	char *name = unpack_string(uk);
 	char *value = unpack_string(uk);
 
+	if (!strcmp(name, "tmtv_update_required")) {
+		tmate_snapshot_error(session, value); free(name); free(value); return;
+	}
+	if (!strcmp(name, "tmtv_snapshot_capability")) {
+		if (!strcmp(value, TMTV_SNAPSHOT_CAPABILITY)) tmate_snapshot_negotiated(session);
+		else tmate_snapshot_error(session, "Relay update required: reconnect snapshot version unsupported");
+		free(name); free(value); return;
+	}
 	if (!strcmp(name, "tmtv_layout_capability")) {
 		if (!strcmp(value, TMTV_LAYOUT_CAPABILITY)) tmate_layout_negotiated(session);
 		else tmate_layout_capability_timeout(-1, 0, session);

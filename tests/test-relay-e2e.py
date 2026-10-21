@@ -276,6 +276,25 @@ set -g invalid-option-E2E_VIEW yes
             wait_for(lambda: "LOCAL_STILL_WORKS" in host("capture-pane", "-p"), "local terminal remains usable")
             print("PASS unsupported relay gets explicit update requirement, no sharing URL, and usable local terminal", flush=True)
             return
+        if os.environ.get("TMTV_E2E_EXPECT_HOST_REJECTION") == "1":
+            # Use the genuine previous host binary. Its normal NOTIFY handler
+            # must see the notice while the SSH channel is still alive.
+            wait_for(lambda: "Client update required" in host("display-message", "-p", "#{tmtv_update_required}"), "old host receives update-required response")
+            old_local = Viewer(None, local=True)
+            local_viewers.append(old_local)
+            old_local.sees("Client update required")
+            old_local.sees("curl -fsSL")
+            assert host("display-message", "-p", "#{tmtv_ssh}|#{tmtv_web}") == "|"
+            assert not any(p.name.endswith("-e2e") for p in sessions.iterdir())
+            old_local.send(b"q")
+            old_local.pump()
+            old_local.close()
+            local_viewers.remove(old_local)
+            host("send-keys", "-l", "printf 'OLD_LOCAL_WORKS\\n'")
+            host("send-keys", "Enter")
+            wait_for(lambda: "OLD_LOCAL_WORKS" in host("capture-pane", "-p"), "old host retains usable local terminal")
+            print("PASS genuine old host receives update notice and install command before refusal; no URL, local terminal usable", flush=True)
+            return
         wait_for(lambda: any(p.name.endswith("-e2e") and not p.name.startswith("ro-") for p in sessions.iterdir()), "authenticated host registration")
         rw = next(p.name for p in sessions.iterdir() if p.name.endswith("-e2e") and not p.name.startswith("ro-"))
         ro = "ro-e2e"
@@ -445,6 +464,53 @@ set -g invalid-option-E2E_VIEW yes
             viewer.sees("VIEW_EXIT_RESTORED")
         print("PASS view exit returns all viewers to the preserved live shell", flush=True)
 
+        # Inject through the actual pane PTY: the host parses these bytes,
+        # snapshots its state over SSH, and both viewer transports render it.
+        def emit_terminal(data):
+            escaped = "".join("\\%03o" % b for b in data)
+            host("run-shell", "printf '" + escaped + "' > " + pane_tty)
+
+        emit_terminal(b"\x1b[2J\x1b[H\x1b[38;2;18;52;86;48;2;101;67;33;3;9mRGB_SNAPSHOT " + "e\u0301\u754c".encode())
+        def rgb_matches(viewer):
+            viewer.pump()
+            for row in viewer.screen.buffer.values():
+                for col, cell in row.items():
+                    if cell.data == "R" and row[col + 1].data == "G" and row[col + 2].data == "B":
+                        return cell.fg == "123456" and cell.bg == "654321" and cell.italics and cell.strikethrough
+            return False
+        for viewer in viewers:
+            wait_for(lambda: rgb_matches(viewer) and "\u00e9\u754c" in viewer.text(), "styled Unicode before reconnect")
+        reconnect_host(lambda v: rgb_matches(v) and "\u00e9\u754c" in v.text(), "full RGB/style/Unicode snapshot after reconnect")
+        emit_terminal(b"_CONTINUED\x1b[0m\r\n")
+        for viewer in viewers:
+            viewer.sees("_CONTINUED")
+        print("PASS truecolour foreground/background, italics, strike and combining/wide Unicode survive real SSH/SSE reconnect", flush=True)
+
+        emit_terminal(b"\x1b[2J\x1b[HPARTIAL_CSI\x1b[38;2;17;34;")
+        for viewer in viewers:
+            viewer.sees("PARTIAL_CSI")
+        reconnect_host(lambda v: "PARTIAL_CSI" in v.text(), "partial CSI snapshot")
+        emit_terminal(b"51mCSI_CONTINUED")
+        def csi_matches(viewer):
+            viewer.pump()
+            for row in viewer.screen.buffer.values():
+                for col, cell in row.items():
+                    if cell.data == "C" and "".join(row[col + j].data for j in range(13)) == "CSI_CONTINUED":
+                        return cell.fg == "112233"
+            return False
+        for viewer in viewers:
+            wait_for(lambda: csi_matches(viewer), "continued CSI retains RGB state")
+        print("PASS partially received CSI resumes after reconnect with correct subsequent colour", flush=True)
+
+        emit_terminal(b"\x1b[0m\x1b[2J\x1b[HUTF8_PREFIX_\xe7\x95")
+        for viewer in viewers:
+            viewer.sees("UTF8_PREFIX_")
+        reconnect_host(lambda v: "UTF8_PREFIX_" in v.text(), "partial UTF-8 snapshot")
+        emit_terminal(b"\x8c_UTF8_COMPLETE\r\n")
+        for viewer in viewers:
+            viewer.sees("UTF8_PREFIX_\u754c_UTF8_COMPLETE")
+        print("PASS partial multibyte UTF-8 resumes after reconnect without replacement or duplicated bytes", flush=True)
+
         # Same rectangles and active pane, different stacking order. This was
         # invisible to the legacy layout hash. Observe composed terminal output.
         base = host("display-message", "-p", "#{pane_id}")
@@ -527,10 +593,11 @@ set -g invalid-option-E2E_VIEW yes
             viewers.append(viewer)
             viewer.sees("LATE_VIEWER_READY")
         print("PASS fresh SSH/SSE RO viewers reconstruct the current screen", flush=True)
-        print("20 end-to-end checks passed; browser DOM, parsed view styles, full-fidelity SIXEL and platforms remain separate coverage.", flush=True)
+        print("23 end-to-end checks passed; browser DOM, other terminal attributes, full-fidelity SIXEL and platforms remain separate coverage.", flush=True)
     except BaseException:
         with open(ROOT / "diagnostics.log", "w") as out:
             out.write("session entries: " + repr([p.name for p in Path('/tmp/tmtv/sessions').iterdir()]) + "\n")
+            out.write("snapshot error: " + host("display-message", "-p", "#{tmtv_snapshot_error}|#{tmtv_layout_error}") + "\n")
             out.write("host mode: " + host("display-message", "-p", "#{pane_mode}|#{copy_cursor_x},#{copy_cursor_y}|#{selection_present}|#{scroll_position}") + "\n")
             out.write("host screen:\n" + host("capture-pane", "-p") + "\n")
             for viewer in viewers:

@@ -27,6 +27,8 @@
 #include <time.h>
 
 #include "tmux.h"
+#include "tmate-snapshot.h"
+#include <limits.h>
 
 /*
  * Based on the description by Paul Williams at:
@@ -3777,4 +3779,269 @@ input_report_current_theme(struct input_ctx *ictx)
 			break;
 		}
 	}
+}
+
+/* Portable, bounded parser continuation. No terminal actions are replayed. */
+static const struct input_state *input_snapshot_states[] = {
+	&input_state_ground, &input_state_esc_enter, &input_state_esc_intermediate,
+	&input_state_csi_enter, &input_state_csi_parameter, &input_state_csi_intermediate,
+	&input_state_csi_ignore, &input_state_dcs_enter, &input_state_dcs_parameter,
+	&input_state_dcs_intermediate, &input_state_dcs_handler, &input_state_dcs_escape,
+	&input_state_dcs_ignore, &input_state_osc_string, &input_state_apc_string,
+	&input_state_rename_string, &input_state_consume_st
+};
+struct input_snapshot {
+	struct input_ctx state;
+	struct colour_palette palette;
+};
+static int
+input_snap_number(msgpack_object o, u_int max, u_int *n)
+{
+	if (o.type != MSGPACK_OBJECT_POSITIVE_INTEGER || o.via.u64 > max) return (0);
+	*n = o.via.u64; return (1);
+}
+static int
+input_snap_array(msgpack_object o, u_int n)
+{
+	return (o.type == MSGPACK_OBJECT_ARRAY && o.via.array.size == n);
+}
+static int
+input_snap_bin(msgpack_object o, u_int max)
+{
+	return (o.type == MSGPACK_OBJECT_BIN && o.via.bin.size <= max);
+}
+static int
+input_snap_colour(msgpack_object o, int *n)
+{
+	u_int v;
+	if (o.type == MSGPACK_OBJECT_NEGATIVE_INTEGER && o.via.i64 == -1) { *n = -1; return (1); }
+	if (!input_snap_number(o, INT_MAX, &v) || !tmtv_snapshot_colour(v)) return (0);
+	*n = v; return (1);
+}
+static int
+input_snap_cell(msgpack_object o, struct input_cell *c)
+{
+	msgpack_object *v;
+	u_int set, g0, g1;
+	if (!input_snap_array(o, 4)) return (0);
+	v = o.via.array.ptr;
+	if (!tmtv_snapshot_cell_decode(v[0], &c->cell) ||
+	    !input_snap_number(v[1], 1, &set) || !input_snap_number(v[2], 1, &g0) ||
+	    !input_snap_number(v[3], 1, &g1) || (c->cell.flags & (GRID_FLAG_TAB|GRID_FLAG_PADDING))) return (0);
+	c->set = set; c->g0set = g0; c->g1set = g1; return (1);
+}
+static int
+input_snap_write(void *data, const char *s, size_t n)
+{
+	msgpack_sbuffer *sb = data;
+	if (n > TMTV_SNAPSHOT_MAX_PARSER_BYTES - sb->size) return (-1);
+	return (msgpack_sbuffer_write(sb, s, n));
+}
+void
+input_snapshot_free(struct input_snapshot *p)
+{
+	u_int i;
+	if (p == NULL) return;
+	for (i = 0; i < p->state.param_list_len; i++)
+		if (p->state.param_list[i].type == INPUT_STRING) free(p->state.param_list[i].str);
+	free(p->state.input_buf);
+	if (p->state.since_ground != NULL) evbuffer_free(p->state.since_ground);
+	colour_palette_free(&p->palette); free(p);
+}
+struct input_snapshot *
+input_snapshot_decode(msgpack_object o)
+{
+	struct input_snapshot *p = xcalloc(1, sizeof *p);
+	struct input_ctx *s = &p->state;
+	msgpack_object *v, *a, *param, *pal;
+	struct grid_cell last;
+	u_int version, state, n, i, j, flags, end, ch, oldmode;
+	enum utf8_state utf;
+	colour_palette_init(&p->palette);
+	if (!input_snap_array(o, 15)) goto bad;
+	v = o.via.array.ptr;
+	if (!input_snap_number(v[0], 1, &version) || version != 1 ||
+	    !input_snap_cell(v[1], &s->cell) || !input_snap_cell(v[2], &s->old_cell) ||
+	    !input_snap_array(v[3], 3) || !input_snap_number(v[4], nitems(input_snapshot_states)-1, &state) ||
+	    !input_snap_bin(v[5], 3) || !input_snap_bin(v[6], 63) ||
+	    !input_snap_bin(v[7], TMTV_SNAPSHOT_MAX_PARSER_BYTES) ||
+	    !input_snap_number(v[8], INPUT_END_BEL, &end) ||
+	    v[9].type != MSGPACK_OBJECT_ARRAY || v[9].via.array.size > 24 ||
+	    !input_snap_number(v[11], 255, &ch) || !input_snap_number(v[13], 3, &flags) ||
+	    !input_snap_array(v[14], 2)) goto bad;
+	a = v[3].via.array.ptr;
+	if (!input_snap_number(a[0], WINDOW_MAXIMUM, &s->old_cx) ||
+	    !input_snap_number(a[1], WINDOW_MAXIMUM, &s->old_cy) ||
+	    !input_snap_number(a[2], 0x1fffff, &oldmode)) goto bad;
+	s->old_mode = oldmode; s->state = input_snapshot_states[state];
+	s->ch = ch; s->flags = flags; s->input_end = end;
+	s->interm_len = v[5].via.bin.size; s->param_len = v[6].via.bin.size;
+	memcpy(s->interm_buf, v[5].via.bin.ptr, s->interm_len);
+	memcpy(s->param_buf, v[6].via.bin.ptr, s->param_len);
+	/* Intermediate bytes and raw numeric parameters are never executable text. */
+	for (i = 0; i < s->interm_len; i++)
+		if (s->interm_buf[i] < 0x20 || s->interm_buf[i] > 0x3f) goto bad;
+	for (i = 0; i < s->param_len; i++)
+		if (s->param_buf[i] && (s->param_buf[i] < 0x30 || s->param_buf[i] > 0x3b)) goto bad;
+	s->input_len = v[7].via.bin.size;
+	a = v[14].via.array.ptr;
+	if (!input_snap_bin(a[0], TMTV_SNAPSHOT_MAX_PARSER_BYTES) ||
+	    s->input_len + a[0].via.bin.size > TMTV_SNAPSHOT_MAX_PARSER_BYTES) goto bad;
+	s->input_space = s->input_len + 1;
+	if (s->input_space < INPUT_BUF_START) s->input_space = INPUT_BUF_START;
+	s->input_buf = xcalloc(s->input_space, 1);
+	if (s->input_len) memcpy(s->input_buf, v[7].via.bin.ptr, s->input_len);
+	s->since_ground = evbuffer_new();
+	if (s->since_ground == NULL) fatal("evbuffer_new");
+	if (a[0].via.bin.size) evbuffer_add(s->since_ground, a[0].via.bin.ptr, a[0].via.bin.size);
+	s->param_list_len = v[9].via.array.size;
+	for (i = 0; i < s->param_list_len; i++) {
+		if (!input_snap_array(v[9].via.array.ptr[i], 2)) goto bad;
+		param = v[9].via.array.ptr[i].via.array.ptr;
+		if (!input_snap_number(param[0], INPUT_STRING, &n)) goto bad;
+		s->param_list[i].type = n;
+		if (n == INPUT_MISSING) { if (param[1].type != MSGPACK_OBJECT_NIL) goto bad; }
+		else if (n == INPUT_NUMBER) {
+			if (!input_snap_number(param[1], INT_MAX, &n)) goto bad;
+			s->param_list[i].num = n;
+		} else {
+			if (!input_snap_bin(param[1], 63) || memchr(param[1].via.bin.ptr, 0, param[1].via.bin.size)) goto bad;
+			s->param_list[i].str = xstrndup(param[1].via.bin.ptr, param[1].via.bin.size);
+		}
+	}
+	if (v[10].type != MSGPACK_OBJECT_NIL) {
+		if (!input_snap_bin(v[10], 3) || !v[10].via.bin.size) goto bad;
+		utf = utf8_open(&s->utf8data, (u_char)v[10].via.bin.ptr[0]);
+		for (i = 1; i < v[10].via.bin.size && utf == UTF8_MORE; i++)
+			utf = utf8_append(&s->utf8data, (u_char)v[10].via.bin.ptr[i]);
+		if (utf != UTF8_MORE || i != v[10].via.bin.size) goto bad;
+		s->utf8started = 1;
+	}
+	if (flags & INPUT_LAST) {
+		if (!input_snap_array(v[12], 2)) goto bad;
+		param = v[12].via.array.ptr;
+		if (!input_snap_number(param[1], 2, &n)) goto bad;
+		/* Reuse strict UTF-8 validation with a harmless logical width. */
+		{
+			msgpack_object fields[7] = {0}, cell;
+			fields[0] = param[0];
+			for (j = 1; j < 7; j++) fields[j].type = MSGPACK_OBJECT_POSITIVE_INTEGER;
+			fields[1].via.u64 = 1; fields[4].via.u64 = fields[5].via.u64 = fields[6].via.u64 = 8;
+			cell.type = MSGPACK_OBJECT_ARRAY; cell.via.array.ptr = fields; cell.via.array.size = 7;
+			if (!tmtv_snapshot_cell_decode(cell, &last)) goto bad;
+		}
+		s->last = last.data; s->last.width = n;
+	} else if (v[12].type != MSGPACK_OBJECT_NIL) goto bad;
+	if (a[1].type != MSGPACK_OBJECT_NIL) {
+		if (!input_snap_array(a[1], 4)) goto bad;
+		pal = a[1].via.array.ptr;
+		if (!input_snap_colour(pal[0], &p->palette.fg) || !input_snap_colour(pal[1], &p->palette.bg)) goto bad;
+		for (i = 2; i < 4; i++) {
+			int *table;
+			if (pal[i].type == MSGPACK_OBJECT_NIL) continue;
+			if (!input_snap_array(pal[i], 256)) goto bad;
+			table = xcalloc(256, sizeof *table);
+			if (i == 2) p->palette.palette = table; else p->palette.default_palette = table;
+			for (j = 0; j < 256; j++) if (!input_snap_colour(pal[i].via.array.ptr[j], &table[j])) goto bad;
+		}
+	}
+	return (p);
+bad:
+	input_snapshot_free(p); return (NULL);
+}
+int
+input_snapshot_encode(struct input_ctx *s, msgpack_sbuffer *out)
+{
+	msgpack_sbuffer sb;
+	msgpack_packer pk;
+	msgpack_unpacked un;
+	struct input_snapshot *check;
+	struct input_ctx empty;
+	struct grid_cell gc;
+	struct input_cell *c;
+	u_int i, j, state;
+	size_t pending, input_len;
+	int *table, ok = 0;
+	if (s == NULL) {
+		memset(&empty, 0, sizeof empty); input_reset_cell(&empty);
+		empty.state = &input_state_ground; empty.since_ground = evbuffer_new(); s = &empty;
+	}
+	for (state = 0; state < nitems(input_snapshot_states); state++) if (s->state == input_snapshot_states[state]) break;
+	if (state == nitems(input_snapshot_states)) goto empty_done;
+	/* Ground-state scratch buffers are inert and may have been shrunk after
+	 * a completed large OSC/DCS. Never read their stale logical lengths. */
+	pending = state ? evbuffer_get_length(s->since_ground) : 0;
+	input_len = state ? s->input_len : 0;
+	if (pending + input_len > TMTV_SNAPSHOT_MAX_PARSER_BYTES) goto empty_done;
+	msgpack_sbuffer_init(&sb); msgpack_packer_init(&pk, &sb, input_snap_write);
+#define IPACK(type, ...) do { if (msgpack_pack_##type(&pk, ##__VA_ARGS__)) goto done; } while (0)
+#define IBIN(ptr, len) do { IPACK(bin, len); if ((len) && msgpack_pack_bin_body(&pk, ptr, len)) goto done; } while (0)
+	IPACK(array, 15); IPACK(int, 1);
+	for (i = 0; i < 2; i++) {
+		c = i ? &s->old_cell : &s->cell; gc = c->cell; gc.data = grid_default_cell.data;
+		IPACK(array, 4); if (tmtv_snapshot_cell_encode(&gc, &pk)) goto done;
+		IPACK(int, c->set); IPACK(int, c->g0set); IPACK(int, c->g1set);
+	}
+	IPACK(array, 3); IPACK(unsigned_int, s->old_cx); IPACK(unsigned_int, s->old_cy); IPACK(int, s->old_mode);
+	IPACK(unsigned_int, state); IBIN(s->interm_buf, state ? s->interm_len : 0); IBIN(s->param_buf, state ? s->param_len : 0);
+	IBIN(s->input_buf, input_len); IPACK(int, s->input_end); IPACK(array, state ? s->param_list_len : 0);
+	for (i = 0; state && i < s->param_list_len; i++) {
+		IPACK(array, 2); IPACK(int, s->param_list[i].type);
+		if (s->param_list[i].type == INPUT_STRING) { IBIN(s->param_list[i].str, strlen(s->param_list[i].str)); }
+		else if (s->param_list[i].type == INPUT_NUMBER) { IPACK(int, s->param_list[i].num); }
+		else { IPACK(nil); }
+	}
+	if (s->utf8started) { IBIN(s->utf8data.data, s->utf8data.have); } else { IPACK(nil); }
+	IPACK(int, s->ch);
+	if (s->flags & INPUT_LAST) { IPACK(array, 2); IBIN(s->last.data, s->last.size); IPACK(int, s->last.width); }
+	else { IPACK(nil); }
+	IPACK(int, s->flags); IPACK(array, 2); IBIN(evbuffer_pullup(s->since_ground, -1), pending);
+	if (s->palette == NULL) { IPACK(nil); }
+	else {
+		IPACK(array, 4); IPACK(int, s->palette->fg); IPACK(int, s->palette->bg);
+		for (i = 0; i < 2; i++) {
+			table = i ? s->palette->default_palette : s->palette->palette;
+			if (table == NULL) { IPACK(nil); }
+			else { IPACK(array, 256); for (j = 0; j < 256; j++) { IPACK(int, table[j]); } }
+		}
+	}
+	msgpack_unpacked_init(&un);
+	if (msgpack_unpack_next(&un, sb.data, sb.size, NULL) == MSGPACK_UNPACK_SUCCESS) {
+		check = input_snapshot_decode(un.data);
+		if (check != NULL && out->size <= TMTV_SNAPSHOT_MAX_BYTES - sb.size &&
+		    msgpack_sbuffer_write(out, sb.data, sb.size) == 0) ok = 1;
+		input_snapshot_free(check);
+	}
+	msgpack_unpacked_destroy(&un);
+done:
+	msgpack_sbuffer_destroy(&sb);
+empty_done:
+	if (s == &empty) evbuffer_free(empty.since_ground);
+	return (ok ? 0 : -1);
+#undef IPACK
+#undef IBIN
+}
+void
+input_snapshot_apply(struct input_ctx *t, struct input_snapshot *p)
+{
+	struct input_ctx *s = &p->state;
+	struct input_request *ir;
+	u_int i;
+	while ((ir = TAILQ_FIRST(&t->requests)) != NULL) input_free_request(ir);
+	event_del(&t->request_timer); event_del(&t->ground_timer);
+	for (i = 0; i < t->param_list_len; i++) if (t->param_list[i].type == INPUT_STRING) free(t->param_list[i].str);
+	t->cell = s->cell; t->old_cell = s->old_cell; t->old_cx = s->old_cx; t->old_cy = s->old_cy; t->old_mode = s->old_mode;
+	memcpy(t->interm_buf, s->interm_buf, sizeof t->interm_buf); t->interm_len = s->interm_len;
+	memcpy(t->param_buf, s->param_buf, sizeof t->param_buf); t->param_len = s->param_len;
+	free(t->input_buf); t->input_buf = s->input_buf; s->input_buf = NULL;
+	t->input_len = s->input_len; t->input_space = s->input_space; t->input_end = s->input_end;
+	memcpy(t->param_list, s->param_list, sizeof t->param_list); t->param_list_len = s->param_list_len; s->param_list_len = 0;
+	t->state = s->state; t->ch = s->ch; t->flags = s->flags;
+	t->utf8data = s->utf8data; t->utf8started = s->utf8started; t->last = s->last;
+	evbuffer_free(t->since_ground); t->since_ground = s->since_ground; s->since_ground = NULL;
+	if (t->palette != NULL) {
+		colour_palette_free(t->palette); *t->palette = p->palette;
+		p->palette.palette = p->palette.default_palette = NULL;
+	}
+	if (t->state != &input_state_ground) input_start_ground_timer(t);
 }
