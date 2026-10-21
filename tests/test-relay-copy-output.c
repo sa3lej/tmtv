@@ -1451,6 +1451,7 @@ TEST(host_encoder_output_routes_without_feedback)
 
 #include "test-layout.h"
 #include "test-snapshot.h"
+#include "test-snapshot-pane.h"
 
 int
 main(int argc, char **argv)
@@ -1472,7 +1473,11 @@ main(int argc, char **argv)
 			options_default(global_w_options, oe);
 	}
 	TEST_SUITE_BEGIN("Production relay copy output");
-	if (argc == 2 && (strcmp(argv[1], "--host-grid-codec") == 0 ||
+	if (argc == 2 && (strcmp(argv[1], "--host-pane-codec") == 0 ||
+	    strcmp(argv[1], "--host-pane-codec-bulk") == 0)) {
+		snapshot_bulk = strstr(argv[1], "-bulk") != NULL;
+		RUN_TEST(host_pane_codec_stream_roundtrip);
+	} else if (argc == 2 && (strcmp(argv[1], "--host-grid-codec") == 0 ||
 	    strcmp(argv[1], "--host-grid-codec-bulk") == 0)) {
 		snapshot_bulk = strstr(argv[1], "-bulk") != NULL;
 		RUN_TEST(host_grid_codec_stream_roundtrip);
@@ -1507,6 +1512,41 @@ main(int argc, char **argv)
 		else
 			RUN_TEST(host_copy_state_routes_and_preserves_clock);
 	} else {
+#ifdef ENABLE_SIXEL
+		RUN_TEST(pane_snapshot_clears_stale_current_and_saved_image_owners);
+#endif
+		RUN_TEST(pane_snapshot_saved_dimensions_survive_alternate_resize);
+		RUN_TEST(pane_snapshot_saved_cursor_style_survives_after_alternate_exit);
+		RUN_TEST(pane_snapshot_both_grids_share_output_byte_limit);
+		RUN_TEST(pane_snapshot_restores_active_saved_screen_and_exit_style);
+		RUN_TEST(pane_snapshot_keeps_copy_clock_and_frozen_backing);
+		RUN_TEST(pane_snapshot_rejects_identity_and_geometry_before_mutation);
+		RUN_TEST(pane_snapshot_rearms_sync_and_replaces_old_write_queue);
+		RUN_TEST(pane_snapshot_combined_grid_budget_is_checked_before_allocation);
+		RUN_TEST(pane_snapshot_empty_screen_ignores_uninitialized_saved_fields);
+		RUN_TEST(pane_snapshot_unsupported_saved_links_and_images_are_atomic);
+		RUN_TEST(pane_snapshot_rejects_version);
+		RUN_TEST(pane_snapshot_rejects_overflow_id);
+		RUN_TEST(pane_snapshot_rejects_cursor_x);
+		RUN_TEST(pane_snapshot_rejects_cursor_y);
+		RUN_TEST(pane_snapshot_rejects_mode);
+		RUN_TEST(pane_snapshot_rejects_default_mode);
+		RUN_TEST(pane_snapshot_rejects_cursor_style);
+		RUN_TEST(pane_snapshot_rejects_cursor_colour);
+		RUN_TEST(pane_snapshot_rejects_scroll_region);
+		RUN_TEST(pane_snapshot_rejects_tab_range);
+		RUN_TEST(pane_snapshot_rejects_duplicate_tab);
+		RUN_TEST(pane_snapshot_rejects_saved_history);
+		RUN_TEST(pane_snapshot_rejects_saved_history_flag);
+		RUN_TEST(pane_snapshot_rejects_alternate_history_flag);
+		RUN_TEST(pane_snapshot_rejects_unpaired_cursor_sentinel);
+		RUN_TEST(pane_snapshot_rejects_saved_cursor_range);
+		RUN_TEST(pane_snapshot_rejects_missing_saved_style);
+		RUN_TEST(pane_snapshot_rejects_saved_colour);
+		RUN_TEST(pane_snapshot_rejects_saved_flags);
+		RUN_TEST(pane_snapshot_rejects_missing_saved_grid);
+		RUN_TEST(pane_snapshot_rejects_saved_grid_rows);
+		RUN_TEST(pane_snapshot_rejects_saved_style_length);
 		RUN_TEST(snapshot_maximum_combined_cell_roundtrips);
 		RUN_TEST(snapshot_mutated_objects_remain_bounded_and_reencodable);
 		RUN_TEST(snapshot_preserves_host_width_and_full_style_bits);

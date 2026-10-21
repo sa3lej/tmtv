@@ -23,8 +23,8 @@ array(msgpack_object o, u_int n)
 	return (o.type == MSGPACK_OBJECT_ARRAY && o.via.array.size == n);
 }
 
-static int
-colour(u_int c)
+int
+tmtv_snapshot_colour(u_int c)
 {
 	if (c <= 9 || (c >= 90 && c <= 97)) return (1);
 	if ((c & ~0xffU) == COLOUR_FLAG_256) return (1);
@@ -58,8 +58,8 @@ text(const u_char *s, u_int n)
 	return (n != 0);
 }
 
-static int
-cell(msgpack_object o, struct grid_cell *gc)
+int
+tmtv_snapshot_cell_decode(msgpack_object o, struct grid_cell *gc)
 {
 	msgpack_object *v;
 	u_int width, flags, attr, fg, bg, us, size;
@@ -69,9 +69,9 @@ cell(msgpack_object o, struct grid_cell *gc)
 	    !number(v[1], UTF8_SIZE, &width) ||
 	    !number(v[2], CELL_FLAGS, &flags) || (flags & ~CELL_FLAGS) ||
 	    !number(v[3], 0x7fff, &attr) ||
-	    !number(v[4], INT_MAX, &fg) || !colour(fg) ||
-	    !number(v[5], INT_MAX, &bg) || !colour(bg) ||
-	    !number(v[6], INT_MAX, &us) || !colour(us)) return (0);
+	    !number(v[4], INT_MAX, &fg) || !tmtv_snapshot_colour(fg) ||
+	    !number(v[5], INT_MAX, &bg) || !tmtv_snapshot_colour(bg) ||
+	    !number(v[6], INT_MAX, &us) || !tmtv_snapshot_colour(us)) return (0);
 	size = v[0].via.bin.size;
 	if (flags & GRID_FLAG_PADDING) {
 		if (width || size || (flags & GRID_FLAG_TAB)) return (0);
@@ -91,7 +91,7 @@ cell(msgpack_object o, struct grid_cell *gc)
 
 /* The cost includes grid_expand_line's minimum allocation at screen width. */
 static int
-validate(msgpack_object o)
+validate(msgpack_object o, u_int *allocation)
 {
 	msgpack_object *v, *rows, *r, *cells, *osc;
 	struct grid_cell gc;
@@ -127,7 +127,7 @@ validate(msgpack_object o)
 		cells = r[3].via.array.ptr;
 		pending = 0;
 		for (x = 0; x < n; x++) {
-			if (!cell(cells[x], &gc)) return (0);
+			if (!tmtv_snapshot_cell_decode(cells[x], &gc)) return (0);
 			if (gc.flags & GRID_FLAG_PADDING) {
 				if (pending == 0) return (0);
 				pending--;
@@ -139,7 +139,15 @@ validate(msgpack_object o)
 		}
 		if (pending) return (0);
 	}
+	if (allocation != NULL) *allocation = cost;
 	return (1);
+}
+
+int
+tmtv_snapshot_grid_validate(msgpack_object o, u_int hlimit, u_int *allocation)
+{
+	return (hlimit <= TMTV_SNAPSHOT_MAX_HISTORY && validate(o, allocation) &&
+	    o.via.array.ptr[3].via.u64 <= hlimit);
 }
 
 struct grid *
@@ -151,7 +159,7 @@ tmtv_snapshot_grid_decode(msgpack_object o, u_int hlimit)
 	struct grid_cell gc;
 	struct grid_cell_entry *gce;
 	u_int x, y, lines;
-	if (hlimit > TMTV_SNAPSHOT_MAX_HISTORY || !validate(o)) return (NULL);
+	if (!tmtv_snapshot_grid_validate(o, hlimit, NULL)) return (NULL);
 	v = o.via.array.ptr;
 	if (v[3].via.u64 > hlimit) return (NULL);
 	lines = v[2].via.u64 + v[3].via.u64;
@@ -162,7 +170,7 @@ tmtv_snapshot_grid_decode(msgpack_object o, u_int hlimit)
 	for (y = 0; y < lines; y++) {
 		r = rows[y].via.array.ptr;
 		for (x = 0; x < r[3].via.array.size; x++) {
-			cell(r[3].via.array.ptr[x], &gc);
+			tmtv_snapshot_cell_decode(r[3].via.array.ptr[x], &gc);
 			grid_set_cell(gd, x, y, &gc);
 			/* grid_set_cell deliberately clears this storage marker. */
 			if (gc.flags & GRID_FLAG_CLEARED) {
@@ -237,21 +245,12 @@ tmtv_snapshot_grid_encode(struct grid *gd, u_int history, msgpack_sbuffer *out)
 		PACK(array, gl->cellsize);
 		for (x = 0; x < gl->cellsize; x++) {
 			grid_get_cell(gd, x, y, &gc);
-			if (gc.link) goto done; /* handles are not portable */
-			PACK(array, 7);
-			n = gc.flags & (GRID_FLAG_TAB|GRID_FLAG_PADDING) ? 0 : gc.data.size;
-			if (n > TMTV_SNAPSHOT_MAX_UTF8) goto done;
-			PACK(bin, n);
-			if (n && msgpack_pack_bin_body(&pk, gc.data.data, n)) goto done;
-			PACK(unsigned_int, gc.flags & GRID_FLAG_PADDING ? 0 : gc.data.width);
-			PACK(unsigned_int, gc.flags & CELL_FLAGS);
-			PACK(unsigned_int, gc.attr);
-			PACK(int, gc.fg); PACK(int, gc.bg); PACK(int, gc.us);
+			if (tmtv_snapshot_cell_encode(&gc, &pk) != 0) goto done;
 		}
 	}
 	/* One validator defines both sides of the contract. No partial append. */
 	msgpack_unpacked_init(&parsed);
-	if (msgpack_unpack_next(&parsed, sb.data, sb.size, NULL) == MSGPACK_UNPACK_SUCCESS && validate(parsed.data) &&
+	if (msgpack_unpack_next(&parsed, sb.data, sb.size, NULL) == MSGPACK_UNPACK_SUCCESS && validate(parsed.data, NULL) &&
 	    out->size <= TMTV_SNAPSHOT_MAX_BYTES - sb.size &&
 	    msgpack_sbuffer_write(out, sb.data, sb.size) == 0) ok = 1;
 	msgpack_unpacked_destroy(&parsed);
@@ -259,4 +258,20 @@ done:
 	msgpack_sbuffer_destroy(&sb);
 	return (ok ? 0 : -1);
 #undef PACK
+}
+
+/* Storage handles and allocation flags are normalized before packing. */
+int
+tmtv_snapshot_cell_encode(const struct grid_cell *gc, msgpack_packer *pk)
+{
+	u_int n = gc->flags & (GRID_FLAG_TAB|GRID_FLAG_PADDING) ? 0 : gc->data.size;
+	if (gc->link || n > TMTV_SNAPSHOT_MAX_UTF8) return (-1);
+	if (msgpack_pack_array(pk, 7) || msgpack_pack_bin(pk, n) ||
+	    (n && msgpack_pack_bin_body(pk, gc->data.data, n)) ||
+	    msgpack_pack_unsigned_int(pk, gc->flags & GRID_FLAG_PADDING ? 0 : gc->data.width) ||
+	    msgpack_pack_unsigned_int(pk, gc->flags & CELL_FLAGS) ||
+	    msgpack_pack_unsigned_int(pk, gc->attr) ||
+	    msgpack_pack_int(pk, gc->fg) || msgpack_pack_int(pk, gc->bg) ||
+	    msgpack_pack_int(pk, gc->us)) return (-1);
+	return (0);
 }

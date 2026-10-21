@@ -6,6 +6,7 @@
 #include "test-harness.h"
 #include <locale.h>
 #include "snapshot-parser-fixture.h"
+#include "snapshot-pane-fixture.h"
 
 /* Frozen protocol 6 values from the pre-port header, not internal enum math. */
 TEST(sharing_key_numbers_stay_compatible)
@@ -842,6 +843,25 @@ TEST(layout_timeout_cannot_be_revived_by_late_capability)
 	}
 }
 
+TEST(host_pane_snapshot_preserves_alternate_state_and_exit)
+{
+	struct screen source;
+	struct window_pane *wp = create_pane();
+	struct tmtv_snapshot_pane *p;
+	msgpack_sbuffer sb;
+	msgpack_unpacked un;
+	pane_fixture_screen(&source); msgpack_sbuffer_init(&sb);
+	ASSERT(pane_fixture_expected(&source));
+	ASSERT_EQ(tmtv_snapshot_pane_encode(wp->id, &source, 100, &sb), 0);
+	msgpack_unpacked_init(&un);
+	ASSERT_EQ(msgpack_unpack_next(&un, sb.data, sb.size, NULL), MSGPACK_UNPACK_SUCCESS);
+	p = tmtv_snapshot_pane_decode(un.data); ASSERT_NOT_NULL(p);
+	ASSERT_EQ(tmtv_snapshot_pane_apply(wp, p), 0);
+	ASSERT(pane_fixture_expected(&wp->base)); ASSERT(pane_fixture_exit(&wp->base));
+	tmtv_snapshot_pane_free(p); screen_free(&source); destroy_pane(wp);
+	msgpack_sbuffer_destroy(&sb); msgpack_unpacked_destroy(&un);
+}
+
 TEST(host_parser_snapshot_preserves_colours_attributes_and_unicode)
 {
 	msgpack_sbuffer sb;
@@ -874,6 +894,16 @@ main(int argc, char **argv)
 			options_default(global_s_options, oe);
 		if (oe->scope & OPTIONS_TABLE_WINDOW)
 			options_default(global_w_options, oe);
+	}
+	if (argc == 2 && strcmp(argv[1], "--emit-pane-snapshot") == 0) {
+		struct screen source;
+		msgpack_sbuffer sb;
+		int result;
+		pane_fixture_screen(&source); msgpack_sbuffer_init(&sb);
+		result = tmtv_snapshot_pane_encode(0, &source, 100, &sb);
+		if (result == 0 && fwrite(sb.data, 1, sb.size, stdout) != sb.size) result = -1;
+		screen_free(&source); msgpack_sbuffer_destroy(&sb);
+		return (result != 0);
 	}
 	if (argc == 2 && strcmp(argv[1], "--emit-grid-snapshot") == 0) {
 		msgpack_sbuffer sb;
@@ -911,6 +941,7 @@ main(int argc, char **argv)
 		return (result);
 	}
 	TEST_SUITE_BEGIN("Production mode lifecycle");
+	RUN_TEST(host_pane_snapshot_preserves_alternate_state_and_exit);
 	RUN_TEST(host_parser_snapshot_preserves_colours_attributes_and_unicode);
 	RUN_TEST(sharing_key_numbers_stay_compatible);
 	RUN_TEST(layout_negotiation_holds_ready_and_sends_state_once);
