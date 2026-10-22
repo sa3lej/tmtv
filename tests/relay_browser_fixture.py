@@ -1,6 +1,6 @@
 """Optional browser fixture; all live requests stay in the offline container.
 
-Host-side prepare_browser copies an installed Playwright/Chromium and caches only
+Host-side prepare_browser copies an installed Playwright browser and caches only
 pinned public CDN assets referenced by the production Astro viewer. No production
 server, token, key or host directory is exposed to the browser.
 """
@@ -17,23 +17,60 @@ import time
 from urllib.request import urlopen
 
 
-def prepare_browser(repo, root, binary, copy_file, web_root):
+def prepare_browser(repo, root, binary, copy_file, web_root, engine):
     def node_eval(source):
         return subprocess.check_output(['node', '-e', source], text=True).strip()
     subprocess.run(['node', '--check', str(repo / 'tests/test-browser-reconnect.js')], check=True, timeout=10)
     package = Path(node_eval("console.log(require.resolve('playwright-core/package.json'))")).parent
-    chrome = Path(node_eval("console.log(require('playwright-core').chromium.executablePath())"))
-    if not chrome.exists():
-        raise RuntimeError('install the matching Playwright Chromium first')
+    executable = Path(node_eval(f"console.log(require('playwright-core').{engine}.executablePath())"))
+    if not executable.exists():
+        raise RuntimeError('install the matching Playwright ' + engine + ' first')
+    bundle = executable.parent
     shutil.copytree(package, root / 'test/node_modules/playwright-core')
-    shutil.copytree(chrome.parent, root / 'test/chromium')
+    # Preserve soname aliases: copying each symlink as a separate regular file
+    # can load the same WPE library twice, creating conflicting global state.
+    shutil.copytree(bundle, root / 'test/browser', symlinks=True)
+    (root / 'test/browser.json').write_text(json.dumps({'engine': engine, 'executable': '/test/browser/' + executable.name}))
     binary(shutil.which('node'), '/usr/bin/node')
-    for elf in chrome.parent.rglob('*'):
-        if elf.is_file():
+    # Browser bundles resolve their private shared libraries via wrappers/RPATH.
+    # Resolve ldd against the original bundle, but copy only external libraries;
+    # the complete private bundle is already installed at /test/browser.
+    dependency_env = dict(os.environ)
+    if engine == 'webkit':
+        dependency_env['LD_LIBRARY_PATH'] = ':'.join(str(bundle / p) for p in (
+            'minibrowser-wpe/lib', 'minibrowser-wpe/sys/lib',
+            'minibrowser-gtk/lib', 'minibrowser-gtk/sys/lib'))
+        for command in ('env', 'bash', 'uname', 'dirname', 'readlink'):
+            source = shutil.which(command)
+            if source is None:
+                raise RuntimeError(command + ' is required by the WebKit wrapper')
+            binary(source, ('/usr/bin/' if command == 'env' else '/bin/') + command)
+        # WPE's headless display uses Mesa through GLVND/dlopen, so these
+        # software-rendering dependencies do not appear in MiniBrowser's ldd.
+        vendors = Path('/usr/share/glvnd/egl_vendor.d')
+        if not (vendors / '50_mesa.json').is_file():
+            raise RuntimeError('WebKit fixture requires Mesa EGL software rendering')
+        copy_file(vendors / '50_mesa.json')
+        for pattern in ('*-linux-gnu/libEGL_mesa.so.0', '*-linux-gnu/libGLESv2.so.2',
+                        '*-linux-gnu/dri/swrast_dri.so'):
+            matches = list(Path('/usr/lib').glob(pattern))
+            if not matches:
+                raise RuntimeError('WebKit fixture requires ' + pattern)
+            for lib in matches:
+                binary(lib)
+        # Recent Mesa splits the Gallium implementation out of swrast and
+        # loads it dynamically through GBM; older installations have no split.
+        for lib in Path('/usr/lib').glob('*-linux-gnu/libgallium-*.so'):
+            binary(lib)
+    elif engine == 'firefox':
+        dependency_env['LD_LIBRARY_PATH'] = str(bundle)
+    for elf in bundle.rglob('*'):
+        if elf.is_file() and not elf.is_symlink():
             with elf.open('rb') as stream:
                 is_elf = stream.read(4) == b'\x7fELF'
             if is_elf:
-                binary(elf, '/test/chromium/' + str(elf.relative_to(chrome.parent)))
+                binary(elf, '/test/browser/' + str(elf.relative_to(bundle)),
+                       env=dependency_env, bundled_root=bundle)
     # Chromium loads NSS dynamically rather than listing it in ldd chrome.
     for lib in Path('/lib').glob('*-linux-gnu/libnss_*.so.2'):
         binary(lib)
@@ -145,7 +182,9 @@ def run_browser(rw, ro, transport, host, relay_request, wait_for, root):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        subprocess.run(['node', '/test/test-browser-reconnect.js', rw, ro], check=True, timeout=160)
+        with (root / 'browser/launch.log').open('w') as diagnostics:
+            subprocess.run(['node', '/test/test-browser-reconnect.js', rw, ro], check=True, timeout=160,
+                           env={**os.environ, 'DEBUG': 'pw:browser'}, stderr=diagnostics)
     finally:
         server.shutdown()
         server.server_close()

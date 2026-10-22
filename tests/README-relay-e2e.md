@@ -15,7 +15,8 @@ make -C tests relay-e2e PYTHON=/path/to/venv/bin/python \
 ```
 
 For actual browser rendering, install Playwright (tested with 1.59.1) and its
-matching Chromium outside the checkout. Set `NODE_PATH` to its `node_modules`
+matching browsers outside the checkout (`playwright install chromium firefox webkit`).
+Set `NODE_PATH` to its `node_modules`
 directory. Build the production viewer with `npm ci && npm run build` in `site`.
 Then run:
 
@@ -27,11 +28,18 @@ make -C tests relay-browser-e2e PYTHON=/path/to/venv/bin/python \
 
 `--web-root /path/to/site/dist` permits using an already built viewer from another
 worktree. Explicit `--host-binary` and `--relay-binary` paths are also supported.
-Before container startup, the runner copies local Chromium, Node, Playwright and
-fonts and fetches only the exact pinned public jsDelivr assets in the built HTML.
+Select `--browser-engine firefox` or `--browser-engine webkit` in `E2E_ARGS` to
+run the same checks in those engines; the default is Chromium. Use a separate
+artifact directory for each run. The runner requires the browser revision that
+matches the installed Playwright package and prints its actual version.
+Before container startup, the runner copies the selected browser, Node, Playwright
+and fonts and fetches only the exact pinned public jsDelivr assets in the built HTML.
 The browser itself runs offline. External fonts are blocked; DejaVu is the test
 fallback. Chromium's own sandbox is disabled inside this disposable container.
 There is no remote debugging port or Docker socket mounted into it.
+WebKit additionally needs installed Mesa EGL/software rasterizer libraries and
+the GLVND Mesa configuration, which the runner copies into the container. Browser
+library symlinks are preserved to avoid loading aliased libraries twice.
 
 A test-only HTTP server serves the unmodified built viewer and proxies its SSE,
 HEAD and input requests to the real loopback relay. Local control endpoints write
@@ -40,11 +48,12 @@ real DOM's computed attributes, OSC 8 link activation, decoded SIXEL canvas pixe
 and restoration through reconnects, plus read-only input rejection. They do not
 substitute a terminal parser, renderer, MessagePack codec or EventSource. Passive
 terminal observation is restricted to the test page. Screenshots and browser logs
-are retained under the artifact directory's `browser/` subdirectory.
+are retained under the artifact directory's `browser/` subdirectory, including
+`launch.log` with browser process diagnostics.
 
-This is Chromium/Linux coverage; it does not establish Firefox, WebKit, native
-terminal capability discovery or macOS support. The ordinary pyte transport suite
-remains separate and can be run without browser dependencies.
+These are Linux engine checks; WebKit here does not establish native Safari,
+macOS, iOS or native terminal capability discovery support. The ordinary pyte
+transport suite remains separate and can be run without browser dependencies.
 
 The browser tests delay real WebAssembly initialization by 500 ms to reproduce
 first-replay image loss, and exercise the renderer's bounded startup failure.

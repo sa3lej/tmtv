@@ -2,7 +2,8 @@
 // Launched by run-relay-e2e.py --browser; no live service or credentials used.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { chromium } = require('playwright-core');
+const playwright = require('playwright-core');
+const config = JSON.parse(fs.readFileSync('/test/browser.json'));
 const root = '/tmp/e2e/browser';
 fs.mkdirSync(root, { recursive: true });
 const [rw, ro] = process.argv.slice(2);
@@ -15,8 +16,9 @@ const green = red.replace('100;0;0', '0;100;0');
 let passes = 0;
 function pass(label) { console.log('PASS browser: ' + label); passes++; }
 async function main() {
-  const browser = await chromium.launch({ executablePath: '/test/chromium/chrome',
-    args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  const browser = await playwright[config.engine].launch({ executablePath: config.executable,
+    ...(config.engine === 'chromium' ? { args: ['--no-sandbox', '--disable-dev-shm-usage'] } : {}) });
+  console.log(`Browser engine: ${config.engine} ${browser.version()}`);
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
   context.on('requestfailed', req => fs.appendFileSync(root + '/requests.log', req.url() + ': ' + req.failure()?.errorText + '\n'));

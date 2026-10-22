@@ -33,7 +33,9 @@ def main():
     parser.add_argument("--relay-binary", type=Path, help="explicit local relay binary")
     parser.add_argument("--expect-layout-rejection", action="store_true", help="verify new host rejects an old relay")
     parser.add_argument("--expect-host-rejection", action="store_true", help="verify old host receives update notice before refusal")
-    parser.add_argument('--browser', action='store_true', help='run actual Chromium rendering/reconnect tests (requires Playwright Chromium and built site)')
+    parser.add_argument('--browser', action='store_true', help='run actual browser rendering/reconnect tests (requires Playwright and built site)')
+    parser.add_argument('--browser-engine', choices=('chromium', 'firefox', 'webkit'), default='chromium',
+                        help='engine for --browser (default chromium)')
     parser.add_argument('--web-root', type=Path, help='built production Astro site (default site/dist)')
     args = parser.parse_args()
     if sys.platform != "linux":
@@ -55,11 +57,12 @@ def main():
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest, follow_symlinks=True)
 
-        def binary(source, dest=None):
+        def binary(source, dest=None, *, env=None, bundled_root=None):
             copy_file(source, dest)
-            linked = run(["ldd", str(source)], capture_output=True, text=True).stdout
+            linked = run(["ldd", str(source)], capture_output=True, text=True, env=env).stdout
             for dep in re.findall(r"(?:=>\s*)?(/[^\s()]+)", linked):
-                copy_file(dep)
+                if bundled_root is None or not Path(dep).is_relative_to(bundled_root):
+                    copy_file(dep)
             if "not found" in linked:
                 raise RuntimeError("unresolved dependency: " + linked)
 
@@ -112,7 +115,7 @@ def main():
                 copy_file(source, "/usr/share/terminfo/" + term)
         copy_file(repo / "tests/test-relay-e2e.py", "/test/test-relay-e2e.py")
         if args.browser:
-            prepare_browser(repo, root, binary, copy_file, args.web_root or repo / 'site/dist')
+            prepare_browser(repo, root, binary, copy_file, args.web_root or repo / 'site/dist', args.browser_engine)
         (root / "tmp").mkdir(mode=0o1777)
         (context / "Dockerfile").write_text(
             'FROM scratch\nCOPY rootfs /\nENV PATH=/usr/bin:/bin PYTHONPATH=/test/lib LC_ALL=C.UTF-8 TERM=xterm-256color HOME=/tmp\n'
@@ -129,6 +132,7 @@ def main():
                  *(["-e", "TMTV_E2E_EXPECT_LAYOUT_REJECTION=1"] if args.expect_layout_rejection else []),
                  *(["-e", "TMTV_E2E_EXPECT_HOST_REJECTION=1"] if args.expect_host_rejection else []),
                  *(['-e', 'TMTV_E2E_BROWSER=1'] if args.browser else []),
+                 *(['-e', 'TMTV_E2E_BROWSER_ENGINE=' + args.browser_engine] if args.browser else []),
                  "-e", "ASAN_OPTIONS=detect_leaks=0:abort_on_error=1", "-e", "UBSAN_OPTIONS=halt_on_error=1",
                  "--pids-limit", "256" if args.browser else "128",
                  "--memory", "768m" if args.browser else "512m", "--cpus", "2",
