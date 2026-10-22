@@ -31,6 +31,12 @@ relay-e2e:
 	$(MAKE) -C .. tmtv tmtv-server
 	$(PYTHON) run-relay-e2e.py $(E2E_ARGS)
 
+# Same isolated production fixture, with an actual browser instead of pyte.
+.PHONY: relay-browser-e2e
+relay-browser-e2e:
+	$(MAKE) -C .. tmtv tmtv-server
+	$(PYTHON) run-relay-e2e.py --browser $(E2E_ARGS)
+
 all: core38-commands relay-copy-output mode-lifecycle unit server-unit functional hooks session-cleanup prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
 
 unit: $(UNIT_TESTS)

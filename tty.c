@@ -410,9 +410,18 @@ tty_start_tty(struct tty *tty)
 			tty->flags |= TTY_ALL_REQUEST_FLAGS;
 			tty->flags &= ~(TTY_WAITBG|TTY_WAITFG);
 			tty->term->flags |= TERM_SIXEL;
-			/* The owned xterm.js viewer also implements OSC 8. */
-			tty_parse_client_features(c, "hyperlinks", ",");
+			/* The owned xterm.js viewer implements OSC 8 and modern
+			 * underline/overline styles. Queries are suppressed for
+			 * this PTY, so advertise these capabilities explicitly. */
+			tty_parse_client_features(c,
+			    "hyperlinks,overline,usstyle", ",");
 			tty_apply_features(tty->term);
+			/* xterm.js requires the ISO colour-space slot in RGB
+			 * underline SGR: 58:2::r:g:b, not 58:2:r:g:b. Colons
+			 * are doubled in the terminal-override representation. */
+			tty_term_apply(tty->term,
+			    "Setulc=\\E[58::2::::%p1%{65536}%/%d::"
+			    "%p1%{256}%/%{255}%&%d::%p1%{255}%&%d%;m", 1, 0);
 		} else
 #endif
 		{

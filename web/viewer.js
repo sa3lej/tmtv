@@ -61,6 +61,62 @@
   var container = document.getElementById('terminal-container');
   var searchAddon = null;
   var searchVisible = false;
+  var activeEventSource = null;
+  var terminalReady = true;
+  var terminalFailed = false;
+  var terminalPending = [];
+  var terminalPendingBytes = 0;
+  var TERMINAL_PENDING_MAX = 16 * 1024 * 1024;
+  var TERMINAL_PENDING_CHUNKS_MAX = 4096;
+
+  function terminalStartFailed() {
+    terminalFailed = true;
+    terminalPending = [];
+    terminalPendingBytes = 0;
+    if (term) term.options.disableStdin = true;
+    if (activeEventSource) activeEventSource.close();
+    setStatus('Terminal unavailable', 'error');
+    showErrorOverlay('The terminal could not start. Reload this page to try again.', false);
+  }
+
+  function writeTerminal(data) {
+    if (terminalFailed || !data.byteLength) return;
+    if (terminalReady) {
+      term.write(data);
+      return;
+    }
+    if (terminalPending.length >= TERMINAL_PENDING_CHUNKS_MAX ||
+        data.byteLength > TERMINAL_PENDING_MAX - terminalPendingBytes) {
+      terminalStartFailed();
+      return;
+    }
+    terminalPending.push(data);
+    terminalPendingBytes += data.byteLength;
+  }
+
+  function awaitImageDecoder(addon) {
+    /* Pinned addon-image 0.9.0 has no public readiness API. Its SIXEL
+     * handler silently drops data until DecoderAsync installs _dec. Keep
+     * the complete ordered VT stream bounded while that decoder starts. */
+    var handler = addon._handlers && addon._handlers.get('sixel');
+    var deadline = Date.now() + 10000;
+    function check() {
+      if (terminalFailed) return;
+      if (handler && handler._dec) {
+        terminalReady = true;
+        var pending = terminalPending;
+        terminalPending = [];
+        terminalPendingBytes = 0;
+        for (var i = 0; i < pending.length; i++) term.write(pending[i]);
+      } else if (!handler || Date.now() >= deadline) {
+        terminalStartFailed();
+      } else {
+        setTimeout(check, 10);
+      }
+    }
+    terminalReady = false;
+    check();
+  }
 
   /* Connection quality tracking */
   var lastDataTime = 0;
@@ -159,7 +215,8 @@
       try {
         var imageAddon = new window.ImageAddon.ImageAddon();
         term.loadAddon(imageAddon);
-      } catch (e) {}
+        awaitImageDecoder(imageAddon);
+      } catch (e) { terminalStartFailed(); }
     }
 
     /* OSC 52 clipboard handler — intercept host clipboard set and
@@ -350,7 +407,15 @@
        * fit (e.g. 50-row terminal in a 400px viewport). */
       var containerH = clampedWrapH - TITLEBAR_H;
       container.style.height = containerH + 'px';
-      container.style.overflowY = (contentH > containerH + 2) ? 'auto' : 'hidden';
+      /* At the minimum font size wide sessions can still exceed the
+       * available width. Keep their rightmost columns reachable. */
+      container.style.overflowX = (contentW > maxW) ? 'auto' : 'hidden';
+      var scrollbarH = container.offsetHeight - container.clientHeight;
+      clampedWrapH = Math.min(contentH + scrollbarH + TITLEBAR_H, maxH);
+      wrap.style.height = clampedWrapH + 'px';
+      containerH = clampedWrapH - TITLEBAR_H;
+      container.style.height = containerH + 'px';
+      container.style.overflowY = (contentH + scrollbarH > containerH + 2) ? 'auto' : 'hidden';
     }
   }
 
@@ -472,7 +537,7 @@
   var termResponseRe = /\x1b\[[\?>=!]?[\d;]*[cnRySut]|\x1b\]1[01];[^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
 
   function queueInput(data) {
-    if (sessionReadonly || !webInputEnabled) return;
+    if (terminalFailed || sessionReadonly || !webInputEnabled) return;
     data = data.replace(termResponseRe, '');
     if (!data) return;
     inputBatch += data;
@@ -789,6 +854,7 @@
   function connectEventSource() {
     var url = buildSseUrl();
     var es = new EventSource(url);
+    activeEventSource = es;
     var dataReceived = false;
     var silenceTimer = null;
 
@@ -852,6 +918,7 @@
     };
 
     es.onerror = function() {
+      if (terminalFailed) { es.close(); return; }
       if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
       es.close();
       updateConnQuality('disconnected');
@@ -897,7 +964,7 @@
           if (paneId === -1) {
             if (!term) initTerminal();
             if (term && ptyData) {
-              term.write(ptyData instanceof Uint8Array ? ptyData : new Uint8Array(ptyData));
+              writeTerminal(ptyData instanceof Uint8Array ? ptyData : new Uint8Array(ptyData));
             }
           }
           /* Ignore per-pane data (paneId >= 0) — not supported */

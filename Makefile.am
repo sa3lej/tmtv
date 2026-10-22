@@ -520,7 +520,8 @@ tests/test-event-payload: tests/test-event-payload.o tests/test-window-tmux.o $(
 CLEANFILES += tests/test-event-payload tests/test-event-payload.o
 EXTRA_DIST += tests/test-event-payload.c
 EXTRA_DIST += tests/run-relay-e2e.py tests/test-relay-e2e.py \
-	tests/requirements-relay-e2e.txt
+	tests/requirements-relay-e2e.txt tests/relay_browser_fixture.py \
+	tests/test-browser-reconnect.js tests/README-relay-e2e.md
 
 # Exercise event dispatch through the complete production host.
 tests/test-events.o: tests/test-events.c tmux.h

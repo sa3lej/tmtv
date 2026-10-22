@@ -17,6 +17,8 @@ import sysconfig
 import tempfile
 import uuid
 
+from relay_browser_fixture import prepare_browser
+
 
 def run(argv, **kw):
     return subprocess.run(argv, check=True, timeout=kw.pop("timeout", 120), **kw)
@@ -31,6 +33,8 @@ def main():
     parser.add_argument("--relay-binary", type=Path, help="explicit local relay binary")
     parser.add_argument("--expect-layout-rejection", action="store_true", help="verify new host rejects an old relay")
     parser.add_argument("--expect-host-rejection", action="store_true", help="verify old host receives update notice before refusal")
+    parser.add_argument('--browser', action='store_true', help='run actual Chromium rendering/reconnect tests (requires Playwright Chromium and built site)')
+    parser.add_argument('--web-root', type=Path, help='built production Astro site (default site/dist)')
     args = parser.parse_args()
     if sys.platform != "linux":
         parser.error("this native-binary fixture requires Linux and Docker")
@@ -107,6 +111,8 @@ def main():
             if source:
                 copy_file(source, "/usr/share/terminfo/" + term)
         copy_file(repo / "tests/test-relay-e2e.py", "/test/test-relay-e2e.py")
+        if args.browser:
+            prepare_browser(repo, root, binary, copy_file, args.web_root or repo / 'site/dist')
         (root / "tmp").mkdir(mode=0o1777)
         (context / "Dockerfile").write_text(
             'FROM scratch\nCOPY rootfs /\nENV PATH=/usr/bin:/bin PYTHONPATH=/test/lib LC_ALL=C.UTF-8 TERM=xterm-256color HOME=/tmp\n'
@@ -122,13 +128,19 @@ def main():
                  *(["-e", "TMTV_E2E_GDB=1"] if args.gdb else []),
                  *(["-e", "TMTV_E2E_EXPECT_LAYOUT_REJECTION=1"] if args.expect_layout_rejection else []),
                  *(["-e", "TMTV_E2E_EXPECT_HOST_REJECTION=1"] if args.expect_host_rejection else []),
+                 *(['-e', 'TMTV_E2E_BROWSER=1'] if args.browser else []),
                  "-e", "ASAN_OPTIONS=detect_leaks=0:abort_on_error=1", "-e", "UBSAN_OPTIONS=halt_on_error=1",
-                 "--pids-limit", "128", "--memory", "512m", "--cpus", "2",
+                 "--pids-limit", "256" if args.browser else "128",
+                 "--memory", "768m" if args.browser else "512m", "--cpus", "2",
                  "--mount", "type=volume,src=" + name + ",dst=/tmp", name])
-            result = subprocess.run(["docker", "start", "-a", name], timeout=180)
+            result = subprocess.run(["docker", "start", "-a", name], timeout=240 if args.browser else 180)
             if result.returncode:
                 raise RuntimeError("relay E2E fixture failed")
         finally:
+            if args.artifacts and args.browser:
+                args.artifacts.mkdir(parents=True, exist_ok=True, mode=0o700)
+                subprocess.run(['docker', 'cp', name + ':/tmp/e2e/browser', str(args.artifacts)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
             if args.artifacts:
                 args.artifacts.mkdir(parents=True, exist_ok=True, mode=0o700)
                 subprocess.run(["docker", "cp", name + ":/tmp/e2e/relay.log", str(args.artifacts / "relay.log")],

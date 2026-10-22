@@ -363,6 +363,10 @@ set -g invalid-option-E2E_VIEW yes
         wait_for(lambda: request("HEAD", "/" + rw)[0] == 200, "RW token authorization")
         wait_for(lambda: request("HEAD", "/" + ro)[0] == 200, "RO token authorization")
         print("PASS web token authorization accepts RW/RO and rejects an invalid token", flush=True)
+        if os.environ.get('TMTV_E2E_BROWSER') == '1':
+            from relay_browser_fixture import run_browser
+            run_browser(rw, ro, transport, host, request, wait_for, ROOT)
+            return
         rejected = Viewer("invalid-e2e-token")
         viewers.append(rejected)
         wait_for(lambda: rejected.proc.poll() is not None, "invalid SSH token is disconnected")

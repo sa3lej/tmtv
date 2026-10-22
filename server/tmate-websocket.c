@@ -2343,6 +2343,10 @@ static void on_ws_client_read(__unused struct bufferevent *bev, void *arg)
 			 * that triggers watermark disconnects. */
 			pty_replay_send_limited(wc->bev,
 			    PTY_REPLAY_RECONNECT_MAX);
+			/* Replay is bounded and may omit the original image or
+			 * terminal setup. Follow it with a complete composed
+			 * redraw, including retained SIXEL, for this new viewer. */
+			sse_force_vpty_redraw(wc->session);
 		} else {
 			/* vpty just spawned (replay empty) or not active:
 			 * send grid-based screen dump for instant content.
