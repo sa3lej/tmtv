@@ -177,7 +177,8 @@ static void tmate_header(struct tmate_session *session,
 
 	if (session->client_protocol_version != TMATE_PROTOCOL_VERSION) {
 		char *message;
-		xasprintf(&message, "Client update required: server tmtv %s requires sharing protocol %d (client %s uses %d). curl -fsSL https://tmtv.se/install.sh | sh",
+		xasprintf(&message, "%s update required: server tmtv %s requires sharing protocol %d (client %s uses %d). curl -fsSL https://tmtv.se/install.sh | sh",
+		    session->client_protocol_version < TMATE_PROTOCOL_VERSION ? "Client" : "Relay",
 		    TMTV_VERSION, TMATE_PROTOCOL_VERSION, session->client_version, session->client_protocol_version);
 		tmate_refuse_client(session, message); free(message); return;
 	}
@@ -1547,6 +1548,7 @@ tmate_snapshot_exact(struct tmate_session *session, struct tmate_unpacker *uk)
 	struct window_pane *wp;
 	msgpack_object object, fields[3] = {0}, *entries, *v, *modes, *m;
 	u_int count, i, j, k, version, id, cost, total = 0, actual = 0, kind, seen;
+	u_int links = 0, images = 0, pixels = 0;
 	struct screen *back;
 	int good = 0;
 	if (session != NULL && (session->client_protocol_version < 8 || !session->layout_ready)) return;
@@ -1565,7 +1567,8 @@ tmate_snapshot_exact(struct tmate_session *session, struct tmate_unpacker *uk)
 	for (i = 0; i < count; i++) {
 		if (entries[i].type != MSGPACK_OBJECT_ARRAY || entries[i].via.array.size != 3) goto done;
 		v = entries[i].via.array.ptr;
-		if (!tmtv_snapshot_pane_validate(v[0], &cost)) goto done;
+		if (!tmtv_snapshot_pane_validate(v[0], &cost) ||
+		    !tmtv_snapshot_media_budget(v[0], &links, &images, &pixels)) goto done;
 		total += cost; id = v[0].via.array.ptr[1].via.u64;
 		wp = window_pane_find_by_id(id);
 		if (wp == NULL || winlink_find_by_window(&s->windows, wp->window) == NULL ||
@@ -1581,7 +1584,8 @@ tmate_snapshot_exact(struct tmate_session *session, struct tmate_unpacker *uk)
 			if (!snapshot_uint(m[0], &kind) || kind < 1 || kind > 3 || (seen & (1U << kind))) goto done;
 			seen |= 1U << kind; plans[i].kinds[j] = kind;
 			if (kind == 3) { if (m[1].type != MSGPACK_OBJECT_NIL || m[2].type != MSGPACK_OBJECT_NIL) goto done; continue; }
-			if (!tmtv_snapshot_pane_validate(m[1], &cost) || m[1].via.array.ptr[1].via.u64 != id ||
+			if (!tmtv_snapshot_pane_validate(m[1], &cost) ||
+			    !tmtv_snapshot_media_budget(m[1], &links, &images, &pixels) || m[1].via.array.ptr[1].via.u64 != id ||
 			    m[1].via.array.ptr[2].via.array.ptr[1].via.u64 != wp->sx ||
 			    m[1].via.array.ptr[2].via.array.ptr[2].via.u64 != wp->sy ||
 			    !snapshot_copy_state(m[2], kind, m[1], &plans[i].copy[j])) goto done;
@@ -1593,7 +1597,8 @@ tmate_snapshot_exact(struct tmate_session *session, struct tmate_unpacker *uk)
 	for (i = 0; i < count; i++) {
 		v = entries[i].via.array.ptr;
 		plans[i].parser = input_snapshot_decode(v[1]);
-		if (plans[i].parser == NULL) goto done;
+		if (plans[i].parser == NULL ||
+		    !input_snapshot_links_validate(plans[i].parser, v[0].via.array.ptr[13])) goto done;
 	}
 	/* Every object is valid before any grid data is interned or installed. */
 	for (i = 0; i < count; i++) {

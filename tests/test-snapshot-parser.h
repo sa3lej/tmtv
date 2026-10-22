@@ -96,3 +96,8 @@ TEST(parser_snapshot_absent_palette_clears_stale_overrides)
 	input_free(target); colour_palette_free(&palette);
 	msgpack_unpacked_destroy(&un); msgpack_sbuffer_destroy(&sb);
 }
+
+TEST(parser_snapshot_preserves_hyperlink_and_saved_link_at_every_split)
+{
+	parser_sequence("\033]8;id=named;https://example.invalid/a\007LINK\0337\033]8;;\007PLAIN\0338RESTORED\033]8;;\007\033]8;;https://example.invalid/anon\007ANON\033]8;;\007");
+}

@@ -967,6 +967,7 @@ main(int argc, char **argv)
 	RUN_TEST(parser_snapshot_preserves_character_sets);
 	RUN_TEST(parser_snapshot_preserves_osc_and_c0_without_replaying);
 	RUN_TEST(parser_snapshot_preserves_partial_dcs);
+	RUN_TEST(parser_snapshot_preserves_hyperlink_and_saved_link_at_every_split);
 	RUN_TEST(parser_snapshot_does_not_read_inert_completed_large_osc);
 	RUN_TEST(parser_snapshot_absent_palette_clears_stale_overrides);
 	RUN_TEST(host_pane_snapshot_preserves_alternate_state_and_exit);

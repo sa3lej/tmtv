@@ -584,7 +584,7 @@ EXTRA_DIST += tests/test-mode-lifecycle.c
 tests/test-relay-tmux.o: tmux.c tmux.h tmate.h server/tmate.h
 	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(tmtv_server_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -Dmain=tmtv_program_main -c $(srcdir)/tmux.c -o $@
 
-tests/test-relay-copy-output.o: tests/test-relay-copy-output.c tests/test-snapshot-wire.h tests/test-layout.h tests/test-snapshot.h tests/test-snapshot-pane.h tests/snapshot-pane-fixture.h tests/snapshot-parser-fixture.h tmate-snapshot.h tmux.h server/tmate.h tmate-layout.h
+tests/test-relay-copy-output.o: tests/test-relay-copy-output.c tests/test-snapshot-media.h tests/test-snapshot-wire.h tests/test-layout.h tests/test-snapshot.h tests/test-snapshot-pane.h tests/snapshot-pane-fixture.h tests/snapshot-parser-fixture.h tmate-snapshot.h tmux.h server/tmate.h tmate-layout.h
 	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(tmtv_server_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c $(srcdir)/tests/test-relay-copy-output.c -o $@
 
 tests/test-relay-main.o: server/tmate-main.c tmux.h server/tmate.h
@@ -594,7 +594,7 @@ tests/test-relay-copy-output: tests/test-relay-copy-output.o tests/test-relay-tm
 	$(AM_V_CCLD)$(CC) $(AM_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@ tests/test-relay-copy-output.o tests/test-relay-tmux.o tests/test-relay-main.o $(filter-out tmtv_server-tmux.o server/tmtv_server-tmate-main.o,$(tmtv_server_OBJECTS)) $(tmtv_server_LDADD) $(LIBS)
 
 CLEANFILES += tests/test-relay-copy-output tests/test-relay-copy-output.o tests/test-relay-tmux.o tests/test-relay-main.o
-EXTRA_DIST += tests/test-relay-copy-output.c tests/test-snapshot-wire.h tests/test-layout.h tests/test-snapshot.h
+EXTRA_DIST += tests/test-relay-copy-output.c tests/test-snapshot-media.h tests/test-snapshot-wire.h tests/test-layout.h tests/test-snapshot.h
 
 EXTRA_DIST += tests/test-core38-commands.py tests/run-tmux38-regress.sh
 EXTRA_DIST += docs/layout-protocol.md

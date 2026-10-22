@@ -22,6 +22,8 @@
 #include <string.h>
 
 #include "tmux.h"
+#include "tmate-snapshot.h"
+#include <limits.h>
 
 #define SIXEL_WIDTH_LIMIT 10000
 #define SIXEL_HEIGHT_LIMIT 10000
@@ -488,7 +490,10 @@ static void
 sixel_print_add(char **buf, size_t *len, size_t *used, const char *s,
     size_t slen)
 {
-	while (*used + slen >= *len + 1) {
+	/* Keep one byte for the final NUL, including an exact-size append. */
+	if (slen > SIZE_MAX - *used - 1) fatalx("sixel output overflow");
+	while (*used + slen >= *len) {
+		if (*len > SIZE_MAX / 2) fatalx("sixel output overflow");
 		*buf = xreallocarray(*buf, 2, *len);
 		(*len) *= 2;
 	}
@@ -607,6 +612,7 @@ sixel_print(struct sixel_image *si, struct sixel_image *map, size_t *size)
 
 	for (i = 0; i < ncolours; i++) {
 		c = colours[i];
+		if (c == 0) continue; /* Undefined palette slot, not colour type 0. */
 		tmplen = xsnprintf(tmp, sizeof tmp, "#%u;%u;%u;%u;%u",
 		    i, c >> 25, (c >> 16) & 0x1ff, (c >> 8) & 0xff, c & 0xff);
 		sixel_print_add(&buf, &len, &used, tmp, tmplen);
@@ -821,4 +827,98 @@ sixel_to_screen(struct sixel_image *si)
 	}
 	screen_write_stop(&ctx);
 	return (s);
+}
+
+/* Lossless bounded bitmap representation. Never parse or replay supplied DCS
+ * strings: a compact malicious repeat could otherwise expand before limits. */
+static int
+sixel_snap_uint(msgpack_object o, u_int max, u_int *n)
+{
+	if (o.type != MSGPACK_OBJECT_POSITIVE_INTEGER || o.via.u64 > max) return (0);
+	*n = o.via.u64; return (1);
+}
+int
+sixel_snapshot_validate(msgpack_object o, u_int *pixels)
+{
+	msgpack_object *v, *rows, *colours;
+	u_int n[10], i, j, c, type, a, b, d, px;
+	if (o.type != MSGPACK_OBJECT_ARRAY || o.via.array.size != 12) return (0);
+	v = o.via.array.ptr;
+	for (i = 0; i < 10; i++) if (!sixel_snap_uint(v[i], INT_MAX, &n[i])) return (0);
+	if (n[0] != 1 || !n[1] || n[1] > SIXEL_WIDTH_LIMIT || !n[2] || n[2] > SIXEL_HEIGHT_LIMIT ||
+	    (uint64_t)n[1] * n[2] > TMTV_SNAPSHOT_MAX_PIXELS ||
+	    !n[3] || n[3] > WINDOW_MAXIMUM || !n[4] || n[4] > WINDOW_MAXIMUM ||
+	    n[6] > 1 || n[7] > SIXEL_WIDTH_LIMIT || n[8] > SIXEL_HEIGHT_LIMIT ||
+	    n[9] > SIXEL_COLOUR_REGISTERS + 1 ||
+	    v[10].type != MSGPACK_OBJECT_ARRAY || v[10].via.array.size > n[9] ||
+	    v[11].type != MSGPACK_OBJECT_ARRAY || v[11].via.array.size != n[2]) return (0);
+	colours = v[10].via.array.ptr;
+	for (i = 0; i < v[10].via.array.size; i++) {
+		if (!sixel_snap_uint(colours[i], INT_MAX, &c)) return (0);
+		if (!c) continue;
+		type = c >> 25; a = (c >> 16) & 0x1ff; b = (c >> 8) & 0xff; d = c & 0xff;
+		if ((type != 1 && type != 2) || a > (type == 1 ? 360U : 100U) || b > 100 || d > 100 ||
+		    c != ((type << 25) | (a << 16) | (b << 8) | d)) return (0);
+	}
+	rows = v[11].via.array.ptr;
+	for (i = 0; i < n[2]; i++) {
+		if (rows[i].type != MSGPACK_OBJECT_BIN || rows[i].via.bin.size != n[1] * 2) return (0);
+		for (j = 0; j < rows[i].via.bin.size; j += 2) {
+			px = ((u_char)rows[i].via.bin.ptr[j] << 8) | (u_char)rows[i].via.bin.ptr[j+1];
+			if (px > n[9]) return (0);
+		}
+	}
+	if (pixels != NULL) *pixels = n[1] * n[2];
+	return (1);
+}
+
+int
+sixel_snapshot_encode(struct sixel_image *si, msgpack_packer *pk)
+{
+	u_char row[SIXEL_WIDTH_LIMIT * 2];
+	u_int x, y, c;
+	if (si == NULL || !si->x || si->x > SIXEL_WIDTH_LIMIT || !si->y || si->y > SIXEL_HEIGHT_LIMIT ||
+	    (uint64_t)si->x * si->y > TMTV_SNAPSHOT_MAX_PIXELS ||
+	    !si->xpixel || si->xpixel > WINDOW_MAXIMUM || !si->ypixel || si->ypixel > WINDOW_MAXIMUM ||
+	    si->ncolours > SIXEL_COLOUR_REGISTERS + 1 || si->used_colours > SIXEL_COLOUR_REGISTERS + 1) return (-1);
+#define SXPACK(type, val) do { if (msgpack_pack_##type(pk, val)) return (-1); } while (0)
+	SXPACK(array, 12); SXPACK(int, 1); SXPACK(unsigned_int, si->x); SXPACK(unsigned_int, si->y);
+	SXPACK(unsigned_int, si->xpixel); SXPACK(unsigned_int, si->ypixel); SXPACK(unsigned_int, si->p2);
+	SXPACK(unsigned_int, si->set_ra); SXPACK(unsigned_int, si->ra_x); SXPACK(unsigned_int, si->ra_y);
+	SXPACK(unsigned_int, si->used_colours); SXPACK(array, si->ncolours);
+	for (x = 0; x < si->ncolours; x++) SXPACK(unsigned_int, si->colours[x]);
+	SXPACK(array, si->y);
+	for (y = 0; y < si->y; y++) {
+		for (x = 0; x < si->x; x++) {
+			c = sixel_get_pixel(si, x, y); row[2*x] = c >> 8; row[2*x+1] = c;
+		}
+		SXPACK(bin, si->x * 2);
+		if (msgpack_pack_bin_body(pk, row, si->x * 2)) return (-1);
+	}
+	return (0);
+#undef SXPACK
+}
+
+struct sixel_image *
+sixel_snapshot_decode(msgpack_object o)
+{
+	struct sixel_image *si;
+	msgpack_object *v, row;
+	u_int x, y;
+	if (!sixel_snapshot_validate(o, NULL)) return (NULL);
+	v = o.via.array.ptr; si = xcalloc(1, sizeof *si);
+	si->x = v[1].via.u64; si->y = v[2].via.u64;
+	si->xpixel = v[3].via.u64; si->ypixel = v[4].via.u64; si->p2 = v[5].via.u64;
+	si->set_ra = v[6].via.u64; si->ra_x = v[7].via.u64; si->ra_y = v[8].via.u64;
+	si->used_colours = v[9].via.u64; si->ncolours = v[10].via.array.size;
+	if (si->ncolours) si->colours = xcalloc(si->ncolours, sizeof *si->colours);
+	for (x = 0; x < si->ncolours; x++) si->colours[x] = v[10].via.array.ptr[x].via.u64;
+	si->lines = xcalloc(si->y, sizeof *si->lines);
+	for (y = 0; y < si->y; y++) {
+		row = v[11].via.array.ptr[y];
+		si->lines[y].x = si->x; si->lines[y].data = xcalloc(si->x, sizeof *si->lines[y].data);
+		for (x = 0; x < si->x; x++) si->lines[y].data[x] =
+		    ((u_char)row.via.bin.ptr[2*x] << 8) | (u_char)row.via.bin.ptr[2*x+1];
+	}
+	return (si);
 }

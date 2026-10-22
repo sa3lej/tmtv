@@ -219,7 +219,7 @@ void tmate_layout_capability_timeout(__unused evutil_socket_t fd,
 	if (session->layout_failed || (session->layout_capability &&
 	    (!session->snapshot_required || session->snapshot_capability))) return;
 	message = session->layout_capability ?
-	    "Relay update required: reconnect snapshot protocol v1 is unsupported" :
+	    "Relay update required: reconnect snapshot protocol v2 is unsupported" :
 	    "Relay update required: exact layout protocol v2 is unsupported";
 	tmate_set_env(session, "tmtv_layout_error", message);
 	tmate_snapshot_error(session, message);

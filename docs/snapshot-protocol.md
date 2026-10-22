@@ -1,7 +1,7 @@
 # Negotiated reconnect snapshots
 
-Protocol 8 requires exact layout capability `2` and reconnect snapshot capability
-`1`. Both host and relay must be upgraded. These codecs are active on initial
+Protocol 9 requires exact layout capability `2` and reconnect snapshot capability
+`2`. Both host and relay must be upgraded. These codecs are active on initial
 sharing and host reconnect; there is no lossy legacy fallback for a new peer.
 
 The legacy snapshot conflates text bytes with cells and truncates style fields.
@@ -15,10 +15,10 @@ host-selected widths rather than recomputing widths using relay locale tables.
 MessagePack arrays (all integers nonnegative):
 
 ```
-grid = [1, width, height, history_count, scrolled_count, grid_flags, rows]
+grid = [2, width, height, history_count, scrolled_count, grid_flags, rows]
 row  = [used_cell_count, line_flags, osc133, cells]
 osc133 = [prompt_column, command_column, output_start, output_end, exit_status]
-cell = [BIN utf8_bytes, width, flags, attributes, foreground, background, underline]
+cell = [BIN utf8_bytes, width, flags, attributes, foreground, background, underline, link_reference]
 ```
 
 Dimensions and row lengths are explicit. History rows precede visible rows.
@@ -48,20 +48,24 @@ data. Failed encoding appends no bytes to the caller's buffer.
   the current screen width. Encoded output is at most 16 MiB including bytes
   already in the destination buffer. The pane envelope enforces these limits
   across the complete pair of grids, rather than independently per grid.
-- Hyperlink handles are process-local. A grid containing a nonzero link handle
-  is rejected, rather than silently copied or stripped. Portable hyperlink tables
-  need a separate representation before those grids can use this codec.
-- SIXEL/image lists belong to screens, not grids; this codec carries no image
-  payload and makes no image-reconnect preservation claim. The pane envelope
-  explicitly rejects active or saved image state.
+- Links use screen-scoped tables with at most 4999 entries across the entire
+  frame, including independent mode backings. References are validated against
+  their owning table, never resolved through a receiver's old table. Tables are
+  decoded detached from the global eviction list; commit assigns fresh terminal
+  external IDs. Named URI/ID pairs are unique; anonymous links remain distinct.
+- SIXEL uses bounded decoded pixels rather than supplied DCS strings. Up to 19
+  images and 8,388,608 pixels are allowed across current/saved/backing screens,
+  also subject to the complete 16 MiB encoded-frame cap. Both peers must have
+  SIXEL enabled to accept nonempty image lists. A build lacking it refuses them.
 - Colour identifiers are preserved; theme definitions, terminal capabilities and
   actual browser rendering are separate session/viewer concerns.
 
-## Pane-screen envelope, version 2
+## Pane-screen envelope, version 3
 
 ```
-pane = [2, pane_id, current_grid, cursor, modes, cursor_style, scroll_region,
-        tabs, saved_grid_or_nil, saved_cursor, saved_cell_or_nil, saved_flags, metadata]
+pane = [3, pane_id, current_grid, cursor, modes, cursor_style, scroll_region,
+        tabs, saved_grid_or_nil, saved_cursor, saved_cell_or_nil, saved_flags, metadata,
+        links, current_images, saved_images]
 cursor = [x, y]
 modes = [current_mode, default_mode]
 cursor_style = [current_style, default_style, current_colour, default_colour]
@@ -70,6 +74,11 @@ tabs = [sorted_unique_column_indices]
 saved_cursor = [x, y]
 metadata = [BIN title, BIN path_or_nil, [progress_state, progress], title_stack]
 title_stack = [BIN most_recent_saved_title, ...]
+links = [[positive_reference, BIN normalized_uri, BIN normalized_internal_id], ...]
+images = [[column, row, bitmap], ...]
+bitmap = [1, width, height, cell_pixel_width, cell_pixel_height, p2,
+          has_raster_attributes, raster_width, raster_height, used_colours,
+          [colour_register, ...], [BIN big_endian_uint16_pixel_row, ...]]
 ```
 
 The two grids share one 262,144 allocation-cell budget and one 16 MiB envelope
@@ -86,9 +95,21 @@ only base-screen grid/cursor/mode/scroll/tab/saved state; the pane and screen
 objects, mode stack and independently owned copy/view backing remain intact.
 Old queued screen writes are discarded before replacing their grids. Old sync
 state is cancelled; a restored synchronized-output mode gets a fresh timeout.
-A source containing current/saved SIXEL images or nonportable hyperlink handles
-is explicitly rejected, with no partial append. Applying a validated image-free
-snapshot disposes of stale base-screen images, including saved alternate images.
+Grid and saved-style references must exist in the screen's link table. URI and
+internal ID strings preserve their already normalized values without a second
+escape pass; UTF-8 and control characters are validated before use. URI strings
+are at most 1024 bytes, internal IDs at most 64 KiB, table references at most
+INT_MAX and strictly increasing. Reference zero means no link.
+
+Bitmaps preserve transparent pixels (index zero), palette registers, p2, raster
+attributes and original cell pixel geometry. Dimensions are 1..10000, each row
+has exactly width*2 bytes and every pixel index fits the declared used-colour
+range. Registers preserve undefined slots or valid HLS/RGB definitions. No raw
+host DCS is replayed: the receiver regenerates terminal output from validated
+pixels. Image plans remain outside global image ownership until commit. Applying
+an image-free snapshot disposes of stale current and saved alternate images.
+These global cache limits deliberately count duplicated tables/backings; an
+excessive frame is refused rather than evicting part of its new state.
 
 Titles, path and the ten-entry title stack are bounded to 16 KiB per string;
 embedded NUL is rejected. Progress is -1 or 0..100, with state 0..4.
@@ -96,7 +117,7 @@ embedded NUL is rejected. Progress is -1 or 0..100, with state 0..4.
 ## Parser continuation and all-pane frame
 
 ```
-frame = [20, 1, [[pane, parser, modes], ...]]
+frame = [20, 2, [[pane, parser, modes], ...]]
 modes = [[1_or_2, backing_pane, copy_state], [3, nil, nil], ...]
 copy_state = [scroll_offset, cursor_x, cursor_y, selection, selection_x,
               selection_distance_from_bottom, rectangle]
@@ -108,7 +129,7 @@ frozen selection remains separate. Backing history expands beyond the default
 100 rows to include the viewport and selected line, up to 2000 rows; an excessive
 selection or unknown mode is refused explicitly.
 
-Parser version 1 contains current and DECSC-saved cell styles/character sets,
+Parser version 2 contains current and DECSC-saved cell styles/character sets,
 saved cursor/origin mode, a portable state-table index, intermediate/raw parameter
 buffers, collected OSC/DCS bytes and terminator, parsed parameters, partial UTF-8,
 last character for REP, flags, pending control-client bytes and palette overrides.
@@ -131,7 +152,7 @@ frames replace screens and parser state together, then restore mode stacks.
 
 ## Required-upgrade handshake
 
-The relay advertises `tmtv_snapshot_capability=1` and
+The relay advertises `tmtv_snapshot_capability=2` and
 `tmtv_layout_capability=2`. The host withholds PTY/mode traffic and READY until
 both capabilities arrive, then sends exact layout and the complete snapshot.
 The relay withholds sharing URLs until it has both valid layout and snapshot.
@@ -156,5 +177,9 @@ Validation uses full production host/relay objects, every-byte parser split
 points, malformed frame mutations and authenticated isolated SSH/SSE viewers.
 RGB foreground/background, italics, strike, combining/wide Unicode and partial
 CSI/UTF-8 continuations are parsed through real reconnects. Browser DOM rendering,
-other terminal attributes, full-fidelity SIXEL, portable hyperlink tables and
-supported-platform validation remain separate work.
+other terminal attributes, terminal capability discovery and supported-platform
+validation remain separate work. Production-object tests cover portable link
+namespaces, active parser links, current/saved SIXEL pixels/palettes, resource
+limits and atomic malformed-media rejection. SSH/SSE tests additionally inspect
+real renderer OSC 8/DCS output across reconnect and alternate-screen exit. This
+is transport evidence, not browser clickability or pixel-canvas verification.

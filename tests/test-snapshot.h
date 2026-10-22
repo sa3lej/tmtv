@@ -127,7 +127,7 @@ snapshot_bad(int which)
 	c = row[3].via.array.ptr[0].via.array.ptr;
 	pad = row[3].via.array.ptr[2].via.array.ptr;
 	switch (which) {
-	case 0: v[0].via.u64 = 2; break;
+	case 0: v[0].via.u64 = TMTV_SNAPSHOT_GRID_VERSION + 1; break;
 	case 1: v[1].via.u64 = 0; break;
 	case 2: v[2].via.u64 = UINT64_MAX; break;
 	case 3: v[3].via.u64 = 2001; break;
@@ -228,7 +228,7 @@ TEST(snapshot_rejected_encode_preserves_destination)
 	msgpack_sbuffer sb;
 	msgpack_sbuffer_init(&sb);
 	msgpack_sbuffer_write(&sb, "KEEP", 4);
-	gc.link = 42; grid_set_cell(source, 0, 0, &gc);
+	gc.link = UINT_MAX; grid_set_cell(source, 0, 0, &gc);
 	ASSERT_EQ(tmtv_snapshot_grid_encode(source, 0, &sb), -1);
 	ASSERT_EQ(sb.size, 4); ASSERT(memcmp(sb.data, "KEEP", 4) == 0);
 	gc.link = 0; utf8_set(&gc.data, '\033'); grid_set_cell(source, 0, 0, &gc);

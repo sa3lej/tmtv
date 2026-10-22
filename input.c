@@ -3860,7 +3860,7 @@ input_snapshot_decode(msgpack_object o)
 	colour_palette_init(&p->palette);
 	if (!input_snap_array(o, 15)) goto bad;
 	v = o.via.array.ptr;
-	if (!input_snap_number(v[0], 1, &version) || version != 1 ||
+	if (!input_snap_number(v[0], 2, &version) || version != 2 ||
 	    !input_snap_cell(v[1], &s->cell) || !input_snap_cell(v[2], &s->old_cell) ||
 	    !input_snap_array(v[3], 3) || !input_snap_number(v[4], nitems(input_snapshot_states)-1, &state) ||
 	    !input_snap_bin(v[5], 3) || !input_snap_bin(v[6], 63) ||
@@ -3923,11 +3923,11 @@ input_snapshot_decode(msgpack_object o)
 		if (!input_snap_number(param[1], 2, &n)) goto bad;
 		/* Reuse strict UTF-8 validation with a harmless logical width. */
 		{
-			msgpack_object fields[7] = {0}, cell;
+			msgpack_object fields[8] = {0}, cell;
 			fields[0] = param[0];
-			for (j = 1; j < 7; j++) fields[j].type = MSGPACK_OBJECT_POSITIVE_INTEGER;
+			for (j = 1; j < 8; j++) fields[j].type = MSGPACK_OBJECT_POSITIVE_INTEGER;
 			fields[1].via.u64 = 1; fields[4].via.u64 = fields[5].via.u64 = fields[6].via.u64 = 8;
-			cell.type = MSGPACK_OBJECT_ARRAY; cell.via.array.ptr = fields; cell.via.array.size = 7;
+			cell.type = MSGPACK_OBJECT_ARRAY; cell.via.array.ptr = fields; cell.via.array.size = 8;
 			if (!tmtv_snapshot_cell_decode(cell, &last)) goto bad;
 		}
 		s->last = last.data; s->last.width = n;
@@ -3976,7 +3976,7 @@ input_snapshot_encode(struct input_ctx *s, msgpack_sbuffer *out)
 	msgpack_sbuffer_init(&sb); msgpack_packer_init(&pk, &sb, input_snap_write);
 #define IPACK(type, ...) do { if (msgpack_pack_##type(&pk, ##__VA_ARGS__)) goto done; } while (0)
 #define IBIN(ptr, len) do { IPACK(bin, len); if ((len) && msgpack_pack_bin_body(&pk, ptr, len)) goto done; } while (0)
-	IPACK(array, 15); IPACK(int, 1);
+	IPACK(array, 15); IPACK(int, 2);
 	for (i = 0; i < 2; i++) {
 		c = i ? &s->old_cell : &s->cell; gc = c->cell; gc.data = grid_default_cell.data;
 		IPACK(array, 4); if (tmtv_snapshot_cell_encode(&gc, &pk)) goto done;
@@ -4044,4 +4044,12 @@ input_snapshot_apply(struct input_ctx *t, struct input_snapshot *p)
 		p->palette.palette = p->palette.default_palette = NULL;
 	}
 	if (t->state != &input_state_ground) input_start_ground_timer(t);
+}
+
+/* Parser styles reference the base screen's wire-local hyperlink table. */
+int
+input_snapshot_links_validate(struct input_snapshot *p, msgpack_object table)
+{
+	return (p != NULL && hyperlinks_snapshot_has(table, p->state.cell.cell.link) &&
+	    hyperlinks_snapshot_has(table, p->state.old_cell.cell.link));
 }

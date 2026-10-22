@@ -1452,6 +1452,7 @@ TEST(host_encoder_output_routes_without_feedback)
 #include "test-layout.h"
 #include "test-snapshot.h"
 #include "test-snapshot-pane.h"
+#include "test-snapshot-media.h"
 #include "test-snapshot-wire.h"
 
 int
@@ -1517,6 +1518,20 @@ main(int argc, char **argv)
 		RUN_TEST(pane_snapshot_clears_stale_current_and_saved_image_owners);
 #endif
 		RUN_TEST(wire_snapshot_aggregate_byte_and_nesting_bounds);
+		RUN_TEST(media_snapshot_frozen_mode_uses_its_own_link_table);
+		RUN_TEST(media_snapshot_aggregate_cache_bounds_are_explicit);
+#ifdef ENABLE_SIXEL
+		RUN_TEST(media_snapshot_image_fields_and_pixel_indices_are_bounded);
+		RUN_TEST(media_snapshot_canonical_sixel_reserves_exact_buffer_terminator);
+#endif
+		RUN_TEST(media_snapshot_links_survive_table_replacement_and_alternate_screen);
+		RUN_TEST(media_snapshot_rejects_dangling_duplicate_and_control_links);
+		RUN_TEST(media_snapshot_detached_links_do_not_evict_live_links);
+#ifdef ENABLE_SIXEL
+		RUN_TEST(media_snapshot_images_preserve_pixels_palette_and_saved_state);
+		RUN_TEST(media_snapshot_rejects_malformed_image_before_install);
+#endif
+		RUN_TEST(wire_snapshot_media_is_atomic_in_bulk_and_bytewise_transport);
 		RUN_TEST(wire_snapshot_installs_all_panes_and_partial_parser);
 		RUN_TEST(wire_snapshot_malformed_fields_are_atomic_and_keep_boundaries);
 		RUN_TEST(pane_snapshot_saved_dimensions_survive_alternate_resize);

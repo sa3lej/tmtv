@@ -794,8 +794,9 @@ tmate_snapshot_encode(struct session *s, msgpack_sbuffer *out)
 	struct screen *backing, capture;
 	msgpack_unpacked un;
 	msgpack_object *entries, *entry, *modes, *mode;
-	u_int count = 0, nm, kind, history, i, j, cost, total = 0;
+	u_int count = 0, nm, kind, history, i, j, cost, total = 0, links = 0, images = 0, pixels = 0;
 	int ok = 0;
+	struct input_snapshot *parser;
 	if (s == NULL) return (-1);
 	RB_FOREACH(wl, winlinks, &s->windows) if (tmtv_layout_first_link(s, wl))
 		TAILQ_FOREACH(wp, &wl->window->panes, entry) count++;
@@ -840,13 +841,20 @@ tmate_snapshot_encode(struct session *s, msgpack_sbuffer *out)
 		entries = un.data.via.array.ptr[2].via.array.ptr;
 		for (i = 0; i < count; i++) {
 			entry = entries[i].via.array.ptr;
-			if (!tmtv_snapshot_pane_validate(entry[0], &cost)) break;
+			if (!tmtv_snapshot_pane_validate(entry[0], &cost) ||
+			    !tmtv_snapshot_media_budget(entry[0], &links, &images, &pixels)) break;
+			parser = input_snapshot_decode(entry[1]);
+			if (parser == NULL) break;
+			int valid_links = input_snapshot_links_validate(parser, entry[0].via.array.ptr[13]);
+			input_snapshot_free(parser);
+			if (!valid_links) break;
 			total += cost;
 			modes = entry[2].via.array.ptr;
 			for (j = 0; j < entry[2].via.array.size; j++) {
 				mode = modes[j].via.array.ptr;
 				if (mode[1].type == MSGPACK_OBJECT_NIL) continue;
-				if (!tmtv_snapshot_pane_validate(mode[1], &cost)) break;
+				if (!tmtv_snapshot_pane_validate(mode[1], &cost) ||
+				    !tmtv_snapshot_media_budget(mode[1], &links, &images, &pixels)) break;
 				total += cost;
 			}
 			if (j != entry[2].via.array.size || total > TMTV_SNAPSHOT_MAX_CELLS) break;

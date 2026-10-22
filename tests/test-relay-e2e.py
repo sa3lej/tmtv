@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import shlex
 import socket
@@ -23,6 +24,7 @@ import time
 
 import msgpack
 import pyte
+from wcwidth import wcwidth
 
 ROOT = Path("/tmp/e2e")
 SOCKET = str(ROOT / "host.sock")
@@ -124,6 +126,24 @@ def request(method, path, data=None, headers=None):
 
 
 class Screen(pyte.Screen):
+    @property
+    def display(self):
+        # pyte leaves an empty wide-character stub when later narrow text
+        # overwrites its leading cell. Real terminals clear that orphan to a
+        # space; pyte's display property instead indexes char[0] and crashes.
+        result = []
+        for y in range(self.lines):
+            chars, skip = [], False
+            for x in range(self.columns):
+                if skip:
+                    skip = False
+                    continue
+                text = self.buffer[y][x].data
+                chars.append(text or " ")
+                skip = bool(text) and wcwidth(text[0]) == 2
+            result.append("".join(chars))
+        return result
+
     # tmux queries DEC private cursor status; this passive test decoder does
     # not emulate terminal replies. pyte otherwise rejects the private flag.
     def report_device_status(self, mode, **kwargs):
@@ -134,6 +154,8 @@ class Screen(pyte.Screen):
 class Viewer:
     def __init__(self, token, web=False, local=False):
         self.web = web
+        self.raw = bytearray()
+        self.text_pending = bytearray()
         # SSE's composed virtual PTY includes the host's 30 rows plus its
         # relay status row. SSH declares a 30-row physical terminal below.
         self.screen = Screen(100, 31 if web else 30)
@@ -162,7 +184,37 @@ class Viewer:
             os.close(slave)
 
     def feed(self, data):
-        self.terminal.feed(self.decoder.decode(data))
+        self.raw.extend(data)
+        if len(self.raw) > 4 * 1024 * 1024:
+            del self.raw[:-4 * 1024 * 1024]
+        # pyte implements text terminal state but not OSC 8 or SIXEL. Keep
+        # complete control strings in raw for dedicated assertions, and remove
+        # only these two unsupported controls from its text input. Buffer across
+        # transport chunks so their contents never become spurious text.
+        self.text_pending.extend(data)
+        source, output, offset = self.text_pending, bytearray(), 0
+        while offset < len(source):
+            if source[offset] != 27:
+                output.append(source[offset]); offset += 1; continue
+            if offset + 1 == len(source):
+                break
+            kind = source[offset + 1]
+            if kind in (ord("P"), ord("]")):
+                end = source.find(b"\x1b\\", offset + 2)
+                step = 2
+                bel = source.find(b"\x07", offset + 2) if kind == ord("]") else -1
+                if bel >= 0 and (end < 0 or bel < end):
+                    end, step = bel, 1
+                if end < 0:
+                    break
+                if kind == ord("]") and not source[offset + 2:end].startswith(b"8;"):
+                    output.extend(source[offset:end + step])
+                offset = end + step
+                continue
+            output.append(source[offset]); offset += 1
+        del source[:offset]
+        assert len(source) <= 4 * 1024 * 1024, "unterminated test control string"
+        self.terminal.feed(self.decoder.decode(output))
 
     def pump(self):
         while select.select([self.fd], [], [], .01)[0]:
@@ -268,7 +320,13 @@ set -g invalid-option-E2E_VIEW yes
             os.close(master)
         sessions = Path("/tmp/tmtv/sessions")
         if os.environ.get("TMTV_E2E_EXPECT_LAYOUT_REJECTION") == "1":
-            wait_for(lambda: "Relay update required" in host("display-message", "-p", "#{tmtv_layout_error}"), "unsupported relay reports required update")
+            def relay_refused():
+                notice = host("display-message", "-p", "#{tmtv_snapshot_error}|#{tmtv_layout_error}")
+                # Older relays used "Client update required" for either
+                # direction. Require their explicit protocol mismatch too.
+                return ("Relay update required" in notice or
+                        ("requires sharing protocol" in notice and "uses 9" in notice))
+            wait_for(relay_refused, "unsupported relay reports required update")
             assert host("display-message", "-p", "#{tmtv_ssh}|#{tmtv_web}") == "|"
             assert "e2e" not in [p.name for p in sessions.iterdir()]
             host("send-keys", "-l", "printf 'LOCAL_STILL_WORKS\\n'")
@@ -279,7 +337,7 @@ set -g invalid-option-E2E_VIEW yes
         if os.environ.get("TMTV_E2E_EXPECT_HOST_REJECTION") == "1":
             # Use the genuine previous host binary. Its normal NOTIFY handler
             # must see the notice while the SSH channel is still alive.
-            wait_for(lambda: "Client update required" in host("display-message", "-p", "#{tmtv_update_required}"), "old host receives update-required response")
+            wait_for(lambda: "Client update required" in host("display-message", "-p", "#{tmtv_snapshot_error}"), "old host receives update-required response")
             old_local = Viewer(None, local=True)
             local_viewers.append(old_local)
             old_local.sees("Client update required")
@@ -511,6 +569,61 @@ set -g invalid-option-E2E_VIEW yes
             viewer.sees("UTF8_PREFIX_\u754c_UTF8_COMPLETE")
         print("PASS partial multibyte UTF-8 resumes after reconnect without replacement or duplicated bytes", flush=True)
 
+        # OSC 8 is a semantic screen attribute, not replayed application input.
+        # The owned web terminal advertises support. SSH terminals without OSC 8
+        # capability retain the text; their optional hyperlink capability is not
+        # fabricated by this fixture.
+        link = b"https://example.invalid/reconnect-link"
+        emit_terminal(b"\x1b[0m\x1b[2J\x1b[H\x1b]8;id=fixture;" + link + b"\x1b\\LINK_SNAPSHOT")
+        for viewer in viewers:
+            viewer.sees("LINK_SNAPSHOT")
+            if viewer.web:
+                wait_for(lambda: link in viewer.raw, "web emits OSC 8 before reconnect")
+        def link_matches(v):
+            v.pump()
+            return "LINK_SNAPSHOT" in v.text() and (not v.web or link in v.raw)
+        reconnect_host(link_matches, "hyperlink restored from portable table")
+        for viewer in viewers:
+            viewer.raw.clear()
+        emit_terminal(b"_LINK_CONTINUED\x1b]8;;\x1b\\")
+        for viewer in viewers:
+            viewer.sees("_LINK_CONTINUED")
+            if viewer.web:
+                wait_for(lambda: link in viewer.raw, "active parser hyperlink survives reconnect")
+        print("PASS portable hyperlink tables and active link continuation survive SSH/SSE reconnect; web emits OSC 8", flush=True)
+
+        red = b"\x1bP0;1q\"1;1;3;6#0;2;100;0;0~\x1b\\"
+        green = b"\x1bP0;1q\"1;1;3;6#0;2;0;100;0~\x1b\\"
+        def has_image(v, colour):
+            v.pump()
+            # Pixel rows, palette and transparency are checked by production
+            # codec tests; here require genuine complete renderer DCS output.
+            # Live output may be rescaled to the viewer's cell pixels, so a
+            # six-pixel column ('~') can become a shorter nonempty column.
+            return any(colour in image and re.search(rb"[@-~][-$]*$", image) for image in
+                       re.findall(rb"\x1bP[0-9;]*q(.*?)\x1b\\", bytes(v.raw), re.S))
+        emit_terminal(b"\x1b[2J\x1b[HBASE_IMAGE_STATE\x1b[3;5H" + red)
+        for viewer in viewers:
+            if viewer.web:
+                wait_for(lambda: has_image(viewer, b"#0;2;100;0;0"), "SIXEL-capable web renderer sends red image")
+        reconnect_host(lambda v: "BASE_IMAGE_STATE" in v.text() and has_image(v, b"#0;2;100;0;0"),
+                       "SIXEL image restored from pixels")
+        print("PASS current SIXEL bitmap survives actual SSH/SSE host reconnect", flush=True)
+        emit_terminal(b"\x1b[?1049h\x1b[HALT_IMAGE_STATE\x1b[3;5H" + green)
+        for viewer in viewers:
+            if viewer.web:
+                wait_for(lambda: has_image(viewer, b"#0;2;0;100;0"), "SIXEL-capable alternate screen green image")
+        reconnect_host(lambda v: "ALT_IMAGE_STATE" in v.text() and has_image(v, b"#0;2;0;100;0"),
+                       "alternate SIXEL and saved normal screen restored")
+        for viewer in viewers:
+            viewer.raw.clear()
+        emit_terminal(b"\x1b[?1049l")
+        for viewer in viewers:
+            wait_for(lambda: "BASE_IMAGE_STATE" in viewer.text() and has_image(viewer, b"#0;2;100;0;0"),
+                     "saved normal SIXEL returns after alternate exit")
+        emit_terminal(b"\x1b[2J\x1b[H")
+        print("PASS saved and alternate SIXEL owners survive reconnect and alternate-screen exit", flush=True)
+
         # Same rectangles and active pane, different stacking order. This was
         # invisible to the legacy layout hash. Observe composed terminal output.
         base = host("display-message", "-p", "#{pane_id}")
@@ -593,7 +706,7 @@ set -g invalid-option-E2E_VIEW yes
             viewers.append(viewer)
             viewer.sees("LATE_VIEWER_READY")
         print("PASS fresh SSH/SSE RO viewers reconstruct the current screen", flush=True)
-        print("23 end-to-end checks passed; browser DOM, other terminal attributes, full-fidelity SIXEL and platforms remain separate coverage.", flush=True)
+        print("26 end-to-end checks passed; browser DOM, terminal capability discovery, other attributes and platforms remain separate coverage.", flush=True)
     except BaseException:
         with open(ROOT / "diagnostics.log", "w") as out:
             out.write("session entries: " + repr([p.name for p in Path('/tmp/tmtv/sessions').iterdir()]) + "\n")
@@ -603,6 +716,7 @@ set -g invalid-option-E2E_VIEW yes
             for viewer in viewers:
                 out.write("viewer cursor: " + repr((viewer.screen.cursor.x, viewer.screen.cursor.y)) + "\n")
                 out.write("viewer screen:\n" + viewer.text() + "\n")
+                out.write("viewer raw tail: " + repr(bytes(viewer.raw[-8192:])) + "\n")
             out.write(subprocess.run(["tmtv", "-S", SOCKET, "show-messages"], capture_output=True, text=True, timeout=3).stdout)
             for path in ROOT.glob("*.log"):
                 if path.name != 'diagnostics.log':

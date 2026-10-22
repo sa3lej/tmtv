@@ -36,8 +36,8 @@ tmtv_snapshot_colour(u_int c)
  * A cell may contain several scalars (combining marks, variation selectors,
  * ZWJ emoji). Its width belongs to the host. Control bytes never enter a tty.
  */
-static int
-text(const u_char *s, u_int n)
+int
+tmtv_snapshot_text(const u_char *s, u_int n)
 {
 	u_int i = 0, c, more, min;
 	while (i < n) {
@@ -62,8 +62,8 @@ int
 tmtv_snapshot_cell_decode(msgpack_object o, struct grid_cell *gc)
 {
 	msgpack_object *v;
-	u_int width, flags, attr, fg, bg, us, size;
-	if (!array(o, 7)) return (0);
+	u_int width, flags, attr, fg, bg, us, size, link;
+	if (!array(o, 8)) return (0);
 	v = o.via.array.ptr;
 	if (v[0].type != MSGPACK_OBJECT_BIN || v[0].via.bin.size > TMTV_SNAPSHOT_MAX_UTF8 ||
 	    !number(v[1], UTF8_SIZE, &width) ||
@@ -71,16 +71,17 @@ tmtv_snapshot_cell_decode(msgpack_object o, struct grid_cell *gc)
 	    !number(v[3], 0x7fff, &attr) ||
 	    !number(v[4], INT_MAX, &fg) || !tmtv_snapshot_colour(fg) ||
 	    !number(v[5], INT_MAX, &bg) || !tmtv_snapshot_colour(bg) ||
-	    !number(v[6], INT_MAX, &us) || !tmtv_snapshot_colour(us)) return (0);
+	    !number(v[6], INT_MAX, &us) || !tmtv_snapshot_colour(us) ||
+	    !number(v[7], INT_MAX, &link)) return (0);
 	size = v[0].via.bin.size;
 	if (flags & GRID_FLAG_PADDING) {
 		if (width || size || (flags & GRID_FLAG_TAB)) return (0);
 	} else if (flags & GRID_FLAG_TAB) {
 		if (width == 0 || size) return (0);
 	} else if (width == 0 || width > 2 ||
-	    !text((const u_char *)v[0].via.bin.ptr, size)) return (0);
+	    !tmtv_snapshot_text((const u_char *)v[0].via.bin.ptr, size)) return (0);
 	memset(gc, 0, sizeof *gc);
-	gc->flags = flags; gc->attr = attr;
+	gc->flags = flags; gc->attr = attr; gc->link = link;
 	gc->fg = fg; gc->bg = bg; gc->us = us;
 	gc->data.width = width;
 	gc->data.size = gc->data.have = size;
@@ -265,14 +266,14 @@ int
 tmtv_snapshot_cell_encode(const struct grid_cell *gc, msgpack_packer *pk)
 {
 	u_int n = gc->flags & (GRID_FLAG_TAB|GRID_FLAG_PADDING) ? 0 : gc->data.size;
-	if (gc->link || n > TMTV_SNAPSHOT_MAX_UTF8) return (-1);
-	if (msgpack_pack_array(pk, 7) || msgpack_pack_bin(pk, n) ||
+	if (gc->link > INT_MAX || n > TMTV_SNAPSHOT_MAX_UTF8) return (-1);
+	if (msgpack_pack_array(pk, 8) || msgpack_pack_bin(pk, n) ||
 	    (n && msgpack_pack_bin_body(pk, gc->data.data, n)) ||
 	    msgpack_pack_unsigned_int(pk, gc->flags & GRID_FLAG_PADDING ? 0 : gc->data.width) ||
 	    msgpack_pack_unsigned_int(pk, gc->flags & CELL_FLAGS) ||
 	    msgpack_pack_unsigned_int(pk, gc->attr) ||
 	    msgpack_pack_int(pk, gc->fg) || msgpack_pack_int(pk, gc->bg) ||
-	    msgpack_pack_int(pk, gc->us)) return (-1);
+	    msgpack_pack_int(pk, gc->us) || msgpack_pack_unsigned_int(pk, gc->link)) return (-1);
 	return (0);
 }
 

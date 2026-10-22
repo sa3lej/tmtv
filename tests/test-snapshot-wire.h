@@ -18,6 +18,15 @@ wire_case(int variant, int fragmented)
 	session_set_current(s, session_attach(s, a->window, 0, NULL));
 	session_attach(s, b->window, 1, NULL);
 	screen_init(&source, 80, 24, 2000);
+	if (variant >= 26) {
+		const char *link = "\033]8;id=wire;https://example.invalid/wire\007LINK\033]8;;\007";
+		struct input_ctx *mi = input_init(NULL, NULL, NULL, NULL);
+		input_parse_screen(mi, &source, NULL, NULL, (u_char *)link, strlen(link)); input_free(mi);
+#ifdef ENABLE_SIXEL
+		struct sixel_image *si = sixel_parse("q#0;2;100;0;0~", strlen("q#0;2;100;0;0~"), 0, 8, 16);
+		ASSERT_NOT_NULL(si); image_store(&source, si);
+#endif
+	}
 	if (variant == 25) {
 		cell = grid_default_cell; utf8_set(&cell.data, 'H');
 		for (i = 0; i < 1700; i++) {
@@ -42,7 +51,7 @@ wire_case(int variant, int fragmented)
 	second = v[2].via.array.ptr[1].via.array.ptr;
 	parser = second[1].via.array.ptr; meta = second[0].via.array.ptr[12].via.array.ptr;
 	switch (variant) {
-	case -1: case 25: break;
+	case -1: case 25: case 26: break;
 	case 0: v[1].via.u64++; break;
 	case 1: v[2].via.array.size--; break;
 	case 2: second[0].via.array.ptr[1] = first[0].via.array.ptr[1]; break;
@@ -66,6 +75,16 @@ wire_case(int variant, int fragmented)
 	case 18: second[1].type = MSGPACK_OBJECT_NIL; break;
 	case 19: second[2].type = MSGPACK_OBJECT_NIL; break;
 	case 20: second[0].via.array.ptr[2].via.array.ptr[6].via.array.size--; break;
+	case 27: second[0].via.array.ptr[2].via.array.ptr[6].via.array.ptr[0].via.array.ptr[3].via.array.ptr[0].via.array.ptr[7].via.u64 = INT_MAX; break;
+	case 28: parser[1].via.array.ptr[0].via.array.ptr[7].via.u64 = INT_MAX; break;
+	case 29: second[0].via.array.ptr[13].via.array.ptr[0].via.array.ptr[1].via.bin.ptr = "\033";
+		second[0].via.array.ptr[13].via.array.ptr[0].via.array.ptr[1].via.bin.size = 1; break;
+#ifdef ENABLE_SIXEL
+	case 30: second[0].via.array.ptr[14].via.array.ptr[0].via.array.ptr[2].via.array.ptr[1].via.u64 = 0; break;
+	case 31: second[0].via.array.ptr[14].via.array.ptr[0].via.array.ptr[2].via.array.ptr[11].via.array.ptr[0].via.bin.ptr = "\377\377"; break;
+	case 32: second[0].via.array.ptr[14].via.array.ptr[0].via.array.ptr[0].via.u64 = WINDOW_MAXIMUM + 1; break;
+	case 33: second[0].via.array.ptr[14].via.array.ptr[0].via.array.ptr[2].via.array.ptr[3].via.u64 = 0; break;
+#endif
 	case 21: second[0].via.array.ptr[3].via.array.ptr[0].via.u64 = 81; break;
 	default:
 		clock[0].type = MSGPACK_OBJECT_POSITIVE_INTEGER; clock[0].via.u64 = variant == 22 ? 4 : 3;
@@ -83,12 +102,21 @@ wire_case(int variant, int fragmented)
 	msgpack_sbuffer_init(&changed); msgpack_packer_init(&pk, &changed, msgpack_sbuffer_write);
 	ASSERT_EQ(msgpack_pack_object(&pk, un.data), 0);
 	tmate_decoder_init(&decoder, read_message, NULL); decode_buffer(&decoder, &changed, fragmented);
-	if (variant == -1) {
+	if (variant == -1 || variant == 26) {
 		ASSERT(a->base.grid != ga && b->base.grid != gb);
-		grid_get_cell(b->base.grid, 0, 0, &cell); ASSERT_EQ(cell.data.data[0], 'N');
+		grid_get_cell(b->base.grid, 0, 0, &cell); ASSERT_EQ(cell.data.data[0], variant == 26 ? 'L' : 'N');
+		if (variant == 26) {
+			const char *uri;
+			grid_get_cell(b->base.grid, 0, 0, &cell); ASSERT(cell.link != 0);
+			ASSERT(hyperlinks_get(b->base.hyperlinks, cell.link, &uri, NULL, NULL));
+			ASSERT_STR_EQ(uri, "https://example.invalid/wire");
+#ifdef ENABLE_SIXEL
+			ASSERT(!TAILQ_EMPTY(&a->base.images) && !TAILQ_EMPTY(&b->base.images));
+#endif
+		}
 		/* The restored parser is immediately ready for following PTY bytes. */
 		input_parse_screen(b->ictx, &b->base, NULL, NULL, (u_char *)"51mC", 4);
-		grid_get_cell(b->base.grid, 3, 0, &cell); ASSERT_EQ(cell.data.data[0], 'C');
+		grid_get_cell(b->base.grid, variant == 26 ? 7 : 3, 0, &cell); ASSERT_EQ(cell.data.data[0], 'C');
 		ASSERT_EQ(cell.fg, COLOUR_FLAG_RGB | 0x112233);
 		ASSERT_EQ(input_snapshot_encode(b->ictx, &changed), 0);
 	} else ASSERT(a->base.grid == ga && b->base.grid == gb);
@@ -131,4 +159,13 @@ TEST(wire_snapshot_aggregate_byte_and_nesting_bounds)
 	ASSERT(!tmtv_snapshot_object_bounded(nested[0]));
 	nested[12].type = MSGPACK_OBJECT_NIL;
 	ASSERT(tmtv_snapshot_object_bounded(nested[0]));
+}
+
+TEST(wire_snapshot_media_is_atomic_in_bulk_and_bytewise_transport)
+{
+	int i;
+	for (i = 26; i <= 29; i++) { wire_case(i, 0); wire_case(i, 1); }
+#ifdef ENABLE_SIXEL
+	for (i = 30; i <= 33; i++) { wire_case(i, 0); wire_case(i, 1); }
+#endif
 }

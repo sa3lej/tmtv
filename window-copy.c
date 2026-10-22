@@ -7456,6 +7456,10 @@ window_copy_restore_snapshot(struct window_pane *wp, struct screen *backing,
 	if (wme == NULL || wme->mode != mode) fatalx("snapshot mode init failed");
 	data = wme->data;
 	screen_free(data->backing); free(data->backing); data->backing = backing;
+	/* The frozen backing may have a different link namespace than the live
+	 * pane (for example copy-mode -s from another pane). */
+	hyperlinks_free(data->screen.hyperlinks);
+	data->screen.hyperlinks = hyperlinks_copy(backing->hyperlinks);
 	window_copy_sync_snapshot(data, wp->base.grid);
 	window_copy_restore_state(wp, state);
 }

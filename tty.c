@@ -410,6 +410,9 @@ tty_start_tty(struct tty *tty)
 			tty->flags |= TTY_ALL_REQUEST_FLAGS;
 			tty->flags &= ~(TTY_WAITBG|TTY_WAITFG);
 			tty->term->flags |= TERM_SIXEL;
+			/* The owned xterm.js viewer also implements OSC 8. */
+			tty_parse_client_features(c, "hyperlinks", ",");
+			tty_apply_features(tty->term);
 		} else
 #endif
 		{
