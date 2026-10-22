@@ -964,6 +964,7 @@ main(int argc, char **argv)
 	TEST_SUITE_BEGIN("Production mode lifecycle");
 	RUN_TEST(parser_snapshot_preserves_split_sgr_and_saved_cursor);
 	RUN_TEST(parser_snapshot_preserves_partial_unicode_and_repeat);
+		RUN_TEST(parser_snapshot_preserves_full_32_byte_cluster_and_continuation);
 	RUN_TEST(parser_snapshot_preserves_character_sets);
 	RUN_TEST(parser_snapshot_preserves_osc_and_c0_without_replaying);
 	RUN_TEST(parser_snapshot_preserves_partial_dcs);

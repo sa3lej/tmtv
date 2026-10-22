@@ -1,7 +1,7 @@
 #ifndef TMATE_PROTOCOL_H
 #define TMATE_PROTOCOL_H
 
-#define TMATE_PROTOCOL_VERSION 9
+#define TMATE_PROTOCOL_VERSION 10
 
 enum tmate_control_out_msg_types {
 	TMATE_CTL_HEADER,

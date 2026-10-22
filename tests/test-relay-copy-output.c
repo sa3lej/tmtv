@@ -1566,6 +1566,7 @@ main(int argc, char **argv)
 		RUN_TEST(pane_snapshot_rejects_missing_saved_grid);
 		RUN_TEST(pane_snapshot_rejects_saved_grid_rows);
 		RUN_TEST(pane_snapshot_rejects_saved_style_length);
+		RUN_TEST(utf8_handle_preserves_all_lengths_and_widths);
 		RUN_TEST(snapshot_maximum_combined_cell_roundtrips);
 		RUN_TEST(snapshot_mutated_objects_remain_bounded_and_reencodable);
 		RUN_TEST(snapshot_preserves_host_width_and_full_style_bits);

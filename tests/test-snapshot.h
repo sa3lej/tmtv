@@ -138,7 +138,7 @@ snapshot_bad(int which)
 	case 8: row[1].via.u64 |= GRID_LINE_EXTENDED; break;
 	case 9: row[2].via.array.ptr[4].via.u64 = 256; break;
 	case 10: c[0].type = MSGPACK_OBJECT_STR; break;
-	case 11: memset(bad, 'x', sizeof bad); c[0].via.bin.ptr = bad; c[0].via.bin.size = 32; break;
+	case 11: memset(bad, 'x', sizeof bad); c[0].via.bin.ptr = bad; c[0].via.bin.size = 33; break;
 	case 12: c[1].via.u64 = 3; break;
 	case 13: c[2].via.u64 = GRID_FLAG_EXTENDED; break;
 	case 14: c[3].via.u64 = 0x10000; break;
@@ -313,26 +313,64 @@ TEST(snapshot_history_limit_is_atomic)
 	grid_destroy(source); msgpack_sbuffer_destroy(&sb);
 }
 
+TEST(utf8_handle_preserves_all_lengths_and_widths)
+{
+	struct utf8_data source, decoded;
+	utf8_char handle;
+	u_int size, width, x;
+	for (size = 0; size <= UTF8_SIZE; size++) for (width = 0; width <= 2; width++) {
+		memset(&source, 0, sizeof source);
+		for (x = 0; x < size; x++) source.data[x] = 'a' + x % 26;
+		source.have = source.size = size; source.width = width;
+		ASSERT_EQ(utf8_from_data(&source, &handle), UTF8_DONE);
+		utf8_to_data(handle, &decoded);
+		ASSERT_EQ(decoded.size, size); ASSERT_EQ(decoded.have, size);
+		ASSERT_EQ(decoded.width, width);
+		ASSERT(memcmp(decoded.data, source.data, size) == 0);
+	}
+	utf8_to_data(utf8_build_one('Z'), &decoded);
+	ASSERT_EQ(decoded.size, 1); ASSERT_EQ(decoded.width, 1);
+	ASSERT_EQ(decoded.data[0], 'Z');
+	utf8_to_data(0, &decoded); ASSERT_EQ(decoded.width, 0xff);
+	/* A length past the buffer is rejected before any bytes are read. */
+	for (width = 0; width <= 2; width++) {
+		source.size = UTF8_SIZE + 1; source.width = width;
+		ASSERT_EQ(utf8_from_data(&source, &handle), UTF8_ERROR);
+		utf8_to_data(handle, &decoded);
+		ASSERT(decoded.width <= 2);
+		ASSERT(decoded.size <= 1);
+	}
+}
+
 TEST(snapshot_maximum_combined_cell_roundtrips)
 {
-	struct grid *source = grid_create(1, 1, 0), *gd;
+	struct grid *source, *gd;
 	struct grid_cell gc = grid_default_cell, decoded;
 	msgpack_sbuffer sb;
 	msgpack_unpacked un;
-	u_int x;
-	memset(&gc.data, 0, sizeof gc.data); gc.data.data[0] = 'a';
-	for (x = 1; x < 31; x += 2) {
-		gc.data.data[x] = 0xcc; gc.data.data[x + 1] = 0x81;
+	u_int x, size, width;
+	for (size = 31; size <= 32; size++) for (width = 1; width <= 2; width++) {
+		source = grid_create(2, 1, 0);
+		memset(&gc.data, 0, sizeof gc.data); gc.data.data[0] = 'a';
+		for (x = 1; x < 29; x += 2) {
+			gc.data.data[x] = 0xcc; gc.data.data[x + 1] = 0x81;
+		}
+		if (size == 31) { gc.data.data[29] = 0xcc; gc.data.data[30] = 0x81; }
+		else { gc.data.data[29] = 0xe2; gc.data.data[30] = 0x83; gc.data.data[31] = 0x9d; }
+		gc.data.have = gc.data.size = size; gc.data.width = width;
+		grid_set_cell(source, 0, 0, &gc);
+		if (width == 2) grid_set_padding(source, 1, 0, gc.bg);
+		grid_get_cell(source, 0, 0, &decoded);
+		ASSERT_EQ(decoded.data.size, size); ASSERT_EQ(decoded.data.width, width);
+		ASSERT(memcmp(decoded.data.data, gc.data.data, size) == 0);
+		ASSERT(snapshot_unpack(source, 0, &sb, &un));
+		gd = tmtv_snapshot_grid_decode(un.data, 0);
+		ASSERT_NOT_NULL(gd); grid_get_cell(gd, 0, 0, &decoded);
+		ASSERT_EQ(decoded.data.size, size); ASSERT_EQ(decoded.data.width, width);
+		ASSERT(memcmp(decoded.data.data, gc.data.data, size) == 0);
+		grid_destroy(source); grid_destroy(gd);
+		msgpack_unpacked_destroy(&un); msgpack_sbuffer_destroy(&sb);
 	}
-	gc.data.have = gc.data.size = 31; gc.data.width = 1;
-	grid_set_cell(source, 0, 0, &gc);
-	ASSERT(snapshot_unpack(source, 0, &sb, &un));
-	gd = tmtv_snapshot_grid_decode(un.data, 0);
-	ASSERT_NOT_NULL(gd); grid_get_cell(gd, 0, 0, &decoded);
-	ASSERT_EQ(decoded.data.size, 31);
-	ASSERT(memcmp(decoded.data.data, gc.data.data, 31) == 0);
-	grid_destroy(source); grid_destroy(gd);
-	msgpack_unpacked_destroy(&un); msgpack_sbuffer_destroy(&sb);
 }
 
 /* Collect only actual parsed nodes. Mutating raw MessagePack length headers can

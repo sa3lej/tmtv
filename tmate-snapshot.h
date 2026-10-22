@@ -3,7 +3,7 @@
 #define TMTV_SNAPSHOT_H
 #include <msgpack.h>
 #define TMTV_SNAPSHOT_GRID_VERSION 2
-#define TMTV_SNAPSHOT_MAX_UTF8 31 /* utf8_char has a five-bit byte length */
+#define TMTV_SNAPSHOT_MAX_UTF8 UTF8_SIZE
 #define TMTV_SNAPSHOT_HISTORY 100
 #define TMTV_SNAPSHOT_MAX_HISTORY 2000
 #define TMTV_SNAPSHOT_MAX_CELLS 262144

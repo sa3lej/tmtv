@@ -1,6 +1,6 @@
 # Negotiated reconnect snapshots
 
-Protocol 9 requires exact layout capability `2` and reconnect snapshot capability
+Protocol 10 requires exact layout capability `2` and reconnect snapshot capability
 `2`. Both host and relay must be upgraded. These codecs are active on initial
 sharing and host reconnect; there is no lossy legacy fallback for a new peer.
 
@@ -28,9 +28,10 @@ are never copied between processes. Logical cleared, selected, padding, tab and
 no-palette flags survive. Tabs carry empty bytes and their column width; padding
 carries empty bytes and width zero. Wide characters and tabs require following
 padding cells. UTF-8 bytes may include combining marks, variation selectors and
-ZWJ sequences up to 31 bytes per text cell. The tmux cell buffer is 32 bytes,
-but its packed internal handle has a five-bit length, so 32-byte text payloads
-are rejected before interning. Tab widths may use the full 32-column buffer.
+ZWJ sequences up to 32 bytes per text cell. The packed process-local handle
+uses six length bits and two width bits, preserving the full 32-byte buffer.
+Larger text payloads are rejected before interning. Tab widths may use the full
+32-column buffer.
 Invalid scalar encodings and
 C0/C1/DEL controls are rejected. This validates encoding and bounds, not a new
 Unicode grapheme segmentation or width algorithm.
@@ -183,3 +184,10 @@ namespaces, active parser links, current/saved SIXEL pixels/palettes, resource
 limits and atomic malformed-media rejection. SSH/SSE tests additionally inspect
 real renderer OSC 8/DCS output across reconnect and alternate-screen exit. This
 is transport evidence, not browser clickability or pixel-canvas verification.
+
+Sharing protocol 10 also requires the corrected 32-byte cell implementation on
+both host and relay. Older peers are refused by the existing version gate before
+sharing: protocol 9 peers can corrupt a 32-byte live cell or reject its snapshot.
+Snapshot arrays and resource budgets are unchanged; the text length bound now
+matches the existing 32-byte cell buffer. The process-local packed handles are
+never transmitted and the local tmux IPC version is unchanged.

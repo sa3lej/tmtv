@@ -21,6 +21,7 @@ import subprocess
 import termios
 import threading
 import time
+import unicodedata
 
 import msgpack
 import pyte
@@ -325,7 +326,7 @@ set -g invalid-option-E2E_VIEW yes
                 # Older relays used "Client update required" for either
                 # direction. Require their explicit protocol mismatch too.
                 return ("Relay update required" in notice or
-                        ("requires sharing protocol" in notice and "uses 9" in notice))
+                        ("requires sharing protocol" in notice and "uses 10" in notice))
             wait_for(relay_refused, "unsupported relay reports required update")
             assert host("display-message", "-p", "#{tmtv_ssh}|#{tmtv_web}") == "|"
             assert "e2e" not in [p.name for p in sessions.iterdir()]
@@ -569,6 +570,22 @@ set -g invalid-option-E2E_VIEW yes
             viewer.sees("UTF8_PREFIX_\u754c_UTF8_COMPLETE")
         print("PASS partial multibyte UTF-8 resumes after reconnect without replacement or duplicated bytes", flush=True)
 
+        cluster = "\u00f8" + "\u0301" * 15
+        assert len(cluster.encode()) == 32
+        rendered = unicodedata.normalize("NFC", cluster)
+        emit_terminal(b"\x1b[0m\x1b[2J\x1b[HFULL_CLUSTER_" + cluster.encode())
+        for viewer in viewers:
+            viewer.sees("FULL_CLUSTER_" + rendered)
+            assert cluster.encode() in viewer.raw
+        assert cluster in host("capture-pane", "-p")
+        reconnect_host(lambda v: "FULL_CLUSTER_" + rendered in v.text() and cluster.encode() in v.raw,
+                       "32-byte combined cluster survives reconnect")
+        emit_terminal(b"_END")
+        for viewer in viewers:
+            viewer.sees("FULL_CLUSTER_" + rendered + "_END")
+        assert cluster + "_END" in host("capture-pane", "-p")
+        print("PASS full 32-byte Unicode cluster survives host storage, SSH/SSE reconnect and subsequent output", flush=True)
+
         # OSC 8 is a semantic screen attribute, not replayed application input.
         # The owned web terminal advertises support. SSH terminals without OSC 8
         # capability retain the text; their optional hyperlink capability is not
@@ -706,7 +723,7 @@ set -g invalid-option-E2E_VIEW yes
             viewers.append(viewer)
             viewer.sees("LATE_VIEWER_READY")
         print("PASS fresh SSH/SSE RO viewers reconstruct the current screen", flush=True)
-        print("26 end-to-end checks passed; browser DOM, terminal capability discovery, other attributes and platforms remain separate coverage.", flush=True)
+        print("27 end-to-end checks passed; browser DOM, terminal capability discovery, other attributes and platforms remain separate coverage.", flush=True)
     except BaseException:
         with open(ROOT / "diagnostics.log", "w") as out:
             out.write("session entries: " + repr([p.name for p in Path('/tmp/tmtv/sessions').iterdir()]) + "\n")

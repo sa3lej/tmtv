@@ -644,3 +644,14 @@ change authenticated relay behavior or float/protocol integration. Monitor
 scanner safety is the only new behavior in this stage; the other migration
 limits listed above still apply. This work is local, untested against a
 configured relay deployment, unpushed and undeployed.
+
+## Full UTF-8 cell length
+
+The fork deliberately differs from the pinned 3.8 `utf8.c` packed handle: the
+24-bit inline/cache index remains, length gets six bits, and width plus one gets
+two bits. Core widths are 0..2; a zero handle retains invalid width 0xff. This
+fixes the pinned implementation's 32-byte length spilling into width. Both
+host and relay use it; sharing protocol 10 requires corrected peers. Expanded
+cells and local tmux IPC are unchanged. Snapshot text accepts all 32 bytes and
+rejects larger payloads. Boundary tests cover every length and core width,
+31/32-byte grid/snapshot restoration, parser split points and subsequent output.

@@ -253,11 +253,13 @@ static struct utf8_index_tree utf8_index_tree = RB_INITIALIZER(utf8_index_tree);
 static int	utf8_no_width;
 static u_int	utf8_next_index;
 
-#define UTF8_GET_SIZE(uc) (((uc) >> 24) & 0x1f)
-#define UTF8_GET_WIDTH(uc) (((uc) >> 29) - 1)
+/* 24 bits for inline bytes/cache index, six for length (including 32),
+ * and two for width + 1 (0..2). A zero handle keeps the invalid width. */
+#define UTF8_GET_SIZE(uc) (((uc) >> 24) & 0x3f)
+#define UTF8_GET_WIDTH(uc) (((uc) >> 30) - 1)
 
 #define UTF8_SET_SIZE(size) (((utf8_char)(size)) << 24)
-#define UTF8_SET_WIDTH(width) ((((utf8_char)(width)) + 1) << 29)
+#define UTF8_SET_WIDTH(width) ((((utf8_char)(width)) + 1) << 30)
 
 /* Get a UTF-8 item from data. */
 static struct utf8_item *

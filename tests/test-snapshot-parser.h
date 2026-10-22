@@ -101,3 +101,23 @@ TEST(parser_snapshot_preserves_hyperlink_and_saved_link_at_every_split)
 {
 	parser_sequence("\033]8;id=named;https://example.invalid/a\007LINK\0337\033]8;;\007PLAIN\0338RESTORED\033]8;;\007\033]8;;https://example.invalid/anon\007ANON\033]8;;\007");
 }
+
+TEST(parser_snapshot_preserves_full_32_byte_cluster_and_continuation)
+{
+	struct screen screen;
+	struct input_ctx *input;
+	struct grid_cell gc;
+	char sequence[37];
+	u_int x;
+	sequence[0] = 'a';
+	for (x = 1; x < 29; x += 2) { sequence[x] = 0xcc; sequence[x+1] = 0x81; }
+	memcpy(sequence + 29, "\xe2\x83\x9d", 3); /* U+20DD */
+	memcpy(sequence + 32, "_END", 5);
+	screen_init(&screen, 80, 24, 0); input = input_init(NULL, NULL, NULL, NULL);
+	input_parse_screen(input, &screen, NULL, NULL, (u_char *)sequence, 36);
+	grid_get_cell(screen.grid, 0, 0, &gc);
+	ASSERT_EQ(gc.data.size, 32); ASSERT_EQ(gc.data.width, 1);
+	ASSERT(memcmp(gc.data.data, sequence, 32) == 0);
+	input_free(input); screen_free(&screen);
+	parser_sequence(sequence);
+}

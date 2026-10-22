@@ -79,7 +79,7 @@ extern void unpack_array(struct tmate_unpacker *uk, struct tmate_unpacker *neste
 
 /* tmate-encoder.c */
 
-#define TMATE_PROTOCOL_VERSION 9
+#define TMATE_PROTOCOL_VERSION 10
 
 struct tmate_session;
 

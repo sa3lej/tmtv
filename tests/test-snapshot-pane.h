@@ -130,7 +130,7 @@ pane_bad(u_int which)
 	case 18: v[11].via.u64 = 2; break;
 	case 19: v[8].type = MSGPACK_OBJECT_NIL; break; /* inconsistent saved_flags */
 	case 20: saved[6].via.array.size--; break;
-	case 21: v[10].via.array.ptr[0].via.bin.size = 32; break;
+	case 21: v[10].via.array.ptr[0].via.bin.size = 33; break;
 	}
 	ASSERT(tmtv_snapshot_pane_decode(un.data) == NULL);
 	screen_free(&source); msgpack_sbuffer_destroy(&sb); msgpack_unpacked_destroy(&un);
