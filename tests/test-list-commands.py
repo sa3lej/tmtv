@@ -12,7 +12,7 @@ BINARY = Path(os.environ.get("TMTV", ROOT / "tmtv")).resolve()
 
 class ListCommandsTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory(prefix="list-commands-", dir=ROOT / "tests")
+        self.directory = tempfile.TemporaryDirectory(prefix="list-commands-")
         self.addCleanup(self.directory.cleanup)
         self.socket = Path(self.directory.name) / "socket"
         self.config = Path(self.directory.name) / "config"

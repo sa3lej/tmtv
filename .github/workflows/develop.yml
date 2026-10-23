@@ -58,9 +58,18 @@ jobs:
           make -C tests all TMTV="$TMTV"
 
   macos:
-    name: macOS host build
+    name: macOS ${{ matrix.arch }} host build and tests
+    # Each architecture uses its native Homebrew; never substitute Rosetta.
     # The relay is Linux-only in Makefile.am.
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     env:
       HOMEBREW_NO_AUTO_UPDATE: '1'
@@ -73,7 +82,7 @@ jobs:
       - name: Install build dependencies
         run: |
           brew install autoconf automake pkg-config bison \
-            libevent libssh msgpack-c openssl@3 utf8proc
+            libevent libssh msgpack-c openssl@3 utf8proc jemalloc python@3.13
 
       - name: Build host with sixel
         # Dynamic linkage is enough for validation; release packaging remains
@@ -84,9 +93,23 @@ jobs:
           OPENSSL_PREFIX="$(brew --prefix openssl@3)"
           export PKG_CONFIG_PATH="${OPENSSL_PREFIX}/lib/pkgconfig:${BREW_PREFIX}/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
           sh autogen.sh
-          ./configure --enable-sixel --enable-utf8proc \
+          ./configure --enable-sixel --enable-utf8proc --enable-jemalloc \
             CPPFLAGS="-I${BREW_PREFIX}/include -I${OPENSSL_PREFIX}/include" \
             LDFLAGS="-L${BREW_PREFIX}/lib -L${OPENSSL_PREFIX}/lib"
           grep -q '^DEFS = .* -DENABLE_SIXEL=1' Makefile
           make -j"$(sysctl -n hw.ncpu)"
           ./tmtv -V
+
+      - name: Run native host regressions
+        run: |
+          python3 tests/run-native-host-tests.py \
+            --expected-arch "${{ matrix.arch }}" \
+            --artifacts "${RUNNER_TEMP}/native-host-${{ matrix.arch }}"
+
+      - name: Retain native host evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-host-${{ matrix.arch }}
+          path: ${{ runner.temp }}/native-host-${{ matrix.arch }}/
+          if-no-files-found: warn

@@ -64,3 +64,38 @@ OSC 8 activation uses Shift-click to bypass terminal application mouse reporting
 Small viewports keep the minimum font size and allow horizontal scrolling when
 all columns cannot fit. Browser fixtures allow 768 MiB and 256 processes/threads;
 the ordinary transport fixture keeps its 512 MiB/128 limits.
+
+## Native host validation
+
+After building the production host with SIXEL and utf8proc enabled, run the
+portable host subset on the actual target system:
+
+```sh
+python3 tests/run-native-host-tests.py --expected-arch arm64 \
+  --artifacts /path/outside/checkout/native-host
+```
+
+Use `x86_64` for Intel, or omit the architecture assertion for a local smoke run.
+The runner records the real OS/architecture, source commit and dirty state,
+production binary hash, exit status and log hash. It isolates the normal user
+configuration and uses a short temporary directory for Unix sockets. The host
+subset exercises full-object mode/layout/snapshot/parser/media fixtures, pane
+lifetimes, event/control/command paths and actual host socket commands. It excludes
+Linux relay/jail tests; those remain covered by the Linux `all` target and isolated
+relay fixture. No installation, publication or deployment occurs.
+
+The Darwin configure path requires jemalloc by default. These builds install
+and enable it explicitly, including its archive in static release linkage;
+utf8proc and SIXEL remain enabled.
+
+Develop validation has separate native Apple Silicon and Intel jobs. Release
+packaging uses the same host subset instead of trying to link Linux relay tests
+on Darwin. These workflow edits do not run until the source reaches CI.
+
+This runner does not establish Safari support. Native Safari still needs an
+actual macOS browser session against an isolated Linux relay and production
+viewer: verify styled text and OSC 8 activation, SIXEL pixels, host disconnect/
+reconnect and reload, saved/alternate-screen images, small viewports and read-only
+input rejection, matching the Linux browser fixture. Playwright WebKit on Linux
+or macOS is not Apple's Safari binary. Retain exact OS/browser versions and
+logs/screenshots, and keep missing native coverage explicit.

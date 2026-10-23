@@ -19,7 +19,7 @@ TYPES = ("command", "search", "target", "window-target")
 
 class PromptHistoryTests(unittest.TestCase):
     def setUp(self):
-        self.root = Path(tempfile.mkdtemp(prefix="history-", dir=ROOT / "tests"))
+        self.root = Path(tempfile.mkdtemp(prefix="history-"))
         self.addCleanup(self.cleanup_server)
         self.socket = self.root / "socket"
         self.history = self.root / "history"

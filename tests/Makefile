@@ -37,7 +37,11 @@ relay-browser-e2e:
 	$(MAKE) -C .. tmtv tmtv-server
 	$(PYTHON) run-relay-e2e.py --browser $(E2E_ARGS)
 
-all: core38-commands relay-copy-output mode-lifecycle unit server-unit functional hooks session-cleanup prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
+# Portable production-host checks; no Linux relay objects or jail required.
+.PHONY: host
+host: unit core38-commands mode-lifecycle functional hooks prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
+
+all: host relay-copy-output server-unit session-cleanup
 
 unit: $(UNIT_TESTS)
 	@echo ""

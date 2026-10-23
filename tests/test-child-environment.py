@@ -22,7 +22,7 @@ TERMINAL = {
 
 class ChildEnvironmentTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory(prefix="environment-", dir=ROOT / "tests")
+        self.directory = tempfile.TemporaryDirectory(prefix="environment-")
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         self.socket = self.root / "socket"

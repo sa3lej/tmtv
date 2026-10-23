@@ -15,7 +15,7 @@ class ListKeysTests(unittest.TestCase):
         env = dict(os.environ, TERM="xterm-256color")
         for name in ("TMUX", "TMTV", "TMUX_PROGRAM"):
             env.pop(name, None)
-        with tempfile.TemporaryDirectory(prefix="list-keys-", dir=ROOT / "tests") as directory:
+        with tempfile.TemporaryDirectory(prefix="list-keys-") as directory:
             path = Path(directory)
             socket = path / "socket"
             config = path / "config"
