@@ -58,11 +58,11 @@ test-compat: test-compat.c test-harness.h ../compat/base64.c ../compat/getline.c
 	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -o $@ $< $(LDFLAGS)
 
 # Link the same parser and allocation implementations used by host and relay.
-test-json: test-json.c test-harness.h ../json.c ../xmalloc.c ../xmalloc.h ../compat/recallocarray.c ../compat/reallocarray.c ../compat/explicit_bzero.c ../tmux.h
+test-json: test-json.c test-harness.h ../json.c ../xmalloc.c ../xmalloc.h ../compat/recallocarray.c ../compat/reallocarray.c ../compat/explicit_bzero.c ../compat/freezero.c ../tmux.h
 	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) -I.. -o $@ test-json.c ../json.c ../xmalloc.c ../compat/recallocarray.c $(ALLOC_COMPAT_SOURCES) $(LDFLAGS) $(shell pkg-config --libs libevent) $(LIBBSD)
 
 # Compile actual peer/libevent/imsg paths; discard unused process startup code.
-test-proc: test-proc.c test-harness.h ../proc.c ../tmux.h ../compat/imsg.c ../compat/imsg-buffer.c ../compat/getpeereid.c ../compat/reallocarray.c ../compat/explicit_bzero.c ../xmalloc.c ../log.c
+test-proc: test-proc.c test-harness.h ../proc.c ../tmux.h ../compat/imsg.c ../compat/imsg-buffer.c ../compat/getpeereid.c ../compat/reallocarray.c ../compat/explicit_bzero.c ../compat/freezero.c ../xmalloc.c ../log.c
 	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -ffunction-sections -fdata-sections -o $@ test-proc.c ../compat/imsg.c ../compat/imsg-buffer.c ../compat/getpeereid.c ../compat/recallocarray.c ../xmalloc.c ../log.c $(ALLOC_COMPAT_SOURCES) $(LDFLAGS) $(GC_SECTIONS) $(shell pkg-config --libs libevent) $(LIBBSD)
 
 test-msgpack: test-msgpack.c test-harness.h
@@ -90,7 +90,7 @@ PARENT_LDFLAGS := $(shell $(MAKE) -C .. -n -p 2>/dev/null | grep '^LDFLAGS = ' |
 UTF8PROC_CFLAGS := $(shell pkg-config --cflags libutf8proc 2>/dev/null)
 # Standalone allocator/parser tests need the same Darwin fallback functions as
 # the host. On libc platforms that provide them, avoid duplicate definitions.
-ALLOC_COMPAT_SOURCES = $(if $(findstring -DHAVE_REALLOCARRAY=1,$(PARENT_DEFS)),,../compat/reallocarray.c) $(if $(findstring -DHAVE_EXPLICIT_BZERO=1,$(PARENT_DEFS)),,../compat/explicit_bzero.c)
+ALLOC_COMPAT_SOURCES = $(if $(findstring -DHAVE_REALLOCARRAY=1,$(PARENT_DEFS)),,../compat/reallocarray.c) $(if $(findstring -DHAVE_EXPLICIT_BZERO=1,$(PARENT_DEFS)),,../compat/explicit_bzero.c) $(if $(findstring -DHAVE_FREEZERO=1,$(PARENT_DEFS)),,../compat/freezero.c)
 
 
 test-server-header: test-server-header.c test-harness.h ../server/tmate.h ../server/tmate-protocol.h
