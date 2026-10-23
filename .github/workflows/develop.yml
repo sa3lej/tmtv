@@ -82,7 +82,7 @@ jobs:
       - name: Install build dependencies
         run: |
           brew install autoconf automake pkg-config bison \
-            libevent libssh msgpack-c openssl@3 utf8proc jemalloc python@3.13
+            libevent libssh msgpack-c openssl@3 utf8proc jemalloc
 
       - name: Build host with sixel
         # Dynamic linkage is enough for validation; release packaging remains
