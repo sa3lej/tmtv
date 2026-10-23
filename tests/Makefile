@@ -63,7 +63,7 @@ test-json: test-json.c test-harness.h ../json.c ../xmalloc.c ../xmalloc.h ../com
 
 # Compile actual peer/libevent/imsg paths; discard unused process startup code.
 test-proc: test-proc.c test-harness.h ../proc.c ../tmux.h ../compat/imsg.c ../compat/imsg-buffer.c ../compat/getpeereid.c ../compat/reallocarray.c ../compat/explicit_bzero.c ../compat/freezero.c ../xmalloc.c ../log.c
-	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -ffunction-sections -fdata-sections -o $@ test-proc.c ../compat/imsg.c ../compat/imsg-buffer.c ../compat/getpeereid.c ../compat/recallocarray.c ../xmalloc.c ../log.c $(ALLOC_COMPAT_SOURCES) $(LDFLAGS) $(GC_SECTIONS) $(shell pkg-config --libs libevent) $(LIBBSD)
+	$(CC) $(CFLAGS) $(PARENT_DEFS) $(PARENT_CPPFLAGS) $(MSGPACK_CFLAGS) $(LIBSSH_CFLAGS) $(LIBEVENT_CFLAGS) $(UTF8PROC_CFLAGS) -I.. -ffunction-sections -fdata-sections -o $@ test-proc.c ../compat/imsg.c ../compat/imsg-buffer.c $(PEER_COMPAT_SOURCE) ../compat/recallocarray.c ../xmalloc.c ../log.c $(ALLOC_COMPAT_SOURCES) $(LDFLAGS) $(GC_SECTIONS) $(shell pkg-config --libs libevent) $(LIBBSD)
 
 test-msgpack: test-msgpack.c test-harness.h
 	$(CC) $(CFLAGS) $(MSGPACK_CFLAGS) -o $@ $< $(LDFLAGS) $(MSGPACK_LIBS)
@@ -91,6 +91,8 @@ UTF8PROC_CFLAGS := $(shell pkg-config --cflags libutf8proc 2>/dev/null)
 # Standalone allocator/parser tests need the same Darwin fallback functions as
 # the host. On libc platforms that provide them, avoid duplicate definitions.
 ALLOC_COMPAT_SOURCES = $(if $(findstring -DHAVE_REALLOCARRAY=1,$(PARENT_DEFS)),,../compat/reallocarray.c) $(if $(findstring -DHAVE_EXPLICIT_BZERO=1,$(PARENT_DEFS)),,../compat/explicit_bzero.c) $(if $(findstring -DHAVE_FREEZERO=1,$(PARENT_DEFS)),,../compat/freezero.c)
+# Do not override Darwin's real credential checks with an unused fallback.
+PEER_COMPAT_SOURCE = $(if $(findstring -DHAVE_GETPEEREID=1,$(PARENT_DEFS)),,../compat/getpeereid.c)
 
 
 test-server-header: test-server-header.c test-harness.h ../server/tmate.h ../server/tmate-protocol.h
