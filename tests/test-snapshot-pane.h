@@ -8,6 +8,88 @@ pane_unpack(u_int id, struct screen *s, msgpack_sbuffer *sb, msgpack_unpacked *u
 	    msgpack_unpack_next(un, sb->data, sb->size, NULL) == MSGPACK_UNPACK_SUCCESS);
 }
 
+/* Mutate the received BIN, bypassing the host's ordinary OSC sanitizer. */
+TEST(pane_snapshot_rejects_unsafe_metadata_before_decode)
+{
+	static const char *bad[] = { "\033]52;c;SGVsbG8=\007", "x\007", "x\033\\",
+	    "x\n", "x\r", "x\t", "x\177", "x\377", "\300\257", "\342\202",
+	    "#(touch /tmp/never-run)", "x\302\233" };
+	struct screen source;
+	msgpack_sbuffer sb;
+	msgpack_unpacked un;
+	msgpack_object *meta, *field, saved, stack, stack_entry;
+	u_int i, j;
+	pane_fixture_screen(&source); ASSERT(pane_unpack(1, &source, &sb, &un));
+	meta = un.data.via.array.ptr[12].via.array.ptr;
+	stack = meta[3]; stack_entry = meta[0]; meta[3].via.array.size = 1;
+	meta[3].via.array.ptr = &stack_entry;
+	for (j = 0; j < 3; j++) {
+		field = j == 2 ? &meta[3].via.array.ptr[0] : &meta[j];
+		saved = *field;
+		for (i = 0; i < sizeof bad / sizeof *bad; i++) {
+			field->type = MSGPACK_OBJECT_BIN;
+			field->via.bin.ptr = bad[i]; field->via.bin.size = strlen(bad[i]);
+			ASSERT(!tmtv_snapshot_pane_validate(un.data, NULL));
+			ASSERT(tmtv_snapshot_pane_decode(un.data) == NULL);
+		}
+		*field = saved;
+	}
+	meta[3] = stack;
+	screen_free(&source); msgpack_sbuffer_destroy(&sb); msgpack_unpacked_destroy(&un);
+}
+
+TEST(pane_snapshot_preserves_safe_metadata_across_repeated_roundtrips)
+{
+	const char *title = "Norrsken \342\230\205 \\033]52; text # literal";
+	const char *path = "/home/lex/Byvattnet \\ backups";
+	struct window_pane *wp = create_pane();
+	struct screen source, *current = &source;
+	struct tmtv_snapshot_pane *p;
+	msgpack_sbuffer sb;
+	msgpack_unpacked un;
+	u_int i;
+	pane_fixture_screen(&source);
+	screen_free_titles(&source);
+	free(source.title); source.title = xstrdup(title); screen_push_title(&source);
+	free(source.title); source.title = xstrdup("");
+	free(source.path); source.path = xstrdup(path);
+	for (i = 0; i < 3; i++) {
+		ASSERT(pane_unpack(wp->id, current, &sb, &un));
+		p = tmtv_snapshot_pane_decode(un.data); ASSERT_NOT_NULL(p);
+		ASSERT_EQ(tmtv_snapshot_pane_apply(wp, p), 0);
+		ASSERT_STR_EQ(wp->base.title, ""); ASSERT_STR_EQ(wp->base.path, path);
+		ASSERT_EQ(wp->base.ntitles, 1); ASSERT_STR_EQ(screen_title_at(&wp->base, 0), title);
+		tmtv_snapshot_pane_free(p); current = &wp->base;
+		msgpack_sbuffer_destroy(&sb); msgpack_unpacked_destroy(&un);
+	}
+	screen_free(&source); destroy_pane(wp);
+}
+
+TEST(pane_snapshot_metadata_limits_and_embedded_nul_are_checked)
+{
+	struct screen source;
+	msgpack_sbuffer sb;
+	msgpack_unpacked un;
+	msgpack_object *meta, *field, saved, stack_entry;
+	char text[16385];
+	u_int i;
+	pane_fixture_screen(&source); ASSERT(pane_unpack(1, &source, &sb, &un));
+	meta = un.data.via.array.ptr[12].via.array.ptr;
+	stack_entry = meta[0]; meta[3].via.array.size = 1; meta[3].via.array.ptr = &stack_entry;
+	memset(text, 'T', sizeof text);
+	for (i = 0; i < 3; i++) {
+		field = i == 2 ? &stack_entry : &meta[i]; saved = *field;
+		field->type = MSGPACK_OBJECT_BIN; field->via.bin.ptr = text;
+		field->via.bin.size = 16384; ASSERT(tmtv_snapshot_pane_validate(un.data, NULL));
+		field->via.bin.size = 16385; ASSERT(!tmtv_snapshot_pane_validate(un.data, NULL));
+		field->via.bin.size = 3; text[1] = '\0';
+		ASSERT(!tmtv_snapshot_pane_validate(un.data, NULL)); text[1] = 'T';
+		field->via.bin.size = 0; ASSERT(tmtv_snapshot_pane_validate(un.data, NULL));
+		*field = saved;
+	}
+	screen_free(&source); msgpack_sbuffer_destroy(&sb); msgpack_unpacked_destroy(&un);
+}
+
 TEST(pane_snapshot_restores_active_saved_screen_and_exit_style)
 {
 	struct window_pane *wp = create_pane();

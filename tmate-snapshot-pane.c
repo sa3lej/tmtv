@@ -34,6 +34,31 @@ cursor_colour(msgpack_object o, int *out)
 	return (1);
 }
 
+/* Screens already contain escaped OSC strings. Re-running clean_name would
+ * double their backslashes on every reconnect. Reject unsafe wire metadata
+ * instead, before allocating or installing any part of the snapshot. */
+static int
+metadata_string(msgpack_object o)
+{
+	char text[16385];
+	const u_char *s;
+	u_int i;
+
+	if (o.type != MSGPACK_OBJECT_BIN || o.via.bin.size > sizeof text - 1)
+		return (0);
+	s = (const u_char *)o.via.bin.ptr;
+	for (i = 0; i < o.via.bin.size; i++) {
+		if (s[i] < 0x20 || s[i] == 0x7f ||
+		    (i + 1 < o.via.bin.size &&
+		     ((s[i] == '#' && s[i + 1] == '(') ||
+		      (s[i] == 0xc2 && s[i + 1] >= 0x80 && s[i + 1] <= 0x9f))))
+			return (0);
+	}
+	if (o.via.bin.size != 0) memcpy(text, s, o.via.bin.size);
+	text[o.via.bin.size] = '\0';
+	return (utf8_isvalid(text));
+}
+
 /* The grid contains table-local reference numbers, never receiver handles. */
 static int
 grid_links(msgpack_object grid, msgpack_object links)
@@ -165,11 +190,8 @@ validate(msgpack_object o, struct tmtv_snapshot_pane *p, u_int *allocation)
 	if (!array(v[12], 4)) return (0);
 	msgpack_object *meta = v[12].via.array.ptr;
 	u_int progress_state, progress;
-	if (meta[0].type != MSGPACK_OBJECT_BIN || meta[0].via.bin.size > 16384 ||
-	    memchr(meta[0].via.bin.ptr, 0, meta[0].via.bin.size) != NULL ||
-	    (meta[1].type != MSGPACK_OBJECT_NIL &&
-	     (meta[1].type != MSGPACK_OBJECT_BIN || meta[1].via.bin.size > 16384 ||
-	      memchr(meta[1].via.bin.ptr, 0, meta[1].via.bin.size) != NULL)) ||
+	if (!metadata_string(meta[0]) ||
+	    (meta[1].type != MSGPACK_OBJECT_NIL && !metadata_string(meta[1])) ||
 	    !array(meta[2], 2) ||
 	    !number(meta[2].via.array.ptr[0], PROGRESS_BAR_PAUSED, &progress_state)) return (0);
 	msgpack_object value = meta[2].via.array.ptr[1];
@@ -182,8 +204,7 @@ validate(msgpack_object o, struct tmtv_snapshot_pane *p, u_int *allocation)
 	p->ntitles = meta[3].via.array.size;
 	for (i = 0; i < p->ntitles; i++) {
 		msgpack_object title = meta[3].via.array.ptr[i];
-		if (title.type != MSGPACK_OBJECT_BIN || title.via.bin.size > 16384 ||
-		    memchr(title.via.bin.ptr, 0, title.via.bin.size)) return (0);
+		if (!metadata_string(title)) return (0);
 	}
 	if (!media_validate(v)) return (0);
 	if (allocation != NULL) *allocation = cost + saved_cost;

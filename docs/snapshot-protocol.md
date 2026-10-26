@@ -40,6 +40,15 @@ The pane-screen envelope below carries identity, current and saved screen state.
 Both codecs validate complete objects before allocating grids or interning cell
 data. Failed encoding appends no bytes to the caller's buffer.
 
+Completed OSC metadata (title, optional path and each saved title) is untrusted
+on receipt, even though a normal host has already escaped it. Each string must
+be valid UTF-8, at most 16384 bytes, and contain no C0/C1/DEL controls, embedded
+NUL or `#(` command expansion. Invalid metadata rejects the entire snapshot
+before grids, parser state or modes are installed. Already escaped text,
+including literal backslashes, is preserved byte for byte; it is not escaped
+again on each reconnect. A partial OSC in parser continuation remains parser
+state and is subject to the ordinary terminal parser when completed.
+
 ## Limits and scope
 
 - Default history retention is 100 rows, explicitly truncated at

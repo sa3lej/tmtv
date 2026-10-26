@@ -18,7 +18,12 @@ wire_case(int variant, int fragmented)
 	session_set_current(s, session_attach(s, a->window, 0, NULL));
 	session_attach(s, b->window, 1, NULL);
 	screen_init(&source, 80, 24, 2000);
-	if (variant >= 26) {
+	if (variant >= 34) {
+		ASSERT(screen_set_title(&a->base, "keep-a", 1));
+		ASSERT(screen_set_title(&b->base, "keep-b", 1));
+		ASSERT(screen_set_path(&b->base, "/keep", 1)); screen_push_title(&b->base);
+	}
+	if (variant >= 26 && variant <= 33) {
 		const char *link = "\033]8;id=wire;https://example.invalid/wire\007LINK\033]8;;\007";
 		struct input_ctx *mi = input_init(NULL, NULL, NULL, NULL);
 		input_parse_screen(mi, &source, NULL, NULL, (u_char *)link, strlen(link)); input_free(mi);
@@ -36,6 +41,11 @@ wire_case(int variant, int fragmented)
 	}
 	input = input_init(NULL, NULL, NULL, NULL);
 	input_parse_screen(input, &source, NULL, NULL, (u_char *)"NEW\033[38;2;17;34;", strlen("NEW\033[38;2;17;34;"));
+	if (variant >= 34) {
+		ASSERT(screen_set_title(&source, "saved \342\230\205", 1)); screen_push_title(&source);
+		ASSERT(screen_set_title(&source, "title \\033]52; literal", 1));
+		ASSERT(screen_set_path(&source, "/home/lex/Byvattnet \\ backups", 1));
+	}
 	msgpack_sbuffer_init(&sb); msgpack_packer_init(&pk, &sb, msgpack_sbuffer_write);
 	msgpack_pack_array(&pk, 3); msgpack_pack_int(&pk, TMTV_SNAPSHOT_OPCODE);
 	msgpack_pack_int(&pk, TMTV_SNAPSHOT_VERSION); msgpack_pack_array(&pk, 2);
@@ -52,6 +62,18 @@ wire_case(int variant, int fragmented)
 	parser = second[1].via.array.ptr; meta = second[0].via.array.ptr[12].via.array.ptr;
 	switch (variant) {
 	case -1: case 25: case 26: break;
+	case 34: meta[0].via.bin.ptr = "\033]52;c;SGVsbG8=\007";
+		meta[0].via.bin.size = strlen(meta[0].via.bin.ptr); break;
+	case 35: meta[1].via.bin.ptr = "/p\033[31m";
+		meta[1].via.bin.size = strlen(meta[1].via.bin.ptr); break;
+	case 36: meta[3].via.array.ptr[0].via.bin.ptr = "saved\007";
+		meta[3].via.array.ptr[0].via.bin.size = 6; break;
+	case 37: meta[0].via.bin.ptr = "\377"; meta[0].via.bin.size = 1; break;
+	case 38: meta[1].via.bin.ptr = "#(never-run)";
+		meta[1].via.bin.size = strlen(meta[1].via.bin.ptr); break;
+	case 39: meta[3].via.array.ptr[0].via.bin.ptr = "\342\202";
+		meta[3].via.array.ptr[0].via.bin.size = 2; break;
+	case 40: break;
 	case 0: v[1].via.u64++; break;
 	case 1: v[2].via.array.size--; break;
 	case 2: second[0].via.array.ptr[1] = first[0].via.array.ptr[1]; break;
@@ -102,8 +124,14 @@ wire_case(int variant, int fragmented)
 	msgpack_sbuffer_init(&changed); msgpack_packer_init(&pk, &changed, msgpack_sbuffer_write);
 	ASSERT_EQ(msgpack_pack_object(&pk, un.data), 0);
 	tmate_decoder_init(&decoder, read_message, NULL); decode_buffer(&decoder, &changed, fragmented);
-	if (variant == -1 || variant == 26) {
+	if (variant == -1 || variant == 26 || variant == 40) {
 		ASSERT(a->base.grid != ga && b->base.grid != gb);
+		if (variant == 40) {
+			ASSERT_STR_EQ(b->base.title, source.title);
+			ASSERT_STR_EQ(b->base.path, source.path);
+			ASSERT_EQ(b->base.ntitles, 1);
+			ASSERT_STR_EQ(screen_title_at(&b->base, 0), screen_title_at(&source, 0));
+		}
 		grid_get_cell(b->base.grid, 0, 0, &cell); ASSERT_EQ(cell.data.data[0], variant == 26 ? 'L' : 'N');
 		if (variant == 26) {
 			const char *uri;
@@ -119,7 +147,14 @@ wire_case(int variant, int fragmented)
 		grid_get_cell(b->base.grid, variant == 26 ? 7 : 3, 0, &cell); ASSERT_EQ(cell.data.data[0], 'C');
 		ASSERT_EQ(cell.fg, COLOUR_FLAG_RGB | 0x112233);
 		ASSERT_EQ(input_snapshot_encode(b->ictx, &changed), 0);
-	} else ASSERT(a->base.grid == ga && b->base.grid == gb);
+	} else {
+		ASSERT(a->base.grid == ga && b->base.grid == gb);
+		if (variant >= 34) {
+			ASSERT_STR_EQ(a->base.title, "keep-a"); ASSERT_STR_EQ(b->base.title, "keep-b");
+			ASSERT_STR_EQ(b->base.path, "/keep");
+			ASSERT_EQ(b->base.ntitles, 1); ASSERT_STR_EQ(screen_title_at(&b->base, 0), "keep-b");
+		}
+	}
 	/* A rejected complete object does not consume the following message. */
 	msgpack_sbuffer_clear(&changed); pack_output(&changed, a->id, "AFTER_BAD_FRAME");
 	decode_buffer(&decoder, &changed, fragmented); ASSERT(line_equals(a, 0, "AFTER_BAD_FRAME"));
@@ -137,6 +172,12 @@ TEST(wire_snapshot_malformed_fields_are_atomic_and_keep_boundaries)
 {
 	int i;
 	for (i = 0; i <= 25; i++) { wire_case(i, 0); wire_case(i, 1); }
+}
+
+TEST(wire_snapshot_metadata_is_safe_and_atomic_in_bulk_and_bytewise_transport)
+{
+	int i;
+	for (i = 34; i <= 40; i++) { wire_case(i, 0); wire_case(i, 1); }
 }
 
 TEST(wire_snapshot_aggregate_byte_and_nesting_bounds)

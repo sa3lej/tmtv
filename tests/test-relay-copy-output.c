@@ -1514,6 +1514,9 @@ main(int argc, char **argv)
 		else
 			RUN_TEST(host_copy_state_routes_and_preserves_clock);
 	} else {
+		RUN_TEST(pane_snapshot_rejects_unsafe_metadata_before_decode);
+		RUN_TEST(pane_snapshot_preserves_safe_metadata_across_repeated_roundtrips);
+		RUN_TEST(pane_snapshot_metadata_limits_and_embedded_nul_are_checked);
 #ifdef ENABLE_SIXEL
 		RUN_TEST(pane_snapshot_clears_stale_current_and_saved_image_owners);
 #endif
@@ -1534,6 +1537,7 @@ main(int argc, char **argv)
 		RUN_TEST(wire_snapshot_media_is_atomic_in_bulk_and_bytewise_transport);
 		RUN_TEST(wire_snapshot_installs_all_panes_and_partial_parser);
 		RUN_TEST(wire_snapshot_malformed_fields_are_atomic_and_keep_boundaries);
+		RUN_TEST(wire_snapshot_metadata_is_safe_and_atomic_in_bulk_and_bytewise_transport);
 		RUN_TEST(pane_snapshot_saved_dimensions_survive_alternate_resize);
 		RUN_TEST(pane_snapshot_saved_cursor_style_survives_after_alternate_exit);
 		RUN_TEST(pane_snapshot_both_grids_share_output_byte_limit);
