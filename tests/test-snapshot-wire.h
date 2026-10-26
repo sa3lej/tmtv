@@ -180,6 +180,110 @@ TEST(wire_snapshot_metadata_is_safe_and_atomic_in_bulk_and_bytewise_transport)
 	for (i = 34; i <= 40; i++) { wire_case(i, 0); wire_case(i, 1); }
 }
 
+static void
+wire_copy_boundary_case(int view, int invalid, int fragmented)
+{
+	struct session *s = session_create(NULL, "copy-boundary", "/",
+	    environ_create(), options_create(global_s_options), NULL);
+	struct window_pane *a = create_pane(), *b = create_pane();
+	struct grid *ga = a->base.grid, *gb = b->base.grid;
+	struct window_mode_entry *clock;
+	struct window_copy_state state;
+	struct input_ctx *input = input_init(NULL, NULL, NULL, NULL);
+	struct tmate_decoder decoder;
+	struct screen source;
+	msgpack_sbuffer sb;
+	msgpack_packer pk;
+	u_int i;
+
+	session_set_current(s, session_attach(s, a->window, 0, NULL));
+	session_attach(s, b->window, 1, NULL);
+	window_pane_set_mode(b, NULL, &window_clock_mode, NULL, NULL, NULL);
+	clock = TAILQ_FIRST(&b->modes);
+	screen_init(&source, 80, 24, 0);
+	msgpack_sbuffer_init(&sb);
+	msgpack_packer_init(&pk, &sb, msgpack_sbuffer_write);
+	msgpack_pack_array(&pk, 3);
+	msgpack_pack_int(&pk, TMTV_SNAPSHOT_OPCODE);
+	msgpack_pack_int(&pk, TMTV_SNAPSHOT_VERSION);
+	msgpack_pack_array(&pk, 2);
+	for (i = 0; i < 2; i++) {
+		msgpack_pack_array(&pk, 3);
+		ASSERT_EQ(tmtv_snapshot_pane_encode(i ? b->id : a->id,
+		    &source, 0, &sb), 0);
+		ASSERT_EQ(input_snapshot_encode(input, &sb), 0);
+		msgpack_pack_array(&pk, i ? 1 : 0);
+		if (!i)
+			continue;
+		msgpack_pack_array(&pk, 3);
+		msgpack_pack_int(&pk, view ? 2 : 1);
+		ASSERT_EQ(tmtv_snapshot_pane_encode(b->id, &source, 0, &sb), 0);
+		msgpack_pack_array(&pk, 7);
+		msgpack_pack_int(&pk, invalid == 4 ? 1 : 0); /* scroll */
+		msgpack_pack_int(&pk, invalid == 1 ? 81 : 80); /* cursor x */
+		msgpack_pack_int(&pk, invalid == 3 ? 24 : 6); /* cursor y */
+		msgpack_pack_int(&pk, 1); /* selected */
+		msgpack_pack_int(&pk, invalid == 2 ? 81 : 80); /* anchor x */
+		msgpack_pack_int(&pk, invalid == 5 ? 24 : 0); /* anchor y */
+		msgpack_pack_int(&pk, 0); /* rectangle */
+	}
+	tmate_decoder_init(&decoder, read_message, NULL);
+	decode_buffer(&decoder, &sb, fragmented);
+	if (invalid) {
+		ASSERT(a->base.grid == ga && b->base.grid == gb);
+		ASSERT(TAILQ_FIRST(&b->modes) == clock);
+	} else {
+		ASSERT(a->base.grid != ga && b->base.grid != gb);
+		ASSERT(window_copy_get_state(b, &state));
+		ASSERT_EQ(state.view_mode, view);
+		ASSERT_EQ(state.cx, 80);
+		ASSERT_EQ(state.selx, 80);
+		ASSERT(window_copy_state_is_valid(b, &state));
+		/* Ordinary updates after reconnect must preserve the same edge. */
+		msgpack_sbuffer_clear(&sb);
+		pack_copy_state(&sb, view, b->id, 0, 79, 6, 1, 80, 0, 0);
+		decode_buffer(&decoder, &sb, fragmented);
+		ASSERT(window_copy_get_state(b, &state));
+		ASSERT_EQ(state.cx, 79);
+		ASSERT_EQ(state.selx, 80);
+		msgpack_sbuffer_clear(&sb);
+		pack_copy_state(&sb, view, b->id, 0, 80, 6, 1, 80, 0, 0);
+		decode_buffer(&decoder, &sb, fragmented);
+		ASSERT(window_copy_get_state(b, &state));
+		ASSERT_EQ(state.cx, 80);
+		ASSERT_EQ(state.selx, 80);
+	}
+	msgpack_sbuffer_clear(&sb);
+	pack_output(&sb, a->id, "AFTER_COPY_BOUNDARY");
+	decode_buffer(&decoder, &sb, fragmented);
+	ASSERT(line_equals(a, 0, "AFTER_COPY_BOUNDARY"));
+	msgpack_unpacker_destroy(&decoder.unpacker);
+	msgpack_sbuffer_destroy(&sb);
+	screen_free(&source);
+	input_free(input);
+	session_destroy(s, 0, __func__);
+	destroy_pane(b);
+	destroy_pane(a);
+	event_loop(EVLOOP_NONBLOCK);
+}
+
+TEST(wire_copy_boundary_matches_snapshot_and_ordinary_updates)
+{
+	int view, fragmented;
+	for (view = 0; view <= 1; view++)
+		for (fragmented = 0; fragmented <= 1; fragmented++)
+			wire_copy_boundary_case(view, 0, fragmented);
+}
+
+TEST(wire_copy_outside_boundary_is_atomic_and_keeps_frame_boundaries)
+{
+	int view, invalid, fragmented;
+	for (view = 0; view <= 1; view++)
+		for (invalid = 1; invalid <= 5; invalid++)
+			for (fragmented = 0; fragmented <= 1; fragmented++)
+				wire_copy_boundary_case(view, invalid, fragmented);
+}
+
 TEST(wire_snapshot_aggregate_byte_and_nesting_bounds)
 {
 	msgpack_object bin[4] = {0}, object, nested[14] = {0};

@@ -394,9 +394,9 @@ TEST(malformed_copy_state_is_atomic_and_keeps_boundaries)
 		{ 0, 5, 6, 1, -3, 1 },
 		{ 0, 5, 6, 1, 3, 2 },
 		{ 0, 5, 24, 0, 0, 0 },
-		{ 0, 80, 6, 0, 0, 0 },
+		{ 0, 81, 6, 0, 0, 0 },
 		{ 2, 5, 6, 0, 0, 0 },
-		{ 0, 5, 6, 1, 80, 0 }
+		{ 0, 5, 6, 1, 81, 0 }
 	};
 	size_t i;
 
@@ -1521,6 +1521,8 @@ main(int argc, char **argv)
 		RUN_TEST(pane_snapshot_clears_stale_current_and_saved_image_owners);
 #endif
 		RUN_TEST(wire_snapshot_aggregate_byte_and_nesting_bounds);
+		RUN_TEST(wire_copy_boundary_matches_snapshot_and_ordinary_updates);
+		RUN_TEST(wire_copy_outside_boundary_is_atomic_and_keeps_frame_boundaries);
 		RUN_TEST(media_snapshot_frozen_mode_uses_its_own_link_table);
 		RUN_TEST(media_snapshot_aggregate_cache_bounds_are_explicit);
 #ifdef ENABLE_SIXEL

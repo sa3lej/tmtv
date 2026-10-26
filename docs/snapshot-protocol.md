@@ -139,6 +139,12 @@ frozen selection remains separate. Backing history expands beyond the default
 100 rows to include the viewport and selected line, up to 2000 rows; an excessive
 selection or unknown mode is refused explicitly.
 
+Copy/view cursor and selection columns may equal the backing width: copy-mode
+commands can place them just after a full-width line. Ordinary state updates
+accept the same end-of-line position as exact snapshots; columns greater than
+the width and rows outside the screen are rejected. This copy-mode position is
+distinct from the base terminal screen's pending-wrap cursor.
+
 Parser version 2 contains current and DECSC-saved cell styles/character sets,
 saved cursor/origin mode, a portable state-table index, intermediate/raw parameter
 buffers, collected OSC/DCS bytes and terminator, parsed parameters, partial UTF-8,
