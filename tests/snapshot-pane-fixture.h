@@ -16,12 +16,18 @@ pane_fixture_screen(struct screen *s)
 	s->cstyle = SCREEN_CURSOR_BAR; s->default_cstyle = SCREEN_CURSOR_BLOCK;
 	s->ccolour = COLOUR_FLAG_RGB|0x6789ab; s->default_ccolour = -1;
 	s->default_mode = MODE_WRAP|MODE_KCURSOR;
+	screen_set_title(s, "saved \342\230\205", 1); screen_push_title(s);
+	screen_set_title(s, "active \\033]52; literal", 1);
+	screen_set_path(s, "/home/lex/Byvattnet \\ backups", 1);
 }
 
 static int
 pane_fixture_expected(struct screen *s)
 {
 	struct grid_cell gc;
+	if (strcmp(s->title, "active \\\\033]52; literal") != 0 ||
+	    s->path == NULL || strcmp(s->path, "/home/lex/Byvattnet \\\\ backups") != 0 ||
+	    s->ntitles != 1 || strcmp(screen_title_at(s, 0), "saved \342\230\205") != 0) return (0);
 	if (s->saved_grid == NULL || s->cx != 10 || s->cy != 3 ||
 	    s->saved_cx != 4 || s->saved_cy != 0 ||
 	    s->rupper != 1 || s->rlower != 19 ||

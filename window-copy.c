@@ -6373,7 +6373,9 @@ window_copy_state_is_valid(struct window_pane *wp,
 	}
 	if (state->oy > hsize)
 		return (0);
-	if (state->cx >= sx || state->cy >= sy)
+	/* Copy mode may sit just after a full-width line, including a selection
+	 * anchor there. Exact reconnect snapshots preserve this same position. */
+	if (state->cx > sx || state->cy >= sy)
 		return (0);
 	if (!state->selection)
 		return (1);
@@ -6383,7 +6385,7 @@ window_copy_state_is_valid(struct window_pane *wp,
 		return (0);
 	if (state->transformed_sely > (int64_t)hsize + sy - 1)
 		return (0);
-	if (state->selx >= sx)
+	if (state->selx > sx)
 		return (0);
 	return (1);
 }

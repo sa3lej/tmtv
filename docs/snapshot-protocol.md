@@ -40,6 +40,15 @@ The pane-screen envelope below carries identity, current and saved screen state.
 Both codecs validate complete objects before allocating grids or interning cell
 data. Failed encoding appends no bytes to the caller's buffer.
 
+Completed OSC metadata (title, optional path and each saved title) is untrusted
+on receipt, even though a normal host has already escaped it. Each string must
+be valid UTF-8, at most 16384 bytes, and contain no C0/C1/DEL controls, embedded
+NUL or `#(` command expansion. Invalid metadata rejects the entire snapshot
+before grids, parser state or modes are installed. Already escaped text,
+including literal backslashes, is preserved byte for byte; it is not escaped
+again on each reconnect. A partial OSC in parser continuation remains parser
+state and is subject to the ordinary terminal parser when completed.
+
 ## Limits and scope
 
 - Default history retention is 100 rows, explicitly truncated at
@@ -129,6 +138,12 @@ once each. Copy/view own independent backing screens, so live output beneath a
 frozen selection remains separate. Backing history expands beyond the default
 100 rows to include the viewport and selected line, up to 2000 rows; an excessive
 selection or unknown mode is refused explicitly.
+
+Copy/view cursor and selection columns may equal the backing width: copy-mode
+commands can place them just after a full-width line. Ordinary state updates
+accept the same end-of-line position as exact snapshots; columns greater than
+the width and rows outside the screen are rejected. This copy-mode position is
+distinct from the base terminal screen's pending-wrap cursor.
 
 Parser version 2 contains current and DECSC-saved cell styles/character sets,
 saved cursor/origin mode, a portable state-table index, intermediate/raw parameter

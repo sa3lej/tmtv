@@ -242,6 +242,79 @@ TEST(real_copy_clock_and_view_modes)
 	destroy_pane(wp);
 }
 
+static void
+copy_boundary_command(struct window_pane *wp, struct session *s,
+    struct winlink *wl, const char *command)
+{
+	struct args_parse parse = { "", 1, 1, NULL };
+	struct args_value values[2] = {
+		{ .type = ARGS_STRING, .string = "send-keys" },
+		{ .type = ARGS_STRING, .string = (char *)command }
+	};
+	struct window_mode_entry *wme = TAILQ_FIRST(&wp->modes);
+	struct args *args;
+	char *cause = NULL;
+
+	args = args_parse(&parse, values, 2, &cause);
+	if (args == NULL)
+		fatalx("copy boundary command: %s", cause);
+	wme->mode->command(wme, NULL, s, wl, args, NULL);
+	args_free(args);
+}
+
+TEST(full_width_copy_commands_produce_valid_cursor_and_selection)
+{
+	struct window_pane *wp = create_pane();
+	struct session *s = session_create(NULL, "copy-boundary", "/",
+	    environ_create(), options_create(global_s_options), NULL);
+	struct winlink *wl;
+	struct args *args = args_create();
+	struct window_copy_state state;
+	struct grid_cell gc = grid_default_cell;
+	u_int x;
+	const char *motions[] = { "previous-word", "next-word", "previous-space",
+	    "next-space", "cursor-left", "cursor-right", "start-of-line" };
+
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	wl = session_attach(s, wp->window, 0, NULL);
+	session_set_current(s, wl);
+	options_set_number(wp->window->options, "mode-keys", MODEKEY_EMACS);
+	for (x = 0; x < wp->sx; x++) {
+		utf8_set(&gc.data, x % 8 == 7 ? ' ' : 'a');
+		/* The final cell must be nonblank to make the line full width. */
+		if (x == wp->sx - 1)
+			utf8_set(&gc.data, 'z');
+		grid_set_cell(wp->base.grid, x, 0, &gc);
+	}
+	window_pane_set_mode(wp, wp, &window_copy_mode, NULL, NULL, args);
+	copy_boundary_command(wp, s, wl, "end-of-line");
+	ASSERT(window_copy_get_state(wp, &state));
+	ASSERT_EQ(state.cx, wp->sx);
+	ASSERT(window_copy_state_is_valid(wp, &state));
+	copy_boundary_command(wp, s, wl, "begin-selection");
+	ASSERT(window_copy_get_state(wp, &state));
+	ASSERT_EQ(state.selection, 1);
+	ASSERT_EQ(state.selx, wp->sx);
+	ASSERT(window_copy_state_is_valid(wp, &state));
+	for (x = 0; x < nitems(motions); x++) {
+		copy_boundary_command(wp, s, wl, "end-of-line");
+		copy_boundary_command(wp, s, wl, motions[x]);
+		ASSERT(window_copy_get_state(wp, &state));
+		ASSERT(window_copy_state_is_valid(wp, &state));
+	}
+	state.cx = wp->sx + 1;
+	ASSERT(!window_copy_state_is_valid(wp, &state));
+	state.cx = wp->sx;
+	state.selx = wp->sx + 1;
+	ASSERT(!window_copy_state_is_valid(wp, &state));
+	session_destroy(s, 0, __func__);
+	destroy_pane(wp);
+	event_loop(EVLOOP_NONBLOCK);
+	args_free(args);
+	tmate_encoder_destroy(&tmate_session.encoder);
+	tmate_session.encoder.buffer = NULL;
+}
+
 TEST(host_exit_only_emits_for_last_copy_mode)
 {
 	struct window_pane *wp = create_pane();
@@ -1011,6 +1084,11 @@ main(int argc, char **argv)
 		if (oe->scope & OPTIONS_TABLE_WINDOW)
 			options_default(global_w_options, oe);
 	}
+	if (argc == 2 && strcmp(argv[1], "--copy-boundary") == 0) {
+		TEST_SUITE_BEGIN("Production copy boundary");
+		RUN_TEST(full_width_copy_commands_produce_valid_cursor_and_selection);
+		TEST_SUITE_END();
+	}
 	if (argc == 2 && strcmp(argv[1], "--emit-pane-snapshot") == 0) {
 		struct screen source;
 		msgpack_sbuffer sb;
@@ -1080,6 +1158,7 @@ main(int argc, char **argv)
 	RUN_TEST(no_stack_replacement_restores_underlying_mode_on_decline);
 	RUN_TEST(existing_mode_reorders_without_reinitializing);
 	RUN_TEST(real_copy_clock_and_view_modes);
+	RUN_TEST(full_width_copy_commands_produce_valid_cursor_and_selection);
 	RUN_TEST(host_exit_only_emits_for_last_copy_mode);
 	RUN_TEST(empty_session_reconnect_keeps_message_boundaries);
 	RUN_TEST(fragmented_empty_session_reconnect_keeps_message_boundaries);
