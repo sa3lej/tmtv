@@ -1,0 +1,69 @@
+---
+import Base from "../../layouts/Base.astro";
+import SiteNav from "../../components/SiteNav.astro";
+import SiteFooter from "../../components/SiteFooter.astro";
+import { release } from "../../data/release";
+import "../../styles/marketing.css";
+---
+
+<Base
+  title="tmtv — Release log"
+  description="What's changing in tmtv. Read the 3.0 preview, upgrade guidance and published release history."
+  canonicalUrl="https://tmtv.se/releases/"
+>
+  <div class="marketing">
+    <SiteNav />
+    <article class="article wrap">
+      <p class="eyebrow">THE PROJECT, MOVING FORWARD</p>
+      <h1>
+        A little more
+        <br />
+        terminal, together.
+      </h1>
+      <p>
+        New releases, practical changes, and what to know before you upgrade.
+      </p>
+      <section class="release-entry">
+        <span class="outline-tag">UPCOMING / {release.upcoming}</span>
+        <h2>More of your terminal, shared.</h2>
+        <p>
+          A tmux 3.8 core. Richer reconnect snapshots. Unicode input that
+          carries what you typed. A major release with a coordinated host and
+          relay upgrade.
+        </p>
+        <p>
+          <a href="/releases/3-0/">
+            Read the release preview and upgrade notes ↗
+          </a>
+        </p>
+      </section>
+      <section class="release-entry">
+        <span class="outline-tag">CURRENT STABLE / {release.current}</span>
+        <h2>Keep your invitation through a reconnect.</h2>
+        <p>
+          2.0.4 introduced stable sharing credentials across automatic
+          reconnects of the same running host. A full host restart creates fresh
+          credentials.
+        </p>
+        <p>
+          <a href="https://github.com/sa3lej/tmtv/releases/tag/v2.0.4">
+            Read the published release ↗
+          </a>
+        </p>
+      </section>
+      <section class="release-entry">
+        <h2>The full history.</h2>
+        <p>
+          Published downloads, checksums and earlier release notes live on
+          GitHub.
+        </p>
+        <p>
+          <a href="https://github.com/sa3lej/tmtv/releases">
+            Browse published releases ↗
+          </a>
+        </p>
+      </section>
+    </article>
+    <SiteFooter />
+  </div>
+</Base>

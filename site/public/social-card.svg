@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#101410"/>
+  <path d="M64 122H1136M64 537H1136" stroke="#35402e"/>
+  <g font-family="Arial,sans-serif"><text x="64" y="83" font-size="34" font-weight="700" fill="#eef1e8"><tspan fill="#d5fb81">&gt;_ </tspan>tmtv</text><text x="1136" y="78" text-anchor="end" fill="#b5c0af" font-size="18" letter-spacing="2">TERMINAL SHARING</text>
+  <text x="64" y="255" fill="#eef1e8" font-size="86" font-weight="700" letter-spacing="-4">Your terminal.</text><text x="64" y="355" fill="#d5fb81" font-size="86" font-weight="700" letter-spacing="-4">Better together.</text>
+  <text x="68" y="427" fill="#bcc6b5" font-size="25">Pair. Troubleshoot. Teach.</text>
+  <text x="68" y="473" fill="#bcc6b5" font-size="22">SSH + optional browser access. Open source.</text>
+  <text x="64" y="583" fill="#d5fb81" font-size="19" letter-spacing="1">tmtv.se</text><text x="1136" y="583" text-anchor="end" fill="#b5c0af" font-size="18">3.0 / RELEASE PREVIEW</text></g>
+  <rect x="850" y="191" width="286" height="276" rx="12" fill="#1d261a" stroke="#536346"/>
+  <path d="M850 233H1136" stroke="#536346"/><circle cx="874" cy="213" r="5" fill="#e6a38c"/><circle cx="891" cy="213" r="5" fill="#d5c98c"/><circle cx="908" cy="213" r="5" fill="#a8c49a"/>
+  <g font-family="monospace" font-size="20" fill="#c3d0b6"><text x="873" y="280"><tspan fill="#d5fb81">❯ </tspan>tmtv</text><text x="873" y="326">ssh TOKEN@tmtv.se</text><text x="873" y="381" fill="#d5fb81">[ pair / watch ]</text><text x="873" y="429">❯ _</text></g>
+</svg>

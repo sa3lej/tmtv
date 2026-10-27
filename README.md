@@ -1,6 +1,8 @@
 # tmtv
 
-Terminal sharing for IT professionals. Share your terminal over SSH and the web — built on tmux 3.8.
+Your terminal. Better together. Share a session over SSH or an optional web viewer to pair, troubleshoot and teach. Open source and self-hostable.
+
+**On develop: tmtv 3.0 is in preparation, built on tmux 3.8.** The current published stable release is 2.0.4. Read the [3.0 release preview and coordinated upgrade guide](docs/releases/v3.0.0.md) and [changelog](CHANGELOG.md) before upgrading a hosting client.
 
 ## Quick start
 

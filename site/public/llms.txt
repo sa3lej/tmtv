@@ -1,113 +1,56 @@
-tmtv — SSH terminal sharing, built on modern tmux.
+# tmtv — Your terminal. Better together.
 
-tmtv lets you share your terminal session instantly over SSH. Your pair
-runs one command and lands in your session. No plugins, no accounts, no
-browser required. It also offers an optional web viewer for browser-based
-access — watch read-only, or type along with a read-write token.
+Open-source terminal sharing over SSH and an optional browser viewer. Pair,
+troubleshoot and teach in a shared terminal. Host platforms: Linux and macOS.
+License: ISC. Author: Lars-Erik Jonsson.
 
-tmtv is a fork of tmate, rebased on tmux 3.6a, bringing nine years of
-tmux improvements that tmate never had: popup menus, extended keys, sixel
-graphics, and more.
+Current published stable release: 2.0.4.
+Upcoming release: 3.0.0, in preparation, based on pinned tmux 3.8 sources and
+sharing protocol 11. Upcoming does not mean published or deployed.
 
-Current version: 2.0.4
-License: ISC (same as tmux)
-Author: Lars-Erik Jonsson (SA3LEJ)
-Repository: https://github.com/sa3lej/tmtv
-Website: https://tmtv.se
-Releases: https://github.com/sa3lej/tmtv/releases
-Homebrew: brew install sa3lej/tap/tmtv
+## Documentation
 
+- Website: https://tmtv.se/
+- Source and usage: https://github.com/sa3lej/tmtv
+- Release log: https://tmtv.se/releases/
+- 3.0 preview and coordinated upgrade guide: https://tmtv.se/releases/3-0/
+- Published releases: https://github.com/sa3lej/tmtv/releases
+- Snapshot limits: https://github.com/sa3lej/tmtv/blob/develop/docs/snapshot-protocol.md
 
-INSTALL
+## Install and join
 
-  curl -fsSL https://tmtv.se/install.sh | sh
+Install the published release: curl -fsSL https://tmtv.se/install.sh | sh
+macOS Homebrew: brew install sa3lej/tap/tmtv
+Run tmtv to start a host. SSH guests use: ssh TOKEN@tmtv.se
+Ordinary SSH guests do not need tmtv installed.
 
-Supported platforms: Linux (amd64, arm64, arm32v7, arm32v6, i386) and
-macOS (arm64, amd64). Linux binaries are fully static (musl, zero
-external dependencies). You can also build from source.
+Web sharing is opt-in: tmtv set -g tmtv-web-sharing on
+Browser input is a separate opt-in: tmtv set -g tmtv-web-input on
+The host supplies a browser link at https://tmtv.se/s/TOKEN when web sharing is enabled.
 
+## Capabilities and boundaries
 
-USAGE
+Separate read-only and read-write invitations. Read-only guests cannot type and
+do not receive shared clipboard access. Web input additionally requires the host's
+input setting. Optional session passwords and self-hosted relays are supported.
+Treat access tokens as credentials. Named public URLs are not secret access controls.
+The relay processes terminal data; SSH transport encryption is not end-to-end
+host-to-guest encryption through an untrusted relay.
 
-  1. Run "tmtv" to start a shared session.
-  2. tmtv prints two SSH tokens:
-     - A read-write token for pair programming (full terminal access).
-     - A read-only token for observers (view only, no input).
-  3. Your pair connects with: ssh TOKEN@tmtv.se
-  4. A web viewer link is also provided for browser-based access at
-     https://tmtv.se/s/TOKEN (no install needed for viewers).
+The same running host can automatically reconnect and retain its identity and links.
+Full host restarts create fresh credentials. Session names are availability-based;
+name collisions during a gap can change links. Recording uses asciinema cast format.
 
-Named sessions:
+3.0 adds a tmux 3.8 core, richer bounded layout/snapshot transfers and portable
+Unicode sharing input. Supported reconnect state includes text attributes, OSC 8
+hyperlinks and SIXEL images. Documented size/history and state limitations apply.
+Unsupported live sharing layouts end sharing explicitly; local operation can continue.
 
-  tmtv new-session -s myproject
-  tmtv attach -t myproject
+## 3.0 upgrade
 
-Detach with the standard tmux prefix (Ctrl-B, then D). Reattach by
-running "tmtv" again — it auto-attaches to your detached session.
-
-
-KEY FEATURES
-
-- Stable SSH/web access links across automatic host reconnects (client and
-  relay v2.0.4+); private in-memory identity, fresh credentials on full restart
-- SSH terminal sharing with read-write and read-only access tokens
-- Built on tmux 3.6a — full modern tmux feature set
-- Shared clipboard — copy in the session and it syncs to every viewer
-  (host and viewers, SSH and web), so you can copy once and paste anywhere
-- SIXEL inline graphics — images render in the terminal and the web viewer
-- Password-protected sessions with modern SSH crypto and isolated tokens
-- Web viewer powered by xterm.js (SSE streaming, 256-color, RGB,
-  Unicode, multi-pane layout, themes); read-only or read-write input
-- Viewer counting in the status bar (SSH and web viewers separately)
-- GitHub Action (sa3lej/action-tmtv) — SSH into a failing CI job to debug
-  it live; a drop-in replacement for action-tmate
-- Hardened, resilient server: survives malformed input, output floods, and
-  slow or abusive web clients without dropping SSH sessions
-- Static Linux binaries with zero dependencies
-- One-line install via curl
-- Homebrew tap for macOS
-- Self-hostable server (tmtv-server)
-- ISC license (permissive, same as tmux)
-
-
-COMPARISON
-
-vs tmate: tmate is stuck on tmux 2.4 (2017) and no longer maintained.
-tmtv is rebased on tmux 3.6a with all modern features.
-
-vs VS Code Live Share: tmtv is terminal-native. No IDE required. Works
-with any editor, any workflow, any shell.
-
-vs Tuple/screen sharing: tmtv shares the terminal session itself, not
-pixels. Low bandwidth, low latency, works over SSH.
-
-
-BUILD FROM SOURCE
-
-Linux (Debian/Ubuntu):
-  sudo apt-get install build-essential autoconf automake pkg-config \
-    libevent-dev libncurses-dev libssh-dev libmsgpack-dev libbsd-dev \
-    bison libutf8proc-dev
-  sh autogen.sh && ./configure && make
-
-macOS:
-  brew install autoconf automake pkg-config libevent libssh msgpack-c \
-    bison utf8proc
-  sh autogen.sh && ./configure --enable-utf8proc && make
-
-
-SELF-HOSTING
-
-tmtv-server is the relay component. Build it alongside the client from
-the same source tree. The server handles SSH relay, authentication, SSE
-streaming for the web viewer, and session management. See the repository
-for deployment details and the Caddyfile for reverse proxy configuration.
-
-
-LINKS
-
-Homepage: https://tmtv.se
-Source code: https://github.com/sa3lej/tmtv
-Releases: https://github.com/sa3lej/tmtv/releases
-Install script: https://tmtv.se/install.sh
-Demo: https://tmtv.se/tmtv-demo.gif
+Protocol 11 is incompatible with 2.x and earlier develop protocol versions. Upgrade
+hosts and relays together with matching web assets. Wait for the public service's
+announced cutover before switching a host that uses it. Replacing the executable
+does not upgrade an already running host. Save work before restarting: this ends
+the local tmux server and may terminate pane programs. Restarted hosts need new links.
+Publication and production deployment are separate operations.

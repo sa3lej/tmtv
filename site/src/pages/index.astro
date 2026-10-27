@@ -1,471 +1,551 @@
 ---
-import Base from '../layouts/Base.astro';
+import Base from "../layouts/Base.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import { release } from "../data/release";
+import "../styles/marketing.css";
+const schema = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "tmtv",
+  description:
+    "Open-source terminal sharing over SSH and an optional web viewer. Pair, troubleshoot and teach in the same terminal.",
+  url: "https://tmtv.se",
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "Linux, macOS",
+  softwareVersion: release.current,
+  license: "https://github.com/sa3lej/tmtv/blob/develop/LICENSE",
+  codeRepository: release.repository,
+  author: { "@type": "Person", name: "Lars-Erik Jonsson" },
+};
 ---
 
-<Base title="tmtv — SSH terminal sharing built on modern tmux">
-  <!-- Structured data -->
-  <script type="application/ld+json" is:inline>
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "tmtv",
-    "description": "Share your terminal over SSH with tmtv — a modern tmate alternative built on tmux 3.8. Pair program in your terminal with read-write and read-only SSH tokens.",
-    "url": "https://tmtv.se",
-    "applicationCategory": "DeveloperApplication",
-    "operatingSystem": "Linux, macOS",
-    "license": "https://opensource.org/licenses/ISC",
-    "softwareVersion": "3.0.0",
-    "author": {
-      "@type": "Person",
-      "name": "Lars-Erik Jonsson",
-      "url": "https://github.com/sa3lej"
-    },
-    "codeRepository": "https://github.com/sa3lej/tmtv",
-    "downloadUrl": "https://tmtv.se/install.sh",
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    }
-  }
-  </script>
-
-  <!-- Background gradients -->
-  <div class="fixed inset-0 -z-10 overflow-hidden">
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_-10%,rgba(108,158,252,0.16)_0%,transparent_55%)]"></div>
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_85%_10%,rgba(192,132,252,0.14)_0%,transparent_55%)]"></div>
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_120%,rgba(61,220,132,0.10)_0%,transparent_55%)]"></div>
-    <!-- Faint terminal grid -->
-    <div class="absolute inset-0 opacity-[0.18] [background-image:linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:42px_42px] [mask-image:radial-gradient(ellipse_at_50%_0%,black_0%,transparent_75%)]"></div>
-  </div>
-
-  <!-- Hero -->
-  <div class="flex flex-col items-center justify-center min-h-[62vh] px-5 pt-16 pb-4 text-center">
-    <div class="relative">
-      <div class="absolute -inset-x-10 -inset-y-6 bg-[radial-gradient(ellipse_at_center,rgba(108,158,252,0.25)_0%,transparent_70%)] blur-2xl -z-10" aria-hidden="true"></div>
-      <h1 class="font-mono text-6xl sm:text-7xl font-bold tracking-tight mb-3 bg-gradient-to-br from-tmtv-blue via-tmtv-purple to-tmtv-green bg-clip-text text-transparent">
-        tmtv
-      </h1>
-    </div>
-    <p class="text-gray-200 text-lg sm:text-xl tracking-wide font-normal mb-5 max-w-md">
-      Share your terminal over SSH.
-      <span class="text-gray-400">That's it.</span>
-    </p>
-
-    <!-- Trust pills -->
-    <div class="flex flex-wrap items-center justify-center gap-2 mb-11">
-      <span class="inline-flex items-center gap-1.5 font-mono text-[11px] font-medium text-tmtv-green bg-tmtv-green/10 border border-tmtv-green/20 px-2.5 py-1 rounded-full">
-        <span class="w-1.5 h-1.5 rounded-full bg-tmtv-green motion-safe:animate-blink" aria-hidden="true"></span>
-        v3.0.0
-      </span>
-      <span class="font-mono text-[11px] font-medium text-tmtv-blue bg-tmtv-blue/10 border border-tmtv-blue/20 px-2.5 py-1 rounded-full">built on tmux 3.8</span>
-      <span class="font-mono text-[11px] font-medium text-gray-300 bg-white/[0.04] border border-white/[0.08] px-2.5 py-1 rounded-full">ISC licensed</span>
-    </div>
-
-    <!-- SSH quickstart -->
-    <div class="relative bg-gradient-to-b from-white/[0.05] to-white/[0.02] border border-white/[0.08] rounded-2xl p-7 sm:p-9 w-[540px] max-w-[92vw] backdrop-blur-xl shadow-2xl shadow-black/40 text-left">
-      <div class="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-tmtv-blue/40 to-transparent" aria-hidden="true"></div>
-      <h2 class="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.18em] mb-4">Get started</h2>
-      <div class="group bg-black/50 rounded-xl px-4 py-3.5 font-mono text-sm flex items-center justify-between gap-4 mb-5 border border-white/[0.05] ring-1 ring-inset ring-white/[0.02]">
-        <code class="text-tmtv-green whitespace-nowrap overflow-x-auto"><span class="text-gray-500 select-none">$ </span>curl -fsSL https://tmtv.se/install.sh | sh</code>
-        <button id="copy-btn" class="text-gray-400 hover:text-tmtv-green transition-colors shrink-0 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded" aria-label="Copy install command">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-        </button>
+<Base
+  title="tmtv — Your terminal. Better together."
+  description="Share a terminal over SSH or in the browser. Pair, troubleshoot and teach with read-write and read-only access. Open source, self-hostable, built on tmux."
+>
+  <script type="application/ld+json" set:html={JSON.stringify(schema)} />
+  <div class="marketing">
+    <SiteNav />
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <a class="release-chip" href="/releases/3-0/">
+          <span class="chip-dot" aria-hidden="true"></span> ON THE WAY / tmtv{" "}
+          {release.upcoming} <span aria-hidden="true">↗</span>
+        </a>
+        <h1 id="hero-title">
+          Your terminal.
+          <br />
+          <span>Better together.</span>
+        </h1>
+        <p class="hero-lead">
+          Bring someone into the session.
+          <br />
+          Keep your tools, your shell, your flow.
+        </p>
+        <p class="hero-detail">
+          Share over SSH. Invite a browser. Pair on a fix, walk through a
+          command, or let the whole team watch.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="#install">
+            Start sharing <span aria-hidden="true">↗</span>
+          </a>
+          <a class="text-link" href="#demo">
+            Explore a session <span aria-hidden="true">↓</span>
+          </a>
+        </div>
+        <p class="hero-meta">
+          OPEN SOURCE <span>·</span> LINUX & macOS <span>·</span> NO ACCOUNT
+          REQUIRED
+        </p>
       </div>
-      <div class="bg-black/50 rounded-xl p-4 font-mono text-[13px] text-gray-300 leading-relaxed space-y-1 border border-white/[0.05]">
-        <div><span class="text-gray-500 select-none">$</span> <span class="text-tmtv-green">tmtv</span><span class="inline-block w-2 h-4 align-text-bottom ml-0.5 bg-tmtv-green/80 motion-safe:animate-blink" aria-hidden="true"></span></div>
-        <div><span class="text-gray-500 select-none">#</span> <span class="text-gray-500">share the SSH token with your pair</span></div>
-        <div><span class="text-gray-500 select-none">$</span> ssh <span class="text-tmtv-blue">TOKEN</span>@tmtv.se</div>
-      </div>
-      <p class="mt-3 text-xs text-gray-400">
-        Linux and macOS. Or <code class="font-mono bg-white/5 px-1.5 py-0.5 rounded text-[11px] text-gray-300">brew install sa3lej/tap/tmtv</code> on macOS.
-        Or build from <a href="https://github.com/sa3lej/tmtv" class="text-gray-300 hover:text-gray-200 transition-colors underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">source</a>.
-      </p>
-
-      <!-- Divider -->
-      <div class="border-t border-white/[0.06] my-6"></div>
-
-      <!-- View a session (secondary) -->
-      <h3 class="text-[11px] font-medium text-gray-400 tracking-wide mb-3">View a session in the browser</h3>
-      <form id="session-form" class="flex gap-2">
-        <label for="token" class="sr-only">Session token</label>
-        <input
-          type="text"
-          id="token"
-          placeholder="session token"
-          autocomplete="off"
-          spellcheck="false"
-          class="flex-1 bg-white/5 border border-white/[0.06] rounded-lg px-3 py-2.5 font-mono text-xs text-gray-200 placeholder:text-gray-400 outline-none focus:border-tmtv-blue/40 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 transition-colors"
-        />
-        <button
-          type="submit"
-          class="bg-white/[0.06] border border-white/[0.08] rounded-lg px-4 py-2.5 text-xs font-medium text-gray-300 hover:bg-white/[0.1] active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 focus-visible:ring-offset-2 focus-visible:ring-offset-tmtv-bg transition-all whitespace-nowrap"
+      <figure
+        class="session-preview"
+        id="demo"
+        aria-label="Illustrative terminal sharing example"
+      >
+        <div class="terminal-header">
+          <span class="terminal-dots" aria-hidden="true">
+            <i></i>
+            <i></i>
+            <i></i>
+          </span>
+          <span>tmtv / working-together</span>
+          <span class="terminal-signal" aria-hidden="true">
+            ▂▄▆
+          </span>
+        </div>
+        <div class="terminal-body">
+          <div class="terminal-path">
+            ~/projects/hello <span>on main</span>
+          </div>
+          <div class="terminal-command">
+            <span>❯</span> tmtv
+          </div>
+          <div class="terminal-note">One terminal. A few good minds.</div>
+          <div class="terminal-rule"></div>
+          <div class="terminal-label">INVITE YOUR PAIR</div>
+          <div class="terminal-ssh">
+            ssh <span>TOKEN</span>@tmtv.se
+          </div>
+          <div class="terminal-label second">INVITE AN OBSERVER</div>
+          <div class="terminal-ssh">
+            ssh <span>RO_TOKEN</span>@tmtv.se
+          </div>
+          <div class="terminal-rule"></div>
+          <div class="example-output" id="example-output" aria-live="polite">
+            <p class="example-title">Work in the same session.</p>
+            <p class="example-line">Your pair joins with a read-write token.</p>
+            <p class="example-line">Both of you can type.</p>
+          </div>
+          <div class="terminal-prompt">
+            <span>❯</span>
+            <b class="cursor" aria-hidden="true"></b>
+          </div>
+        </div>
+        <div class="terminal-status">
+          <span>[0] hello: shell*</span>
+          <span>SSH + WEB</span>
+        </div>
+        <div
+          class="demo-options"
+          role="group"
+          aria-label="Explore sharing modes"
         >
-          Watch
-        </button>
+          <button type="button" data-demo="pair" aria-pressed="true">
+            01 / Pair
+          </button>
+          <button type="button" data-demo="watch" aria-pressed="false">
+            02 / Watch
+          </button>
+          <button type="button" data-demo="reconnect" aria-pressed="false">
+            03 / Reconnect
+          </button>
+        </div>
+        <figcaption>
+          INTERACTIVE EXAMPLE · PLACEHOLDER TOKENS, NOT A LIVE SESSION
+        </figcaption>
+      </figure>
+    </section>
+    <div class="principles wrap">
+      <span>
+        <b>SSH</b> Your favourite terminal
+      </span>
+      <span>
+        <b>WEB</b> A link is enough to watch
+      </span>
+      <span>
+        <b>YOU</b> Choose who can type
+      </span>
+    </div>
+
+    <section class="section wrap" id="how-it-works" aria-labelledby="how-title">
+      <div class="section-heading">
+        <p class="eyebrow">A SHORT PATH TO WORKING TOGETHER</p>
+        <h2 id="how-title">
+          One starts.
+          <br />
+          Everyone joins in.
+        </h2>
+        <p>
+          Run tmtv on the host. Your guests bring an SSH client—or, when you
+          enable web sharing, just a browser.
+        </p>
+      </div>
+      <div class="steps">
+        <article>
+          <span class="step-number">01</span>
+          <h3>Open your session.</h3>
+          <p>
+            Start tmtv and work in a familiar tmux environment. Your shell and
+            tools stay on your machine.
+          </p>
+          <code>tmtv</code>
+        </article>
+        <article>
+          <span class="step-number">02</span>
+          <h3>Choose the invitation.</h3>
+          <p>
+            Share the read-write token with a collaborator. Send a read-only
+            token to people who just need to follow along.
+          </p>
+          <code>ssh TOKEN@tmtv.se</code>
+        </article>
+        <article>
+          <span class="step-number">03</span>
+          <h3>Open it to the browser.</h3>
+          <p>
+            Web sharing is your choice. Browser guests watch by default; typing
+            needs a read-write token and your explicit input setting.
+          </p>
+          <code>tmtv set -g tmtv-web-sharing on</code>
+        </article>
+      </div>
+    </section>
+
+    <section class="release-feature wrap" aria-labelledby="new-title">
+      <div class="release-feature-heading">
+        <span class="eyebrow">THE NEXT CHAPTER / 3.0 PREVIEW</span>
+        <span class="outline-tag">BUILT ON tmux 3.8</span>
+      </div>
+      <div class="release-feature-grid">
+        <div>
+          <h2 id="new-title">
+            More of your terminal.
+            <br />
+            <em>Shared faithfully.</em>
+          </h2>
+          <p>
+            Colour. Unicode. Layouts. The details are the work. tmtv 3.0 brings
+            a newer tmux core and a richer sharing protocol to keep more of that
+            context together.
+          </p>
+          <a class="text-link" href="/releases/3-0/">
+            Read the 3.0 release preview <span aria-hidden="true">↗</span>
+          </a>
+        </div>
+        <div class="release-points">
+          <article>
+            <span>01</span>
+            <div>
+              <h3>Modern tmux, shared.</h3>
+              <p>
+                A tmux 3.8 core with layout hierarchy, floating panes and
+                linked-window state carried to the relay.
+              </p>
+            </div>
+          </article>
+          <article>
+            <span>02</span>
+            <div>
+              <h3>Pick up the picture.</h3>
+              <p>
+                Richer reconnect snapshots restore supported screen state, text
+                attributes, hyperlinks and SIXEL images within documented
+                limits.
+              </p>
+            </div>
+          </article>
+          <article>
+            <span>03</span>
+            <div>
+              <h3>Type what you mean.</h3>
+              <p>
+                Portable Unicode keystrokes and literal UTF-8 paste, with
+                bracketed paste when the receiving application requests it.
+              </p>
+            </div>
+          </article>
+        </div>
+      </div>
+      <p class="upgrade-note">
+        <strong>A coordinated upgrade.</strong> 3.0 requires matching hosting
+        clients and relays. The currently published release is {release.current}
+        ; the public-service cutover will be announced separately.
+      </p>
+    </section>
+
+    <section class="section wrap" aria-labelledby="use-title">
+      <div class="section-heading inline-heading">
+        <div>
+          <p class="eyebrow">GOOD COMPANY FOR REAL WORK</p>
+          <h2 id="use-title">
+            For the “come look at this”
+            <br />
+            moments.
+          </h2>
+        </div>
+        <p>Keep the conversation close to the command line.</p>
+      </div>
+      <div class="use-cases">
+        <article>
+          <div class="use-symbol" aria-hidden="true">
+            &gt;_ &gt;_
+          </div>
+          <h3>Pair on a tricky fix.</h3>
+          <p>
+            Use the same shell, inspect the same output, and take turns at the
+            keyboard. No editor extension required.
+          </p>
+          <span class="small-label">DEVELOPERS & MAINTAINERS</span>
+        </article>
+        <article>
+          <div class="use-symbol" aria-hidden="true">
+            [ ! ]
+          </div>
+          <h3>Get another set of eyes.</h3>
+          <p>
+            Walk a teammate through logs or a failing command. Let observers
+            follow without giving them input access.
+          </p>
+          <span class="small-label">OPERATIONS & TROUBLESHOOTING</span>
+        </article>
+        <article>
+          <div class="use-symbol" aria-hidden="true">
+            ./show
+          </div>
+          <h3>Make the lesson live.</h3>
+          <p>
+            Show a workflow in the browser. Record the session as an asciinema
+            cast when you want something to revisit.
+          </p>
+          <span class="small-label">TEACHING & LIVE DEMOS</span>
+        </article>
+      </div>
+    </section>
+
+    <section class="control-section wrap" aria-labelledby="control-title">
+      <div>
+        <p class="eyebrow">YOUR SESSION. YOUR CALL.</p>
+        <h2 id="control-title">Invite deliberately.</h2>
+        <p>
+          Read-only and read-write access are separate. Web sharing and browser
+          input are opt-in. Add a session password, or run your own relay.
+        </p>
+        <a class="text-link" href="https://github.com/sa3lej/tmtv#self-hosting">
+          Explore self-hosting ↗
+        </a>
+      </div>
+      <div class="control-facts">
+        <p>
+          <span>01</span> View-only guests stay view-only.
+        </p>
+        <p>
+          <span>02</span> You choose when the browser can type.
+        </p>
+        <p>
+          <span>03</span> Open code. Your own relay if you want it.
+        </p>
+        <small>
+          The relay processes terminal data, so use one you trust. Treat access
+          tokens as credentials. Named public URLs are not a substitute for a
+          password.
+        </small>
+      </div>
+    </section>
+
+    <section
+      class="section wrap install-section"
+      id="install"
+      aria-labelledby="install-title"
+    >
+      <div class="section-heading">
+        <p class="eyebrow">BRING YOUR TERMINAL</p>
+        <h2 id="install-title">
+          The next session
+          <br />
+          starts here.
+        </h2>
+        <p>
+          Install the current stable release, then run <code>tmtv</code>.
+          Joining over SSH requires no tmtv installation on your guest’s
+          machine.
+        </p>
+        <p class="stable-label">
+          STABLE {release.current} <span>·</span> 3.0 IN PREPARATION
+        </p>
+      </div>
+      <div class="install-card">
+        <div class="install-card-head">
+          <h3>Install tmtv</h3>
+          <span>Linux / macOS</span>
+        </div>
+        <div class="command-option">
+          <p class="command-label">Install script</p>
+          <div class="copy-row">
+            <code id="install-command">{release.installer}</code>
+            <button
+              type="button"
+              data-copy={release.installer}
+              aria-label="Copy install script command"
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+        <div class="command-option">
+          <p class="command-label">Homebrew · macOS</p>
+          <div class="copy-row">
+            <code id="brew-command">{release.homebrew}</code>
+            <button
+              type="button"
+              data-copy={release.homebrew}
+              aria-label="Copy Homebrew command"
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+        <p id="copy-status" role="status" aria-live="polite"></p>
+        <p class="install-links">
+          <a href="https://github.com/sa3lej/tmtv/releases/latest">
+            Download binaries ↗
+          </a>
+          <a href="/install.sh">Inspect the installer ↗</a>
+        </p>
+        <p class="fine-print">
+          The installer follows the published release. A 3.0 host will need a
+          3.0 relay; wait for the announced service cutover before upgrading a
+          public-service host.
+        </p>
+      </div>
+    </section>
+
+    <section class="join-section wrap" id="join" aria-labelledby="join-title">
+      <div>
+        <p class="eyebrow">ALREADY HAVE AN INVITATION?</p>
+        <h2 id="join-title">Pull up a terminal.</h2>
+        <p>
+          Enter the token or session name your host gave you.
+          <br />
+          The host must have web sharing enabled.
+        </p>
+      </div>
+      <form id="session-form">
+        <label for="token">Session token or name</label>
+        <div class="join-row">
+          <input
+            id="token"
+            name="token"
+            type="text"
+            required
+            maxlength="256"
+            placeholder="Your session token"
+            autocomplete="off"
+            spellcheck="false"
+            aria-describedby="join-error"
+          />
+          <button class="button primary" type="submit">
+            Join <span aria-hidden="true">↗</span>
+          </button>
+        </div>
+        <p id="join-error" role="alert"></p>
+        <p class="fine-print">
+          Got a full link? Open it directly in your browser.
+        </p>
       </form>
-      <p class="mt-2.5 text-[11px] text-gray-400 leading-relaxed">
-        Or open a direct link: <code class="font-mono bg-white/5 px-1.5 py-0.5 rounded text-[11px]">/s/TOKEN</code>
-      </p>
-    </div>
+    </section>
+
+    <section class="section wrap faq-section" aria-labelledby="faq-title">
+      <div>
+        <p class="eyebrow">A FEW THINGS WORTH KNOWING</p>
+        <h2 id="faq-title">Before you connect.</h2>
+      </div>
+      <div class="faq-list">
+        <details>
+          <summary>Is this a screen-sharing app?</summary>
+          <p>
+            tmtv shares terminal sessions. For a desktop GUI, voice or video,
+            use a screen-sharing or calling tool alongside it.
+          </p>
+        </details>
+        <details>
+          <summary>Can someone watch without typing?</summary>
+          <p>
+            Yes. Use a read-only token. Browser input is also off by default;
+            enabling it still does not give a read-only guest write access.
+            Shared clipboard access excludes read-only viewers.
+          </p>
+        </details>
+        <details>
+          <summary>What happens if the connection drops?</summary>
+          <p>
+            The same running host can reconnect automatically and retain its
+            identity and links. Restarting the host creates fresh credentials.
+            Session names are availability-based, so a name collision during a
+            gap can change a link.
+          </p>
+        </details>
+        <details>
+          <summary>Is tmtv 3.0 ready to install?</summary>
+          <p>
+            3.0 is being prepared. The published stable release is{" "}
+            {release.current}. Host and relay must upgrade together for 3.0; see
+            the <a href="/releases/3-0/">release preview and upgrade notes</a>{" "}
+            before changing versions.
+          </p>
+        </details>
+        <details>
+          <summary>Where does the terminal data go?</summary>
+          <p>
+            Through the configured relay, which processes the session and serves
+            viewers. SSH transport encryption is not end-to-end encryption from
+            host to guest through an untrusted relay. Self-host if you need to
+            control that infrastructure.
+          </p>
+        </details>
+      </div>
+    </section>
+    <SiteFooter />
   </div>
-
-  <!-- Demo GIF -->
-  <div class="max-w-2xl mx-auto px-5 pb-16">
-    <div class="rounded-xl overflow-hidden border border-white/[0.06] shadow-2xl">
-      <img
-        src="/tmtv-demo.gif"
-        alt="tmtv terminal sharing session — SSH pair programming with optional web viewer"
-        class="w-full motion-safe:block motion-reduce:hidden"
-      />
-    </div>
-    <p class="text-center text-[11px] text-gray-400 mt-3 motion-reduce:block hidden motion-reduce:visible">
-      <a href="/tmtv-demo.gif" class="underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">View demo animation</a>
-    </p>
-  </div>
-
-  <!-- How it works -->
-  <div class="max-w-3xl mx-auto px-5 pb-20">
-    <div class="text-center mb-10">
-      <h2 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] mb-2">How it works</h2>
-      <div class="mx-auto w-10 h-px bg-gradient-to-r from-transparent via-tmtv-blue/50 to-transparent" aria-hidden="true"></div>
-    </div>
-
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      <div class="relative bg-white/[0.02] border border-white/[0.06] rounded-2xl p-6">
-        <div class="flex items-center justify-center w-9 h-9 rounded-full bg-tmtv-blue/10 border border-tmtv-blue/25 font-mono text-sm font-bold text-tmtv-blue mb-4" aria-hidden="true">1</div>
-        <h3 class="text-sm font-semibold text-gray-200 mb-2">Share</h3>
-        <p class="text-xs text-gray-400 leading-relaxed">
-          Run <code class="font-mono text-[11px] bg-tmtv-blue/10 text-tmtv-blue px-1.5 py-0.5 rounded">tmtv</code>.
-          You get two SSH tokens: read-write for your pair, read-only for spectators. Add a password to lock the door.
-        </p>
-      </div>
-      <div class="relative bg-white/[0.02] border border-white/[0.06] rounded-2xl p-6">
-        <div class="flex items-center justify-center w-9 h-9 rounded-full bg-tmtv-purple/10 border border-tmtv-purple/25 font-mono text-sm font-bold text-tmtv-purple mb-4" aria-hidden="true">2</div>
-        <h3 class="text-sm font-semibold text-gray-200 mb-2">Connect</h3>
-        <p class="text-xs text-gray-400 leading-relaxed">
-          Your pair runs <code class="font-mono text-[11px] bg-tmtv-blue/10 text-tmtv-blue px-1.5 py-0.5 rounded">ssh TOKEN@tmtv.se</code> and lands in your session. No plugins, no accounts, no browser.
-        </p>
-      </div>
-      <div class="relative bg-white/[0.02] border border-white/[0.06] rounded-2xl p-6">
-        <div class="flex items-center justify-center w-9 h-9 rounded-full bg-tmtv-green/10 border border-tmtv-green/25 font-mono text-sm font-bold text-tmtv-green mb-4" aria-hidden="true">3</div>
-        <h3 class="text-sm font-semibold text-gray-200 mb-2">Or use the browser</h3>
-        <p class="text-xs text-gray-400 leading-relaxed">
-          Open the web viewer if you don't have a terminal handy. Watch, or type along with a read-write token. Zero install.
-        </p>
-      </div>
-    </div>
-  </div>
-
-  <!-- Features -->
-  <div class="max-w-4xl mx-auto px-5 pb-20">
-    <div class="text-center mb-10">
-      <h2 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] mb-2">Everything you get</h2>
-      <div class="mx-auto w-10 h-px bg-gradient-to-r from-transparent via-tmtv-blue/50 to-transparent" aria-hidden="true"></div>
-    </div>
-
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-
-      <!-- SSH sharing -->
-      <div class="group bg-white/[0.02] border border-white/[0.06] rounded-2xl p-5 hover:bg-white/[0.04] hover:border-tmtv-blue/30 motion-safe:transition-all motion-safe:duration-200 hover:-translate-y-0.5">
-        <div class="w-9 h-9 rounded-lg bg-tmtv-blue/10 border border-tmtv-blue/20 flex items-center justify-center mb-3 text-tmtv-blue">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
-        </div>
-        <h3 class="text-sm font-semibold text-gray-200 mb-1.5">SSH sharing</h3>
-        <p class="text-xs text-gray-400 leading-relaxed">Read-write and read-only tokens. Your pair edits, spectators just watch — all over plain SSH.</p>
-      </div>
-
-      <!-- Shared clipboard (NEW) -->
-      <div class="group bg-white/[0.02] border border-tmtv-green/20 rounded-2xl p-5 hover:bg-white/[0.04] hover:border-tmtv-green/40 motion-safe:transition-all motion-safe:duration-200 hover:-translate-y-0.5">
-        <div class="flex items-start justify-between mb-3">
-          <div class="w-9 h-9 rounded-lg bg-tmtv-green/10 border border-tmtv-green/20 flex items-center justify-center text-tmtv-green">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg>
-          </div>
-          <span class="text-[9px] font-bold uppercase tracking-wider text-tmtv-green bg-tmtv-green/15 px-1.5 py-0.5 rounded">New</span>
-        </div>
-        <h3 class="text-sm font-semibold text-gray-200 mb-1.5">Shared clipboard</h3>
-        <p class="text-xs text-gray-400 leading-relaxed">Copy once, paste everywhere. Yanks sync across every viewer — host and guests, SSH and web.</p>
-      </div>
-
-      <!-- Inline graphics / SIXEL (NEW) -->
-      <div class="group bg-white/[0.02] border border-tmtv-purple/20 rounded-2xl p-5 hover:bg-white/[0.04] hover:border-tmtv-purple/40 motion-safe:transition-all motion-safe:duration-200 hover:-translate-y-0.5">
-        <div class="flex items-start justify-between mb-3">
-          <div class="w-9 h-9 rounded-lg bg-tmtv-purple/10 border border-tmtv-purple/20 flex items-center justify-center text-tmtv-purple">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-          </div>
-          <span class="text-[9px] font-bold uppercase tracking-wider text-tmtv-purple bg-tmtv-purple/15 px-1.5 py-0.5 rounded">New</span>
-        </div>
-        <h3 class="text-sm font-semibold text-gray-200 mb-1.5">Inline graphics</h3>
-        <p class="text-xs text-gray-400 leading-relaxed">SIXEL images render right in the terminal — and in the web viewer. Charts, previews, QR codes.</p>
-      </div>
-
-      <!-- Session security -->
-      <div class="group bg-white/[0.02] border border-white/[0.06] rounded-2xl p-5 hover:bg-white/[0.04] hover:border-tmtv-blue/30 motion-safe:transition-all motion-safe:duration-200 hover:-translate-y-0.5">
-        <div class="w-9 h-9 rounded-lg bg-tmtv-blue/10 border border-tmtv-blue/20 flex items-center justify-center mb-3 text-tmtv-blue">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        </div>
-        <h3 class="text-sm font-semibold text-gray-200 mb-1.5">Locked down</h3>
-        <p class="text-xs text-gray-400 leading-relaxed">Password-protect any session. Modern SSH crypto, isolated per-session tokens — no weak algorithms.</p>
-      </div>
-
-      <!-- Modern tmux -->
-      <div class="group bg-white/[0.02] border border-white/[0.06] rounded-2xl p-5 hover:bg-white/[0.04] hover:border-tmtv-green/30 motion-safe:transition-all motion-safe:duration-200 hover:-translate-y-0.5">
-        <div class="w-9 h-9 rounded-lg bg-tmtv-green/10 border border-tmtv-green/20 flex items-center justify-center mb-3 text-tmtv-green">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M9 12h12"/></svg>
-        </div>
-        <h3 class="text-sm font-semibold text-gray-200 mb-1.5">Modern tmux</h3>
-        <p class="text-xs text-gray-400 leading-relaxed">Built on tmux 3.8: popup menus, extended keys, split panes, true color — nine years past tmate.</p>
-      </div>
-
-      <!-- Web viewer -->
-      <div class="group bg-white/[0.02] border border-white/[0.06] rounded-2xl p-5 hover:bg-white/[0.04] hover:border-tmtv-purple/30 motion-safe:transition-all motion-safe:duration-200 hover:-translate-y-0.5">
-        <div class="w-9 h-9 rounded-lg bg-tmtv-purple/10 border border-tmtv-purple/20 flex items-center justify-center mb-3 text-tmtv-purple">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-        </div>
-        <h3 class="text-sm font-semibold text-gray-200 mb-1.5">Web viewer</h3>
-        <p class="text-xs text-gray-400 leading-relaxed">Watch or type along right in the browser. xterm.js rendering, themes, zero install.</p>
-      </div>
-
-    </div>
-
-    <!-- Secondary trust row -->
-    <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 mt-7 text-[11px] text-gray-400">
-      <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-tmtv-green" aria-hidden="true"></span>Self-hostable — <code class="font-mono bg-white/5 px-1 rounded text-gray-300">docker compose up</code></span>
-      <span class="text-white/15" aria-hidden="true">·</span>
-      <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-tmtv-blue" aria-hidden="true"></span>Linux + macOS</span>
-      <span class="text-white/15" aria-hidden="true">·</span>
-      <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-tmtv-purple" aria-hidden="true"></span>Static binaries, zero deps</span>
-      <span class="text-white/15" aria-hidden="true">·</span>
-      <span class="inline-flex items-center gap-1.5"><span class="w-1 h-1 rounded-full bg-gray-500" aria-hidden="true"></span>ISC licensed</span>
-    </div>
-  </div>
-
-  <!-- CI debugging -->
-  <div class="max-w-3xl mx-auto px-5 pb-20">
-    <div class="bg-gradient-to-b from-white/[0.04] to-white/[0.01] border border-white/[0.07] rounded-2xl p-6 sm:p-7">
-      <div class="flex items-center gap-2.5 mb-3">
-        <div class="w-8 h-8 rounded-lg bg-tmtv-purple/10 border border-tmtv-purple/20 flex items-center justify-center text-tmtv-purple shrink-0">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>
-        </div>
-        <h3 class="text-sm font-semibold text-gray-200">Debug CI failures over SSH</h3>
-      </div>
-      <p class="text-xs text-gray-400 leading-relaxed mb-4">
-        Drop <code class="font-mono text-[11px] bg-tmtv-blue/10 text-tmtv-blue px-1.5 py-0.5 rounded">sa3lej/action-tmtv@v1</code> into your GitHub Actions workflow. When a job fails, SSH straight into the runner and debug it live. A drop-in replacement for <code class="font-mono text-[11px] bg-white/5 px-1.5 py-0.5 rounded text-gray-300">action-tmate</code>.
-      </p>
-      <div class="rounded-xl overflow-hidden border border-white/[0.06]">
-        <div class="flex items-center gap-1.5 bg-white/[0.03] px-3.5 py-2 border-b border-white/[0.06]">
-          <span class="w-2.5 h-2.5 rounded-full bg-tmtv-red/70" aria-hidden="true"></span>
-          <span class="w-2.5 h-2.5 rounded-full bg-yellow-400/60" aria-hidden="true"></span>
-          <span class="w-2.5 h-2.5 rounded-full bg-tmtv-green/60" aria-hidden="true"></span>
-          <span class="ml-2 font-mono text-[10px] text-gray-500">.github/workflows/ci.yml</span>
-        </div>
-        <div class="bg-black/50 p-4 font-mono text-[12px] text-gray-300 leading-relaxed">
-          <div><span class="text-tmtv-purple">- name:</span> <span class="text-gray-300">Debug via SSH</span></div>
-          <div><span class="text-gray-600">&nbsp;&nbsp;</span><span class="text-tmtv-purple">uses:</span> <span class="text-tmtv-blue">sa3lej/action-tmtv@v1</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Screenshots -->
-  <div class="max-w-3xl mx-auto px-5 pb-20">
-    <div class="text-center mb-8">
-      <h2 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] mb-2">What it looks like</h2>
-      <div class="mx-auto w-10 h-px bg-gradient-to-r from-transparent via-tmtv-green/50 to-transparent" aria-hidden="true"></div>
-    </div>
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      <figure class="group rounded-xl overflow-hidden border border-white/[0.06] bg-white/[0.02] motion-safe:transition-all motion-safe:duration-200 hover:border-white/[0.12] hover:-translate-y-0.5">
-        <img src="/screenshot-default.png" alt="tmtv default theme showing terminal output" class="w-full" loading="lazy" />
-        <figcaption class="text-center text-[11px] text-gray-400 py-2.5 border-t border-white/[0.05]">Default theme</figcaption>
-      </figure>
-      <figure class="group rounded-xl overflow-hidden border border-white/[0.06] bg-white/[0.02] motion-safe:transition-all motion-safe:duration-200 hover:border-white/[0.12] hover:-translate-y-0.5">
-        <img src="/screenshot-tmux.png" alt="tmtv viewer showing a normal tmux session with split panes" class="w-full" loading="lazy" />
-        <figcaption class="text-center text-[11px] text-gray-400 py-2.5 border-t border-white/[0.05]">Normal session</figcaption>
-      </figure>
-      <figure class="group rounded-xl overflow-hidden border border-white/[0.06] bg-white/[0.02] motion-safe:transition-all motion-safe:duration-200 hover:border-white/[0.12] hover:-translate-y-0.5">
-        <img src="/screenshot-tv.png" alt="tmtv TV theme with rounded corners and CRT effect" class="w-full" loading="lazy" />
-        <figcaption class="text-center text-[11px] text-gray-400 py-2.5 border-t border-white/[0.05]">TV theme</figcaption>
-      </figure>
-    </div>
-    <p class="text-center text-[11px] text-gray-400 mt-4">
-      Try it: add <code class="font-mono bg-white/5 px-1.5 py-0.5 rounded text-gray-300">?theme=tv</code> to any viewer URL
-    </p>
-  </div>
-
-  <!-- Why tmtv? -->
-  <div class="max-w-2xl mx-auto px-5 pb-20">
-    <div class="text-center mb-8">
-      <h2 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] mb-2">Why tmtv?</h2>
-      <div class="mx-auto w-10 h-px bg-gradient-to-r from-transparent via-tmtv-purple/50 to-transparent" aria-hidden="true"></div>
-    </div>
-    <div class="relative bg-gradient-to-b from-white/[0.04] to-white/[0.01] border border-white/[0.07] rounded-2xl p-7 sm:p-8 text-sm text-gray-300 leading-relaxed space-y-3">
-      <div class="absolute left-0 top-7 bottom-7 w-px bg-gradient-to-b from-tmtv-blue/40 via-tmtv-purple/30 to-tmtv-green/40" aria-hidden="true"></div>
-      <p>
-        I loved <a href="https://github.com/tmate-io/tmate" class="text-tmtv-blue hover:underline focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">tmate</a> but it was stuck on tmux 2.4 from 2017. Nine years of tmux improvements — popup menus, extended keys, sixel graphics — all missing.
-      </p>
-      <p>
-        So I rebased it on <strong class="text-gray-200">tmux 3.8</strong> and shipped it. Same SSH-based terminal sharing you know, with a modern tmux underneath. The web viewer is a bonus — handy when someone just wants to watch without opening a terminal.
-      </p>
-      <p>
-        No IDE plugins. No accounts. No Electron app. Just SSH.
-      </p>
-    </div>
-  </div>
-
-  <!-- What's new -->
-  <div class="max-w-2xl mx-auto px-5 pb-16">
-    <div class="text-center mb-10">
-      <h2 class="text-xs font-medium text-gray-400 uppercase tracking-[0.15em] mb-2">What's new</h2>
-      <div class="mx-auto w-10 h-px bg-gradient-to-r from-transparent via-tmtv-green/50 to-transparent" aria-hidden="true"></div>
-    </div>
-
-    <div class="space-y-6" role="list" aria-label="Release history">
-
-      <div class="relative ml-4 sm:ml-8">
-        <!-- Vertical timeline line -->
-        <div class="absolute left-[7px] top-3 bottom-3 w-px bg-gradient-to-b from-tmtv-green via-tmtv-blue/60 to-tmtv-blue/20" aria-hidden="true"></div>
-
-        <!-- v3.0.0 — Latest release, featured -->
-        <div class="relative pl-8 pb-8 group" role="listitem">
-          <div class="absolute left-0 top-1.5 w-[15px] h-[15px] rounded-full border-2 border-tmtv-green bg-tmtv-bg motion-safe:group-hover:shadow-[0_0_8px_rgba(61,220,132,0.5)] motion-safe:transition-shadow" aria-hidden="true">
-            <div class="absolute inset-[3px] rounded-full bg-tmtv-green"></div>
-          </div>
-          <div class="bg-white/[0.03] border border-tmtv-green/20 rounded-xl p-5 motion-safe:group-hover:border-tmtv-green/40 motion-safe:transition-colors">
-            <div class="flex flex-wrap items-center gap-2.5 mb-2">
-              <span class="inline-flex items-center font-mono text-xs font-bold bg-tmtv-green/15 text-tmtv-green px-2.5 py-1 rounded-md tracking-wide">v3.0.0</span>
-              <span class="text-[11px] font-medium text-tmtv-green/70 uppercase tracking-wider">Latest</span>
-            </div>
-            <p class="text-[15px] text-gray-200 font-medium leading-snug">A new tmux core. A coordinated upgrade.</p>
-            <p class="text-xs text-gray-400/80 mt-1.5 leading-relaxed">Built on tmux 3.8, with portable Unicode input, bounded sharing snapshots and reconnect restoration. Hosting clients and relays must upgrade together to protocol 11; older hosts cannot connect to the new relay. Restarting a host creates new sharing links.</p>
-          </div>
-        </div>
-
-        <!-- v2.0.4 -->
-        <div class="relative pl-8 pb-8 group" role="listitem">
-          <div class="absolute left-0 top-1.5 w-[15px] h-[15px] rounded-full border-2 border-tmtv-green bg-tmtv-bg motion-safe:group-hover:shadow-[0_0_8px_rgba(61,220,132,0.5)] motion-safe:transition-shadow" aria-hidden="true">
-            <div class="absolute inset-[3px] rounded-full bg-tmtv-green"></div>
-          </div>
-          <div class="bg-white/[0.03] border border-tmtv-green/20 rounded-xl p-5 motion-safe:group-hover:border-tmtv-green/40 motion-safe:transition-colors">
-            <div class="flex flex-wrap items-center gap-2.5 mb-2">
-              <span class="inline-flex items-center font-mono text-xs font-bold bg-tmtv-green/15 text-tmtv-green px-2.5 py-1 rounded-md tracking-wide">v2.0.4</span>
-              <span class="text-[11px] font-medium text-tmtv-green/70 uppercase tracking-wider">Previous</span>
-            </div>
-            <p class="text-[15px] text-gray-200 font-medium leading-snug">Same session. Same links.</p>
-            <p class="text-xs text-gray-400/80 mt-1.5 leading-relaxed">Automatic reconnects now preserve your SSH and web links, backed by a private in-memory host identity. Named sessions keep their assigned names, RW links get stronger tokens, and an old connection can no longer erase its replacement's aliases. Upgrade the hosting client for continuity; a fresh start still creates fresh credentials.</p>
-          </div>
-        </div>
-
-        <!-- v2.0.3 -->
-        <div class="relative pl-8 pb-5 group" role="listitem">
-          <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-blue/60" aria-hidden="true"></div>
-          <div class="flex flex-wrap items-baseline gap-3 py-1">
-            <span class="font-mono text-xs font-semibold text-tmtv-blue/80 shrink-0">v2.0.3</span>
-            <span class="text-sm text-gray-400/80 leading-snug">The relay keeps moving.</span>
-          </div>
-        </div>
-
-        <!-- v2.0.2 -->
-        <div class="relative pl-8 pb-5 group" role="listitem">
-          <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-blue/60 motion-safe:group-hover:bg-tmtv-blue motion-safe:transition-colors" aria-hidden="true"></div>
-          <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
-            <span class="font-mono text-xs font-semibold text-tmtv-blue/80 shrink-0">v2.0.2</span>
-            <span class="text-sm text-gray-400/80 leading-snug">Nothing rattles the relay.</span>
-          </div>
-        </div>
-
-        <!-- v2.0.1 -->
-        <div class="relative pl-8 pb-5 group" role="listitem">
-          <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-blue/60 motion-safe:group-hover:bg-tmtv-blue motion-safe:transition-colors" aria-hidden="true"></div>
-          <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
-            <span class="font-mono text-xs font-semibold text-tmtv-blue/80 shrink-0">v2.0.1</span>
-            <span class="text-sm text-gray-400/80 leading-snug">Exit means exit.</span>
-          </div>
-        </div>
-
-        <!-- v2.0.0 -->
-        <div class="relative pl-8 pb-5 group" role="listitem">
-          <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-blue/60 motion-safe:group-hover:bg-tmtv-blue motion-safe:transition-colors" aria-hidden="true"></div>
-          <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
-            <span class="font-mono text-xs font-semibold text-tmtv-blue/80 shrink-0">v2.0.0</span>
-            <span class="text-sm text-gray-400/80 leading-snug">The server that never gives up.</span>
-          </div>
-        </div>
-
-        <!-- v1.9.3 -->
-        <div class="relative pl-8 pb-2 group" role="listitem">
-          <div class="absolute left-[3px] top-2.5 w-[9px] h-[9px] rounded-full bg-tmtv-blue/60 motion-safe:group-hover:bg-tmtv-blue motion-safe:transition-colors" aria-hidden="true"></div>
-          <div class="flex flex-wrap items-baseline gap-3 py-1 motion-safe:group-hover:translate-x-1 motion-safe:transition-transform">
-            <span class="font-mono text-xs font-semibold text-tmtv-blue/80 shrink-0">v1.9.3</span>
-            <span class="text-sm text-gray-400/80 leading-snug">The server that sleeps when it should.</span>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <p class="text-center text-xs text-gray-400 mt-8">
-      <a href="https://github.com/sa3lej/tmtv/releases" class="inline-flex items-center gap-1.5 text-gray-300 hover:text-gray-200 transition-colors underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">
-        Full changelog on GitHub
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17l9.2-9.2M17 17V7H7"/></svg>
-      </a>
-    </p>
-  </div>
-
-  <!-- About -->
-  <div class="max-w-2xl mx-auto px-5 pb-16">
-    <div class="text-center space-y-3">
-      <p class="text-sm text-gray-300">
-        Built by <strong class="text-gray-200">Lars-Erik Jonsson</strong> (<a href="https://github.com/sa3lej" class="text-tmtv-blue hover:underline focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">SA3LEJ</a>) with <a href="https://claude.ai/code" class="text-tmtv-purple hover:underline focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">Claude Code</a>.
-      </p>
-      <div class="flex items-center justify-center gap-4">
-        <a href="https://github.com/sa3lej/tmtv" class="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-300 transition-colors focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-          GitHub
-        </a>
-        <a href="https://buymeacoffee.com/lejo" class="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-300 transition-colors focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" x2="6" y1="2" y2="4"/><line x1="10" x2="10" y1="2" y2="4"/><line x1="14" x2="14" y1="2" y2="4"/></svg>
-          Buy me a coffee
-        </a>
-      </div>
-    </div>
-  </div>
-
-  <!-- Footer -->
-  <footer class="py-8 text-center text-[11px] text-gray-400 tracking-wide">
-    powered by <a href="https://github.com/sa3lej/tmtv" class="text-gray-300 hover:text-gray-200 transition-colors focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">tmtv</a>
-    &mdash; terminal sharing for IT professionals
-  </footer>
-
   <script>
-    document.getElementById('session-form')?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const token = (document.getElementById('token') as HTMLInputElement).value.trim();
-      if (token) window.location.href = '/s/' + encodeURIComponent(token);
-    });
-    document.getElementById('copy-btn')?.addEventListener('click', () => {
-      const text = 'curl -fsSL https://tmtv.se/install.sh | sh';
-      const done = () => {
-        const btn = document.getElementById('copy-btn')!;
-        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
-        setTimeout(() => {
-          btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
-        }, 1500);
-      };
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(text).then(done).catch(() => { fallbackCopy(text); done(); });
-      } else {
-        fallbackCopy(text); done();
-      }
-    });
-    function fallbackCopy(text: string) {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
+    const modes = {
+      pair: [
+        "Work in the same session.",
+        "Your pair joins with a read-write token.",
+        "Both of you can type.",
+      ],
+      watch: [
+        "Let the team follow along.",
+        "An observer joins with a read-only token.",
+        "They can see the output, but cannot type.",
+      ],
+      reconnect: [
+        "Same running host. Same identity.",
+        "Automatic reconnects retain sharing credentials.",
+        "A full host restart creates fresh links.",
+      ],
+    };
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-demo]")
+      .forEach((button) =>
+        button.addEventListener("click", () => {
+          document
+            .querySelectorAll("[data-demo]")
+            .forEach((b) =>
+              b.setAttribute("aria-pressed", String(b === button)),
+            );
+          const lines = modes[button.dataset.demo as keyof typeof modes];
+          const output = document.getElementById("example-output")!;
+          Array.from(output.children).forEach((line, index) => {
+            line.textContent = lines[index];
+          });
+        }),
+      );
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-copy]")
+      .forEach((button) =>
+        button.addEventListener("click", async () => {
+          const status = document.getElementById("copy-status")!;
+          try {
+            await navigator.clipboard.writeText(button.dataset.copy!);
+            status.textContent = "Command copied. Paste it into your terminal.";
+            button.textContent = "Copied";
+            setTimeout(() => {
+              button.textContent = "Copy";
+            }, 2000);
+          } catch {
+            status.textContent =
+              "Copy is unavailable here. Select the command above and copy it manually.";
+          }
+        }),
+      );
+    document
+      .getElementById("session-form")
+      ?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const token = (
+          document.getElementById("token") as HTMLInputElement
+        ).value.trim();
+        const error = document.getElementById("join-error")!;
+        if (!/^[A-Za-z0-9_-]{1,256}$/.test(token)) {
+          error.textContent =
+            "Enter a session token or name, without a URL or spaces.";
+          return;
+        }
+        error.textContent = "";
+        window.location.assign("/s/" + encodeURIComponent(token));
+      });
   </script>
 </Base>

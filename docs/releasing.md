@@ -86,3 +86,38 @@ not change either. Restart hosts using the matching old client and issue new
 links. Neither forward deployment nor rollback promises uninterrupted sessions
 or preserved links across host restarts. Verify RW/RO access and web rendering
 again before announcing recovery.
+
+## Website preview and complete asset delivery
+
+The prepared website labels 3.0 as upcoming and keeps the installer on published
+stable 2.0.4. Its shared metadata is in `site/src/data/release.ts`; release prose,
+`CHANGELOG.md`, the README and `site/public/llms.txt` must also reflect the actual
+publication and relay-cutover state when those events occur. Publishing a preview
+page does not authorize switching the public relay or announcing that 3.0 is live.
+
+Build and create a complete local web bundle with:
+
+```sh
+npm ci --prefix site
+npm run build --prefix site
+sh scripts/package-site.sh /absolute/path/to/tmtv-web.tar.gz
+```
+
+The bundle includes the nested `/releases/` pages, all static assets, `sitemap.xml`,
+and the top-level `viewer.html`/`viewer.js` used by Caddy's session routes. Caddy's
+existing static-file fallback can serve those nested pages.
+
+**Deployment integration remains necessary before publishing this redesign.**
+The current production workflow and staging upload scripts select individual
+root-level files; that selection omits nested release pages. Production delegates
+installation to an out-of-repository `/usr/local/bin/tmtv-deploy-web` helper.
+Inspect that helper and its permissions in the authorized deployment environment,
+then adapt upload and installation together to deliver the complete bundle. Do not
+assume copying a tarball means the helper installs it. Keep the previous complete
+web tree for rollback and verify `/`, `/releases/`, `/releases/3-0/`, the social card,
+installer and an actual authorized viewer route after deployment. This preparation
+has not changed or exercised that remote helper.
+
+For a local preview without deployment, use `npm run preview --prefix site --
+--host 127.0.0.1`. See `docs/release-positioning.md` for the researched positioning
+and `docs/releases/v3.0.0-launch-copy.md` for unpublished announcement drafts.
