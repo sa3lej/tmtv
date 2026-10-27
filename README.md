@@ -524,6 +524,12 @@ ssh-keygen -lf /etc/tmtv/keys/ssh_host_rsa_key.pub
 
 #### Unit and functional tests
 
+The offline installer regression target (`make -C tests installer`) runs the
+production installer against disposable downloads and installation paths. It needs
+Python 3, `sha256sum` and `shasum`; it makes no network requests or real installations.
+It checks verified installs and preservation of existing binaries on verification
+failures. Linux `make -C tests all` includes this target.
+
 Run locally — no server required:
 
 ```sh

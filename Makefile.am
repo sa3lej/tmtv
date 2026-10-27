@@ -605,3 +605,6 @@ EXTRA_DIST += tests/snapshot-parser-fixture.h docs/snapshot-protocol.md
 EXTRA_DIST += tests/test-snapshot-pane.h tests/snapshot-pane-fixture.h
 
 EXTRA_DIST += tests/test-snapshot-parser.h
+
+# Offline installer regression and its production script.
+EXTRA_DIST += tests/test-installer.py site/public/install.sh

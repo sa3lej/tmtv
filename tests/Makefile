@@ -41,7 +41,12 @@ relay-browser-e2e:
 .PHONY: host
 host: unit core38-commands mode-lifecycle functional hooks prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
 
-all: host relay-copy-output server-unit session-cleanup
+all: host relay-copy-output server-unit session-cleanup installer
+
+# Offline installer checks; real sha256sum and shasum tools, no live installs.
+.PHONY: installer
+installer:
+	$(PYTHON) test-installer.py
 
 unit: $(UNIT_TESTS)
 	@echo ""

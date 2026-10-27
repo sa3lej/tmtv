@@ -18,6 +18,9 @@ release assets are on [GitHub Releases](https://github.com/sa3lej/tmtv/releases)
 
 ### Fixed
 
+- Require successful SHA-256 verification before installing downloaded binaries;
+  missing, invalid or ambiguous checksums and hash-tool failures now stop installation.
+
 - Reject unsafe reconnect snapshot metadata atomically.
 - Preserve valid full-width copy-mode cursor and selection positions across
   ordinary updates and reconnect snapshots.

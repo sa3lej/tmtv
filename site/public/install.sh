@@ -63,6 +63,14 @@ latest_version() {
 
 main() {
   need curl
+  need awk
+  if command -v sha256sum >/dev/null 2>&1; then
+    HASH_TOOL=sha256sum
+  elif command -v shasum >/dev/null 2>&1; then
+    HASH_TOOL=shasum
+  else
+    err "SHA-256 verification requires sha256sum or shasum; nothing installed."
+  fi
 
   OS="$(detect_os)"
   ARCH="$(detect_arch "$OS")"
@@ -83,44 +91,58 @@ main() {
   CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
 
   say "Downloading ${ASSET}..."
-  TMPDIR="$(mktemp -d)"
-  trap 'rm -rf "$TMPDIR"' EXIT
+  DOWNLOAD_DIR="$(mktemp -d)"
+  trap 'rm -rf "$DOWNLOAD_DIR"' EXIT
 
-  curl -fsSL -o "${TMPDIR}/${ASSET}" "$URL" \
+  curl -fsSL -o "${DOWNLOAD_DIR}/${ASSET}" "$URL" \
     || err "Download failed. Binary may not exist for ${OS}-${ARCH}."
 
-  # verify checksum if sha256sum is available
-  if command -v sha256sum >/dev/null 2>&1; then
-    say "Verifying checksum..."
-    if curl -fsSL -o "${TMPDIR}/checksums.txt" "$CHECKSUMS_URL" 2>/dev/null; then
-      EXPECTED="$(grep "${ASSET}$" "${TMPDIR}/checksums.txt" | awk '{print $1}')"
-      if [ -n "$EXPECTED" ]; then
-        ACTUAL="$(sha256sum "${TMPDIR}/${ASSET}" | awk '{print $1}')"
-        [ "$EXPECTED" = "$ACTUAL" ] || err "Checksum mismatch (expected ${EXPECTED}, got ${ACTUAL})"
-        say "Checksum OK"
-      fi
-    fi
-  elif command -v shasum >/dev/null 2>&1; then
-    say "Verifying checksum..."
-    if curl -fsSL -o "${TMPDIR}/checksums.txt" "$CHECKSUMS_URL" 2>/dev/null; then
-      EXPECTED="$(grep "${ASSET}$" "${TMPDIR}/checksums.txt" | awk '{print $1}')"
-      if [ -n "$EXPECTED" ]; then
-        ACTUAL="$(shasum -a 256 "${TMPDIR}/${ASSET}" | awk '{print $1}')"
-        [ "$EXPECTED" = "$ACTUAL" ] || err "Checksum mismatch (expected ${EXPECTED}, got ${ACTUAL})"
-        say "Checksum OK"
-      fi
-    fi
-  fi
+  # A download is installable only after an exact, unambiguous SHA-256 match.
+  say "Verifying checksum..."
+  curl -fsSL -o "${DOWNLOAD_DIR}/checksums.txt" "$CHECKSUMS_URL" \
+    || err "Could not download release checksums; nothing installed."
 
-  chmod +x "${TMPDIR}/${ASSET}"
+  EXPECTED="$(awk -v asset="$ASSET" '
+    $2 == asset || $2 == "*" asset {
+      count++
+      if (NF != 2 || length($1) != 64 || $1 ~ /[^0-9a-fA-F]/)
+        invalid = 1
+      digest = tolower($1)
+    }
+    END {
+      if (count != 1 || invalid) exit 1
+      print digest
+    }
+  ' "${DOWNLOAD_DIR}/checksums.txt")" \
+    || err "Missing, invalid or duplicate checksum for ${ASSET}; nothing installed."
+
+  if [ "$HASH_TOOL" = sha256sum ]; then
+    HASH_OUTPUT="$(sha256sum "${DOWNLOAD_DIR}/${ASSET}")" \
+      || err "SHA-256 calculation failed; nothing installed."
+  else
+    HASH_OUTPUT="$(shasum -a 256 "${DOWNLOAD_DIR}/${ASSET}")" \
+      || err "SHA-256 calculation failed; nothing installed."
+  fi
+  ACTUAL="$(printf '%s\n' "$HASH_OUTPUT" | awk '
+    NR == 1 && length($1) == 64 && $1 !~ /[^0-9a-fA-F]/ { digest = tolower($1) }
+    END {
+      if (NR != 1 || digest == "") exit 1
+      print digest
+    }
+  ')" || err "Invalid SHA-256 tool output; nothing installed."
+  [ "$EXPECTED" = "$ACTUAL" ] \
+    || err "Checksum mismatch (expected ${EXPECTED}, got ${ACTUAL}); nothing installed."
+  say "Checksum OK"
+
+  chmod +x "${DOWNLOAD_DIR}/${ASSET}"
 
   # install
   mkdir -p "$INSTALL_DIR"
   say "Installing to ${INSTALL_DIR}/${BINARY}..."
   if [ -w "$INSTALL_DIR" ]; then
-    mv "${TMPDIR}/${ASSET}" "${INSTALL_DIR}/${BINARY}"
+    mv "${DOWNLOAD_DIR}/${ASSET}" "${INSTALL_DIR}/${BINARY}"
   else
-    sudo mv "${TMPDIR}/${ASSET}" "${INSTALL_DIR}/${BINARY}"
+    sudo mv "${DOWNLOAD_DIR}/${ASSET}" "${INSTALL_DIR}/${BINARY}"
   fi
 
   say "Done! Run 'tmtv' to start a session."

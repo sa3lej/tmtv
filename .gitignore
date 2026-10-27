@@ -29,6 +29,7 @@ action-tmtv/
 tests/test-msgpack
 tests/test-*
 !tests/test-relay-e2e.py
+!tests/test-installer.py
 tests/__pycache__/
 !tests/test-*.c
 !tests/test-*.h
