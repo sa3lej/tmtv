@@ -3,7 +3,7 @@
 User-facing changes are grouped by release. The canonical publication history and
 release assets are on [GitHub Releases](https://github.com/sa3lej/tmtv/releases).
 
-## 3.0.0 — Unreleased
+## 3.0.0 — 2026-10-27
 
 ### Changed
 
@@ -30,13 +30,12 @@ release assets are on [GitHub Releases](https://github.com/sa3lej/tmtv/releases)
 ### Release tooling and documentation
 
 - Add develop validation and separate release publication from production deployment.
-- Add a redesigned website, release preview, upgrade guidance and clear stable-versus-upcoming version labels.
+- Add a redesigned website, release log, upgrade guidance and current stable version labels.
 - Refresh compatible website dependencies; the remaining dependency audit findings
   are documented in `docs/releasing.md` and are not claimed resolved.
 
-See the [3.0 release preview](docs/releases/v3.0.0.md) for behaviour, limits,
-upgrade interruption and rollback guidance. This entry describes the prepared
-candidate, not a published or deployed release.
+See the [3.0 release notes](docs/releases/v3.0.0.md) for behaviour, limits,
+upgrade interruption, validation limitations and rollback guidance.
 
 ## 2.0.4 — 2026-09-06
 

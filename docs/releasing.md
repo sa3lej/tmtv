@@ -28,6 +28,11 @@ OSC 8 links and SIXEL. Test native Safari against staging following
 engine test. Record commit, OS/browser versions, results and logs in release
 validation evidence. Use the project's bd tracker for unresolved failures.
 
+For v3.0.0, the maintainer explicitly waived native Safari verification and the
+supplementary protocol robustness review on 27 October 2026. Record these as
+coverage limitations, not passed checks. The website dependency applicability
+assessment below is deferred for this release.
+
 ## Website dependency audit
 
 Run `npm audit --prefix site` when validating the candidate. The compatible
@@ -89,13 +94,13 @@ links. Neither forward deployment nor rollback promises uninterrupted sessions
 or preserved links across host restarts. Verify RW/RO access and web rendering
 again before announcing recovery.
 
-## Website preview and complete asset delivery
+## Website release metadata and complete asset delivery
 
-The prepared website labels 3.0 as upcoming and keeps the installer on published
-stable 2.0.4. Its shared metadata is in `site/src/data/release.ts`; release prose,
-`CHANGELOG.md`, the README and `site/public/llms.txt` must also reflect the actual
-publication and relay-cutover state when those events occur. Publishing a preview
-page does not authorize switching the public relay or announcing that 3.0 is live.
+The v3.0.0 web bundle labels 3.0.0 as stable and must only be deployed after
+publication and the matching relay upgrade. Shared metadata lives in
+`site/src/data/release.ts`; release prose, `CHANGELOG.md`, the README and
+`site/public/llms.txt` must stay consistent. The deployment workflow installs
+the server before the web bundle. Verify public health and routes after cutover.
 
 Build and create a complete local web bundle with:
 

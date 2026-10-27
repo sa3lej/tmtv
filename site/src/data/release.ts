@@ -1,8 +1,7 @@
-// Change only after release publication AND the public relay cutover are verified.
+// Release bundle metadata. Deploy only after this release is published and the relay is upgraded.
 export const release = {
-  current: "2.0.4",
-  upcoming: "3.0.0",
-  stage: "preview",
+  current: "3.0.0",
+  stage: "released",
   repository: "https://github.com/sa3lej/tmtv",
   installer: "curl -fsSL https://tmtv.se/install.sh | sh",
   homebrew: "brew install sa3lej/tap/tmtv",

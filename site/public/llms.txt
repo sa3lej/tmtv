@@ -4,16 +4,15 @@ Open-source terminal sharing over SSH and an optional browser viewer. Pair,
 troubleshoot and teach in a shared terminal. Host platforms: Linux and macOS.
 License: ISC. Author: Lars-Erik Jonsson.
 
-Current published stable release: 2.0.4.
-Upcoming release: 3.0.0, in preparation, based on pinned tmux 3.8 sources and
-sharing protocol 11. Upcoming does not mean published or deployed.
+Current stable release: 3.0.0, based on pinned tmux 3.8 sources and sharing protocol 11.
+The public service requires a matching 3.0 hosting client.
 
 ## Documentation
 
 - Website: https://tmtv.se/
 - Source and usage: https://github.com/sa3lej/tmtv
 - Release log: https://tmtv.se/releases/
-- 3.0 preview and coordinated upgrade guide: https://tmtv.se/releases/3-0/
+- 3.0 release notes and coordinated upgrade guide: https://tmtv.se/releases/3-0/
 - Published releases: https://github.com/sa3lej/tmtv/releases
 - Snapshot limits: https://github.com/sa3lej/tmtv/blob/develop/docs/snapshot-protocol.md
 
@@ -49,8 +48,7 @@ Unsupported live sharing layouts end sharing explicitly; local operation can con
 ## 3.0 upgrade
 
 Protocol 11 is incompatible with 2.x and earlier develop protocol versions. Upgrade
-hosts and relays together with matching web assets. Wait for the public service's
-announced cutover before switching a host that uses it. Replacing the executable
+hosts and relays together with matching web assets. The public service requires a matching 3.0 host. Replacing the executable
 does not upgrade an already running host. Save work before restarting: this ends
 the local tmux server and may terminate pane programs. Restarted hosts need new links.
 Publication and production deployment are separate operations.

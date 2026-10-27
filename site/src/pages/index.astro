@@ -30,8 +30,8 @@ const schema = {
     <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy">
         <a class="release-chip" href="/releases/3-0/">
-          <span class="chip-dot" aria-hidden="true"></span> ON THE WAY / tmtv{" "}
-          {release.upcoming} <span aria-hidden="true">↗</span>
+          <span class="chip-dot" aria-hidden="true"></span> OUT NOW / tmtv{" "}
+          {release.current} <span aria-hidden="true">↗</span>
         </a>
         <h1 id="hero-title">
           Your terminal.
@@ -186,7 +186,7 @@ const schema = {
 
     <section class="release-feature wrap" aria-labelledby="new-title">
       <div class="release-feature-heading">
-        <span class="eyebrow">THE NEXT CHAPTER / 3.0 PREVIEW</span>
+        <span class="eyebrow">THE NEXT CHAPTER / 3.0</span>
         <span class="outline-tag">BUILT ON tmux 3.8</span>
       </div>
       <div class="release-feature-grid">
@@ -202,7 +202,7 @@ const schema = {
             context together.
           </p>
           <a class="text-link" href="/releases/3-0/">
-            Read the 3.0 release preview <span aria-hidden="true">↗</span>
+            Read the 3.0 release notes <span aria-hidden="true">↗</span>
           </a>
         </div>
         <div class="release-points">
@@ -241,8 +241,8 @@ const schema = {
       </div>
       <p class="upgrade-note">
         <strong>A coordinated upgrade.</strong> 3.0 requires matching hosting
-        clients and relays. The currently published release is {release.current}
-        ; the public-service cutover will be announced separately.
+        clients and relays. Upgrade hosting clients to {release.current} for the
+        public service. Save work before restarting hosts; new sessions use new links.
       </p>
     </section>
 
@@ -343,7 +343,7 @@ const schema = {
           machine.
         </p>
         <p class="stable-label">
-          STABLE {release.current} <span>·</span> 3.0 IN PREPARATION
+          STABLE {release.current} <span>·</span> PROTOCOL 11
         </p>
       </div>
       <div class="install-card">
@@ -460,9 +460,9 @@ const schema = {
         <details>
           <summary>Is tmtv 3.0 ready to install?</summary>
           <p>
-            3.0 is being prepared. The published stable release is{" "}
+            Yes. The published stable release is{" "}
             {release.current}. Host and relay must upgrade together for 3.0; see
-            the <a href="/releases/3-0/">release preview and upgrade notes</a>{" "}
+            the <a href="/releases/3-0/">release notes and upgrade guide</a>{" "}
             before changing versions.
           </p>
         </details>
