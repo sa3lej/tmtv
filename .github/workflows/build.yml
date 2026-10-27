@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   build-linux:
     name: Build Linux amd64
@@ -144,7 +148,7 @@ jobs:
             CPPFLAGS="-I${BREW}/include -I${OPENSSL}/include -I/tmp/utf8proc-static/include" \
             LDFLAGS="-L${BREW}/lib -L${OPENSSL}/lib -L/tmp/utf8proc-static/lib"
           make -j$(sysctl -n hw.ncpu) \
-            LIBS="$STATIC_LIBS -lncurses -lz -lresolv -lgssapi_krb5 -framework Security -framework CoreFoundation -framework GSS"
+            LIBS="$STATIC_LIBS -lc++ -lncurses -lz -lresolv -lgssapi_krb5 -framework Security -framework CoreFoundation -framework GSS"
 
       - name: Verify binary
         run: |
@@ -241,7 +245,7 @@ jobs:
               CPPFLAGS="-I${BREW}/include -I${OPENSSL}/include -I/tmp/utf8proc-static/include" \
               LDFLAGS="-L${BREW}/lib -L${OPENSSL}/lib -L/tmp/utf8proc-static/lib"
             make -j$(sysctl -n hw.ncpu) \
-              LIBS="$STATIC_LIBS -lncurses -lz -lresolv -lgssapi_krb5 -framework Security -framework CoreFoundation -framework GSS"
+              LIBS="$STATIC_LIBS -lc++ -lncurses -lz -lresolv -lgssapi_krb5 -framework Security -framework CoreFoundation -framework GSS"
           '
 
       - name: Verify binary
