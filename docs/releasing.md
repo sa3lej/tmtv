@@ -28,6 +28,19 @@ OSC 8 links and SIXEL. Test native Safari against staging following
 engine test. Record commit, OS/browser versions, results and logs in release
 validation evidence. Use the project's bd tracker for unresolved failures.
 
+## Website dependency audit
+
+Run `npm audit --prefix site` when validating the candidate. The compatible
+lockfile refresh on 2026-10-27 reduced npm's report from 22 to 6 affected packages
+(1 critical, 3 high, 2 low); it did not make the dependency audit clean. Remaining
+reports involve Astro, its Tailwind integration, sharp, esbuild, zod and zod-to-ts.
+The automatic proposed fix upgrades Astro across major versions and needs its
+own migration validation. The deployed site is static HTML/JS, not an Astro
+server, so server-side advisories do not by themselves establish a remotely
+exploitable production issue. Review build-time exposure and the actual use of
+affected features before accepting the candidate; do not mark a successful
+static build as a security-audit pass.
+
 ## Publication and cutover
 
 1. Agree the maintenance window and announce the protocol-11 requirement. Save
