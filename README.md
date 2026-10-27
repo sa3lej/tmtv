@@ -1,6 +1,6 @@
 # tmtv
 
-Terminal sharing for IT professionals. Share your terminal over SSH and the web — built on tmux 3.6a.
+Terminal sharing for IT professionals. Share your terminal over SSH and the web — built on tmux 3.8.
 
 ## Quick start
 
@@ -65,7 +65,7 @@ Names must be 3-32 characters, alphanumeric and hyphens only.
 
 ### Reconnects and restarts
 
-With a **v2.0.4 or newer host client and relay**, automatic reconnects preserve
+With a **v3.0.0 host client and relay**, automatic reconnects preserve
 the SSH read-write, SSH read-only and web links. This works for unnamed sessions
 too. The host keeps a private random identity in memory; viewer tokens cannot
 be used to claim that identity. Named RW links now have a 32-character
@@ -78,9 +78,14 @@ Names remain availability-based, not permanently reserved: an unrelated host
 can occupy a name while yours is offline. The client remembers any assigned
 suffix and warns if a reconnect changes its RW link.
 
-Older clients and relays remain compatible, but keep their previous reconnect
-behavior. Upgrade both ends to get continuity; existing running hosts need to
-be restarted once with the new client.
+**v3.0.0 uses sharing protocol 11 and requires matching host and relay versions.**
+Older hosts and relays cannot share with v3.0.0. Ordinary SSH viewers do not need
+a tmtv upgrade. Upgrade self-hosted relays and hosting clients together, then
+restart running hosts; that restart creates new sharing links. Local terminal
+multiplexing remains available without a relay.
+
+See the [3.0.0 upgrade guide](docs/releases/v3.0.0.md) and
+[release procedure](docs/releasing.md) before updating a deployment.
 
 ### Password-protected sessions
 
@@ -201,7 +206,7 @@ See [action-tmtv](https://github.com/sa3lej/action-tmtv) for full docs.
 ```mermaid
 flowchart LR
     subgraph Host
-        A["tmtv client<br/>(terminal + tmux 3.6a)"]
+        A["tmtv client<br/>(terminal + tmux 3.8)"]
     end
 
     subgraph Server["tmtv-server (relay)"]
@@ -232,7 +237,7 @@ The host runs `tmtv`, which opens an SSH tunnel to the relay server. The server 
 
 ## Features
 
-- Full tmux 3.6a terminal multiplexer
+- Full tmux 3.8 terminal multiplexer
 - Instant session sharing over SSH with read-write and read-only tokens
 - Password-protected sessions — viewers must authenticate before connecting
 - Shared clipboard — copy on host, paste on viewers (and vice versa)

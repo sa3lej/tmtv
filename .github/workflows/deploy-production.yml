@@ -1,0 +1,151 @@
+name: Deploy published release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Published stable release to deploy (for example v3.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Resolve published release and verify downloads
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,tagName > release.json
+          jq -e --arg tag "$RELEASE_TAG" '.isDraft == false and .isPrerelease == false and .tagName == $tag' release.json
+          git fetch origin "refs/tags/$RELEASE_TAG"
+          commit=$(git rev-parse 'FETCH_HEAD^{commit}')
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          mkdir downloads dist
+          gh release download "$RELEASE_TAG" --dir downloads
+          (cd downloads && sha256sum --check checksums.txt)
+          # Validate the exact manifest as well as the published checksums.
+          cp downloads/checksums.txt published-checksums.txt
+          bash .github/scripts/verify-release-assets.sh downloads
+          diff <(sort published-checksums.txt) <(sort downloads/checksums.txt)
+          cp downloads/tmtv-linux-amd64 downloads/tmtv-server-linux-amd64 dist/
+          (cd dist && sha256sum tmtv-linux-amd64 tmtv-server-linux-amd64 > checksums.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-binaries
+          path: dist/
+
+  prepare-web:
+    needs: [validate-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-release.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix site && npm run build --prefix site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-web
+          path: |
+            site/dist/
+            web/viewer.js
+
+  deploy-web:
+    name: Deploy web assets
+    needs: [validate-release, deploy-server]
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-web
+          path: .
+
+      - name: Set up SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ci
+          chmod 600 ~/.ssh/id_ci
+          ssh-keyscan -p ${{ secrets.DEPLOY_SSH_PORT }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload web assets
+        env:
+          DEPLOY_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: |
+          KEY="$HOME/.ssh/id_ci"
+          SCP_OPTS="-i $KEY -o BatchMode=yes -o StrictHostKeyChecking=yes -P ${DEPLOY_PORT}"
+          SSH_OPTS="-i $KEY -o BatchMode=yes -o StrictHostKeyChecking=yes -p ${DEPLOY_PORT}"
+
+          scp ${SCP_OPTS} site/dist/index.html "${DEPLOY_TARGET}:staging/"
+          scp ${SCP_OPTS} web/viewer.js "${DEPLOY_TARGET}:staging/"
+          scp ${SCP_OPTS} site/dist/viewer/index.html "${DEPLOY_TARGET}:staging/viewer.html"
+          scp ${SCP_OPTS} site/dist/install.sh "${DEPLOY_TARGET}:staging/"
+          for f in site/dist/*.txt site/dist/*.png site/dist/*.gif site/dist/favicon.*; do
+            if [ -f "$f" ]; then
+              scp ${SCP_OPTS} "$f" "${DEPLOY_TARGET}:staging/"
+            fi
+          done
+
+          ssh ${SSH_OPTS} "${DEPLOY_TARGET}" 'sudo /usr/local/bin/tmtv-deploy-web'
+
+  deploy-server:
+    name: Deploy server binary
+    needs: [validate-release, prepare-web]
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-binaries
+          path: dist
+
+      - name: Verify downloaded binaries
+        run: cd dist && sha256sum --check checksums.txt
+
+      - name: Set up SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ci
+          chmod 600 ~/.ssh/id_ci
+          ssh-keyscan -p ${{ secrets.DEPLOY_SSH_PORT }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload and deploy binaries
+        env:
+          DEPLOY_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: |
+          KEY="$HOME/.ssh/id_ci"
+          SCP_OPTS="-i $KEY -o BatchMode=yes -o StrictHostKeyChecking=yes -P ${DEPLOY_PORT}"
+          SSH_OPTS="-i $KEY -o BatchMode=yes -o StrictHostKeyChecking=yes -p ${DEPLOY_PORT}"
+
+          scp ${SCP_OPTS} dist/tmtv-server-linux-amd64 "${DEPLOY_TARGET}:staging/tmtv-server"
+          scp ${SCP_OPTS} dist/tmtv-linux-amd64 "${DEPLOY_TARGET}:staging/tmtv"
+
+          ssh ${SSH_OPTS} "${DEPLOY_TARGET}" 'sudo /usr/local/bin/tmtv-deploy-server'
+

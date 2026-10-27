@@ -9,12 +9,12 @@ import Base from '../layouts/Base.astro';
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "tmtv",
-    "description": "Share your terminal over SSH with tmtv — a modern tmate alternative built on tmux 3.6a. Pair program in your terminal with read-write and read-only SSH tokens.",
+    "description": "Share your terminal over SSH with tmtv — a modern tmate alternative built on tmux 3.8. Pair program in your terminal with read-write and read-only SSH tokens.",
     "url": "https://tmtv.se",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Linux, macOS",
     "license": "https://opensource.org/licenses/ISC",
-    "softwareVersion": "2.0.4",
+    "softwareVersion": "3.0.0",
     "author": {
       "@type": "Person",
       "name": "Lars-Erik Jonsson",
@@ -56,9 +56,9 @@ import Base from '../layouts/Base.astro';
     <div class="flex flex-wrap items-center justify-center gap-2 mb-11">
       <span class="inline-flex items-center gap-1.5 font-mono text-[11px] font-medium text-tmtv-green bg-tmtv-green/10 border border-tmtv-green/20 px-2.5 py-1 rounded-full">
         <span class="w-1.5 h-1.5 rounded-full bg-tmtv-green motion-safe:animate-blink" aria-hidden="true"></span>
-        v2.0.4
+        v3.0.0
       </span>
-      <span class="font-mono text-[11px] font-medium text-tmtv-blue bg-tmtv-blue/10 border border-tmtv-blue/20 px-2.5 py-1 rounded-full">built on tmux 3.6a</span>
+      <span class="font-mono text-[11px] font-medium text-tmtv-blue bg-tmtv-blue/10 border border-tmtv-blue/20 px-2.5 py-1 rounded-full">built on tmux 3.8</span>
       <span class="font-mono text-[11px] font-medium text-gray-300 bg-white/[0.04] border border-white/[0.08] px-2.5 py-1 rounded-full">ISC licensed</span>
     </div>
 
@@ -214,7 +214,7 @@ import Base from '../layouts/Base.astro';
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M9 12h12"/></svg>
         </div>
         <h3 class="text-sm font-semibold text-gray-200 mb-1.5">Modern tmux</h3>
-        <p class="text-xs text-gray-400 leading-relaxed">Built on tmux 3.6a: popup menus, extended keys, split panes, true color — nine years past tmate.</p>
+        <p class="text-xs text-gray-400 leading-relaxed">Built on tmux 3.8: popup menus, extended keys, split panes, true color — nine years past tmate.</p>
       </div>
 
       <!-- Web viewer -->
@@ -304,7 +304,7 @@ import Base from '../layouts/Base.astro';
         I loved <a href="https://github.com/tmate-io/tmate" class="text-tmtv-blue hover:underline focus-visible:ring-2 focus-visible:ring-tmtv-blue/70 rounded">tmate</a> but it was stuck on tmux 2.4 from 2017. Nine years of tmux improvements — popup menus, extended keys, sixel graphics — all missing.
       </p>
       <p>
-        So I rebased it on <strong class="text-gray-200">tmux 3.6a</strong> and shipped it. Same SSH-based terminal sharing you know, with a modern tmux underneath. The web viewer is a bonus — handy when someone just wants to watch without opening a terminal.
+        So I rebased it on <strong class="text-gray-200">tmux 3.8</strong> and shipped it. Same SSH-based terminal sharing you know, with a modern tmux underneath. The web viewer is a bonus — handy when someone just wants to watch without opening a terminal.
       </p>
       <p>
         No IDE plugins. No accounts. No Electron app. Just SSH.
@@ -325,7 +325,22 @@ import Base from '../layouts/Base.astro';
         <!-- Vertical timeline line -->
         <div class="absolute left-[7px] top-3 bottom-3 w-px bg-gradient-to-b from-tmtv-green via-tmtv-blue/60 to-tmtv-blue/20" aria-hidden="true"></div>
 
-        <!-- v2.0.4 — Latest release, featured -->
+        <!-- v3.0.0 — Latest release, featured -->
+        <div class="relative pl-8 pb-8 group" role="listitem">
+          <div class="absolute left-0 top-1.5 w-[15px] h-[15px] rounded-full border-2 border-tmtv-green bg-tmtv-bg motion-safe:group-hover:shadow-[0_0_8px_rgba(61,220,132,0.5)] motion-safe:transition-shadow" aria-hidden="true">
+            <div class="absolute inset-[3px] rounded-full bg-tmtv-green"></div>
+          </div>
+          <div class="bg-white/[0.03] border border-tmtv-green/20 rounded-xl p-5 motion-safe:group-hover:border-tmtv-green/40 motion-safe:transition-colors">
+            <div class="flex flex-wrap items-center gap-2.5 mb-2">
+              <span class="inline-flex items-center font-mono text-xs font-bold bg-tmtv-green/15 text-tmtv-green px-2.5 py-1 rounded-md tracking-wide">v3.0.0</span>
+              <span class="text-[11px] font-medium text-tmtv-green/70 uppercase tracking-wider">Latest</span>
+            </div>
+            <p class="text-[15px] text-gray-200 font-medium leading-snug">A new tmux core. A coordinated upgrade.</p>
+            <p class="text-xs text-gray-400/80 mt-1.5 leading-relaxed">Built on tmux 3.8, with portable Unicode input, bounded sharing snapshots and reconnect restoration. Hosting clients and relays must upgrade together to protocol 11; older hosts cannot connect to the new relay. Restarting a host creates new sharing links.</p>
+          </div>
+        </div>
+
+        <!-- v2.0.4 -->
         <div class="relative pl-8 pb-8 group" role="listitem">
           <div class="absolute left-0 top-1.5 w-[15px] h-[15px] rounded-full border-2 border-tmtv-green bg-tmtv-bg motion-safe:group-hover:shadow-[0_0_8px_rgba(61,220,132,0.5)] motion-safe:transition-shadow" aria-hidden="true">
             <div class="absolute inset-[3px] rounded-full bg-tmtv-green"></div>
@@ -333,7 +348,7 @@ import Base from '../layouts/Base.astro';
           <div class="bg-white/[0.03] border border-tmtv-green/20 rounded-xl p-5 motion-safe:group-hover:border-tmtv-green/40 motion-safe:transition-colors">
             <div class="flex flex-wrap items-center gap-2.5 mb-2">
               <span class="inline-flex items-center font-mono text-xs font-bold bg-tmtv-green/15 text-tmtv-green px-2.5 py-1 rounded-md tracking-wide">v2.0.4</span>
-              <span class="text-[11px] font-medium text-tmtv-green/70 uppercase tracking-wider">Latest</span>
+              <span class="text-[11px] font-medium text-tmtv-green/70 uppercase tracking-wider">Previous</span>
             </div>
             <p class="text-[15px] text-gray-200 font-medium leading-snug">Same session. Same links.</p>
             <p class="text-xs text-gray-400/80 mt-1.5 leading-relaxed">Automatic reconnects now preserve your SSH and web links, backed by a private in-memory host identity. Named sessions keep their assigned names, RW links get stronger tokens, and an old connection can no longer erase its replacement's aliases. Upgrade the hosting client for continuity; a fresh start still creates fresh credentials.</p>

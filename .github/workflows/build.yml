@@ -2,8 +2,9 @@ name: Build
 
 on:
   push:
-    branches: ['**']
+    branches: [develop, staging]
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -11,7 +12,6 @@ permissions:
 jobs:
   build-linux:
     name: Build Linux amd64
-    if: github.ref == 'refs/heads/staging' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +35,7 @@ jobs:
       - name: Build (dynamic, for tests)
         run: |
           sh autogen.sh
-          ./configure --enable-sixel
+          ./configure --enable-sixel --enable-utf8proc
           make -j$(nproc)
 
       - name: Verify binaries
@@ -47,8 +47,8 @@ jobs:
         run: |
           cd tests && make all
 
-      # Integration tests run on staging via staging-deploy.sh, not in CI.
-      # The vpty virtual client conflicts with ephemeral CI environments.
+      # Isolated relay/browser integration runs in the relay-e2e job.
+      # Deployed staging checks remain in scripts/staging-deploy.sh.
 
       - name: Build static binaries (Docker/Alpine)
         run: |
@@ -81,7 +81,6 @@ jobs:
 
   build-macos-arm64:
     name: Build macOS arm64
-    if: github.ref == 'refs/heads/staging' || startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -172,7 +171,6 @@ jobs:
 
   build-macos-amd64:
     name: Build macOS amd64
-    if: startsWith(github.ref, 'refs/tags/v')
     # macos-15 is ARM64; use a native Intel runner and its existing Homebrew.
     runs-on: macos-15-intel
     timeout-minutes: 30
@@ -265,10 +263,9 @@ jobs:
           name: macos-amd64
           path: dist/
 
-  # Cross-arch builds only on tags (slow QEMU emulation)
+  # Exercise the complete release matrix before tagging, including on develop.
   build-linux-cross:
     name: Build Linux ${{ matrix.arch }}
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -310,85 +307,29 @@ jobs:
           name: linux-${{ matrix.arch }}
           path: dist/
 
-  deploy-web:
-    name: Deploy web assets
-    needs: [deploy-server]
-    if: always() && !cancelled() && (needs.deploy-server.result == 'success' || needs.deploy-server.result == 'skipped') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+  relay-e2e:
+    uses: ./.github/workflows/relay-e2e.yml
+
+  verify-artifacts:
+    name: Verify complete release manifest
+    needs: [build-linux, build-linux-cross, build-macos-arm64, build-macos-amd64, relay-e2e]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Build site
-        run: |
-          cd site
-          npm ci
-          npm run build
-
-      - name: Set up SSH
-        env:
-          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ci
-          chmod 600 ~/.ssh/id_ci
-          ssh-keyscan -p ${{ secrets.DEPLOY_SSH_PORT }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Upload web assets
-        env:
-          DEPLOY_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
-          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-        run: |
-          KEY="$HOME/.ssh/id_ci"
-          SCP_OPTS="-i $KEY -o StrictHostKeyChecking=accept-new -P ${DEPLOY_PORT}"
-          SSH_OPTS="-i $KEY -o StrictHostKeyChecking=accept-new -p ${DEPLOY_PORT}"
-
-          scp ${SCP_OPTS} site/dist/index.html "${DEPLOY_TARGET}:staging/"
-          scp ${SCP_OPTS} web/viewer.js "${DEPLOY_TARGET}:staging/"
-          scp ${SCP_OPTS} site/dist/viewer/index.html "${DEPLOY_TARGET}:staging/viewer.html"
-          scp ${SCP_OPTS} site/dist/install.sh "${DEPLOY_TARGET}:staging/"
-          for f in site/dist/*.txt site/dist/*.png site/dist/*.gif site/dist/favicon.*; do
-            [ -f "$f" ] && scp ${SCP_OPTS} "$f" "${DEPLOY_TARGET}:staging/" || true
-          done
-
-          ssh ${SSH_OPTS} "${DEPLOY_TARGET}" 'sudo /usr/local/bin/tmtv-deploy-web'
-
-  deploy-server:
-    name: Deploy server binary
-    needs: [build-linux]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
       - uses: actions/download-artifact@v4
         with:
-          name: linux-amd64
-          path: dist
-
-      - name: Set up SSH
-        env:
-          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ci
-          chmod 600 ~/.ssh/id_ci
-          ssh-keyscan -p ${{ secrets.DEPLOY_SSH_PORT }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Upload and deploy binaries
-        env:
-          DEPLOY_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
-          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
-        run: |
-          KEY="$HOME/.ssh/id_ci"
-          SCP_OPTS="-i $KEY -o StrictHostKeyChecking=accept-new -P ${DEPLOY_PORT}"
-          SSH_OPTS="-i $KEY -o StrictHostKeyChecking=accept-new -p ${DEPLOY_PORT}"
-
-          scp ${SCP_OPTS} dist/tmtv-server-linux-amd64 "${DEPLOY_TARGET}:staging/tmtv-server"
-          scp ${SCP_OPTS} dist/tmtv-linux-amd64 "${DEPLOY_TARGET}:staging/tmtv"
-
-          ssh ${SSH_OPTS} "${DEPLOY_TARGET}" 'sudo /usr/local/bin/tmtv-deploy-server'
+          pattern: '{linux-*,macos-*}'
+          path: artifacts
+          merge-multiple: true
+      - run: bash .github/scripts/verify-release-assets.sh artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: artifacts/
 
   release:
     name: Create Release
-    needs: [build-linux, build-linux-cross, build-macos-arm64, build-macos-amd64, deploy-server, deploy-web]
+    needs: [verify-artifacts]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -396,11 +337,17 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
+          name: release-assets
           path: artifacts
-          merge-multiple: true
 
-      - name: Verify complete release and generate checksums
-        run: bash .github/scripts/verify-release-assets.sh artifacts
+      - name: Verify tag matches source version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^AC_INIT(\[tmtv\], \(.*\))/\1/p' configure.ac)
+          test "$RELEASE_TAG" = "v$version"
+          test -f "docs/releases/$RELEASE_TAG.md"
+          cd artifacts && sha256sum --check checksums.txt
 
       - name: Upload draft and publish complete release
         env:

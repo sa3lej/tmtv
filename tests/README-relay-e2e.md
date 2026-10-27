@@ -1,6 +1,8 @@
 # Isolated relay and browser checks
 
-These opt-in Linux checks package the local production host and relay into a
+These Linux checks run in `.github/workflows/relay-e2e.yml`, called by the Build
+workflow for develop, staging and release tags. They can also be run locally
+with the commands below. They package the local production host and relay into a
 disposable Docker container. Its network is disabled, root filesystem read-only,
 resources bounded, and its only writable volume temporary. No production server,
 SSH configuration, credentials, published port or host directory is used.
@@ -90,7 +92,7 @@ utf8proc and SIXEL remain enabled.
 
 Develop validation has separate native Apple Silicon and Intel jobs. Release
 packaging uses the same host subset instead of trying to link Linux relay tests
-on Darwin. These workflow edits do not run until the source reaches CI.
+on Darwin. Build additionally validates static release packaging and all three Linux browser engines.
 
 This runner does not establish Safari support. Native Safari still needs an
 actual macOS browser session against an isolated Linux relay and production

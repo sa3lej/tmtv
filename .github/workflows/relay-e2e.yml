@@ -1,0 +1,59 @@
+name: Isolated relay and browser validation
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  relay-browser:
+    name: Relay and ${{ matrix.engine }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install host and fixture dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake pkg-config bison \
+            libevent-dev libncurses-dev libssh-dev libmsgpack-dev libbsd-dev \
+            libssl-dev libutf8proc-dev python3-venv openssh-client \
+            fonts-dejavu-core libegl-mesa0 libgles2 libgl1-mesa-dri
+          python3 -m venv "$RUNNER_TEMP/e2e-venv"
+          "$RUNNER_TEMP/e2e-venv/bin/pip" install -r tests/requirements-relay-e2e.txt
+          npm install --prefix "$RUNNER_TEMP/e2e-node" playwright@1.59.1
+          "$RUNNER_TEMP/e2e-node/node_modules/.bin/playwright" install --with-deps ${{ matrix.engine }}
+      - name: Build production host, relay and viewer
+        run: |
+          sh autogen.sh
+          ./configure --enable-sixel --enable-utf8proc
+          make -j"$(nproc)"
+          npm ci --prefix site
+          npm run build --prefix site
+      - name: Exercise authenticated SSH transport
+        if: matrix.engine == 'chromium'
+        run: |
+          make -C tests relay-e2e PYTHON="$RUNNER_TEMP/e2e-venv/bin/python" \
+            E2E_ARGS="--artifacts $RUNNER_TEMP/e2e-evidence/transport"
+      - name: Exercise browser rendering and reconnects
+        run: |
+          export NODE_PATH="$RUNNER_TEMP/e2e-node/node_modules"
+          make -C tests relay-browser-e2e PYTHON="$RUNNER_TEMP/e2e-venv/bin/python" \
+            E2E_ARGS="--browser-engine ${{ matrix.engine }} --artifacts $RUNNER_TEMP/e2e-evidence/browser"
+      - name: Retain fixture evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-e2e-${{ matrix.engine }}
+          path: ${{ runner.temp }}/e2e-evidence/
+          if-no-files-found: warn
