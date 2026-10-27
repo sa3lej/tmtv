@@ -171,6 +171,46 @@ line_equals(struct window_pane *wp, u_int line, const char *text)
 	return (equal);
 }
 
+TEST(relay_paste_preserves_utf8_bytes_and_filters_brackets)
+{
+	struct window_pane *wp = create_pane();
+	struct tmate_session session = { 0 }, *previous = tmate_session;
+	msgpack_unpacked un;
+	struct evbuffer *output;
+	const char text[] = "å界🦊";
+	char *bytes;
+	size_t i, offset = 0, length;
+
+	tmate_session = &session;
+	session.client_protocol_version = TMATE_PROTOCOL_VERSION;
+	tmate_encoder_init(&session.daemon_encoder, NULL, NULL);
+	output = session.daemon_encoder.buffer;
+	window_pane_paste(wp, KEYC_PASTE_START, "\033[200~", 6);
+	ASSERT_EQ(evbuffer_get_length(output), 0);
+	window_pane_paste(wp, 0, (char *)text, sizeof text - 1);
+	length = evbuffer_get_length(output);
+	bytes = (char *)evbuffer_pullup(output, -1);
+	msgpack_unpacked_init(&un);
+	for (i = 0; i < sizeof text - 1; i++) {
+		ASSERT_EQ(msgpack_unpack_next(&un, bytes, length, &offset), MSGPACK_UNPACK_SUCCESS);
+		ASSERT_EQ(un.data.type, MSGPACK_OBJECT_ARRAY);
+		ASSERT_EQ(un.data.via.array.size, 3);
+		ASSERT_EQ(un.data.via.array.ptr[0].via.u64, TMATE_IN_PANE_KEY);
+		ASSERT_EQ(un.data.via.array.ptr[1].via.u64, wp->id);
+		ASSERT_EQ(un.data.via.array.ptr[2].via.u64, KEYC_LITERAL | (u_char)text[i]);
+	}
+	ASSERT_EQ(offset, length);
+	msgpack_unpacked_destroy(&un);
+	evbuffer_drain(output, length);
+	wp->screen->mode |= MODE_BRACKETPASTE;
+	window_pane_paste(wp, KEYC_PASTE_START, "\033[200~", 6);
+	ASSERT(evbuffer_get_length(output) > 0);
+	event_free(session.daemon_encoder.ev_buffer);
+	evbuffer_free(output);
+	tmate_session = previous;
+	destroy_pane(wp);
+}
+
 TEST(initial_and_repeated_output)
 {
 	struct window_pane *wp = create_pane();
@@ -1517,6 +1557,7 @@ main(int argc, char **argv)
 #ifdef ENABLE_SIXEL
 		RUN_TEST(pane_snapshot_clears_stale_current_and_saved_image_owners);
 #endif
+		RUN_TEST(relay_paste_preserves_utf8_bytes_and_filters_brackets);
 		RUN_TEST(wire_snapshot_aggregate_byte_and_nesting_bounds);
 		RUN_TEST(media_snapshot_frozen_mode_uses_its_own_link_table);
 		RUN_TEST(media_snapshot_aggregate_cache_bounds_are_explicit);

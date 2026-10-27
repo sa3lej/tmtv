@@ -326,7 +326,7 @@ set -g invalid-option-E2E_VIEW yes
                 # Older relays used "Client update required" for either
                 # direction. Require their explicit protocol mismatch too.
                 return ("Relay update required" in notice or
-                        ("requires sharing protocol" in notice and "uses 10" in notice))
+                        ("requires sharing protocol" in notice and "uses 11" in notice))
             wait_for(relay_refused, "unsupported relay reports required update")
             assert host("display-message", "-p", "#{tmtv_ssh}|#{tmtv_web}") == "|"
             assert "e2e" not in [p.name for p in sessions.iterdir()]
@@ -397,6 +397,21 @@ set -g invalid-option-E2E_VIEW yes
         for viewer in viewers:
             viewer.sees("SSH_RW_RESULT")
         print("PASS SSH RW input reaches the real host and all decoded viewers", flush=True)
+        # Check bytes written by the host shell, not terminal echo. Pace scalar
+        # input so it exercises tty key decoding rather than assume-paste.
+        unicode_text = "å界🦊"
+        command = "printf '%s' '" + unicode_text + "' > /tmp/e2e/ssh-unicode\r"
+        for char in command:
+            ssh_rw.send(char.encode("utf-8"))
+            time.sleep(0.02)
+        wait_for(lambda: (ROOT / "ssh-unicode").exists(), "Unicode SSH input reaches host")
+        assert (ROOT / "ssh-unicode").read_bytes() == unicode_text.encode("utf-8")
+        # Explicit bracketed paste must preserve raw UTF-8 bytes as well.
+        ssh_rw.send(("\x1b[200~printf '%s' '" + unicode_text +
+                     "' > /tmp/e2e/ssh-unicode-paste\x1b[201~\r").encode("utf-8"))
+        wait_for(lambda: (ROOT / "ssh-unicode-paste").exists(), "Unicode SSH paste reaches host")
+        assert (ROOT / "ssh-unicode-paste").read_bytes() == unicode_text.encode("utf-8")
+        print("PASS Unicode SSH keys and pasted UTF-8 preserve host-side bytes", flush=True)
         ssh_ro.send(b"echo BAD > /tmp/e2e/ssh-ro-forbidden\r")
         input_headers = {"X-Tmtv-Input": "1", "X-Tmtv-Viewer-Id": str(web_rw.viewer_id)}
         assert request("POST", "/" + ro + "/input", b"echo BAD > /tmp/e2e/web-ro-forbidden\r", input_headers)[0] == 403

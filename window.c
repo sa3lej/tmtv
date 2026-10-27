@@ -2111,21 +2111,21 @@ window_pane_paste(struct window_pane *wp, key_code key, char *buf, size_t len)
 	if (wp->flags & PANE_INPUTOFF)
 		return;
 
+	if (KEYC_IS_PASTE(key) && (~wp->screen->mode & MODE_BRACKETPASTE))
+		return;
+
 #ifdef TMATE_SERVER_BUILD
 	if (wp->fd == -1) {
 		size_t i;
 
 		log_debug("%s: forwarding %zu bytes to host", __func__, len);
 		for (i = 0; i < len; i++)
-			tmate_client_pane_key(wp->id, (key_code)(u_char)buf[i]);
+			tmate_client_pane_key(wp->id, KEYC_LITERAL | (u_char)buf[i]);
 		return;
 	}
 #endif
 
 	if (wp->fd == -1)
-		return;
-
-	if (KEYC_IS_PASTE(key) && (~wp->screen->mode & MODE_BRACKETPASTE))
 		return;
 
 	log_debug("%s: %.*s", __func__, (int)len, buf);

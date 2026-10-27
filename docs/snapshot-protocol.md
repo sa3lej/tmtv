@@ -1,6 +1,6 @@
 # Negotiated reconnect snapshots
 
-Protocol 10 requires exact layout capability `2` and reconnect snapshot capability
+Protocol 11 requires exact layout capability `2` and reconnect snapshot capability
 `2`. Both host and relay must be upgraded. These codecs are active on initial
 sharing and host reconnect; there is no lossy legacy fallback for a new peer.
 
@@ -191,3 +191,12 @@ sharing: protocol 9 peers can corrupt a 32-byte live cell or reject its snapshot
 Snapshot arrays and resource budgets are unchanged; the text length bound now
 matches the existing 32-byte cell buffer. The process-local packed handles are
 never transmitted and the local tmux IPC version is unchanged.
+
+Sharing protocol 11 sends non-ASCII keyboard input as a tagged Unicode scalar
+(`0x100000000 | codepoint`) instead of a process-local packed UTF-8 handle.
+Modifiers are retained. The host reconstructs its own UTF-8 key, including local
+cache entries for four-byte characters. The tag keeps private-use Unicode scalars
+separate from the legacy special-key numbers; ASCII, literal bytes and function
+keys keep their existing representation. Both host and relay must be upgraded.
+Live layout encoding failures now send FIN, expose `tmtv_layout_error`, and stop
+further PTY/READY traffic, leaving the local terminal usable.

@@ -27,6 +27,44 @@ TEST(sharing_key_numbers_stay_compatible)
 	ASSERT_EQ(tmate_key_to_wire(KEYC_MOUSE, 6), TMATE_WIRE_UNKNOWN);
 }
 
+/* Exercise real UTF-8 interning and the host's final PTY encoding. */
+TEST(sharing_unicode_keys_use_portable_scalars)
+{
+	static const wchar_t scalars[] = { 0xe5, 0x754c, 0x1f98a, 0x10e000, 0x10f003 };
+	struct utf8_data ud;
+	utf8_char local;
+	key_code wire, received;
+	struct screen screen;
+	struct bufferevent *bev;
+	u_int i;
+
+	screen_init(&screen, 80, 24, 0);
+	bev = bufferevent_new(-1, NULL, NULL, NULL, NULL);
+	ASSERT_NOT_NULL(bev);
+	evbuffer_unfreeze(bev->output, 1);
+	for (i = 0; i < nitems(scalars); i++) {
+		ASSERT_EQ(utf8_fromwc(scalars[i], &ud), UTF8_DONE);
+		ASSERT_EQ(utf8_from_data(&ud, &local), UTF8_DONE);
+		wire = tmate_key_to_wire(local, TMATE_PROTOCOL_VERSION);
+		ASSERT_EQ(wire, TMATE_WIRE_UNICODE | scalars[i]);
+		received = tmate_key_from_wire(wire);
+		ASSERT_EQ(input_key(&screen, bev, received), 0);
+		ASSERT_EQ(evbuffer_get_length(bev->output), ud.size);
+		ASSERT(memcmp(evbuffer_pullup(bev->output, -1), ud.data, ud.size) == 0);
+		evbuffer_drain(bev->output, ud.size);
+		ASSERT_EQ(tmate_key_from_wire(tmate_key_to_wire(local | KEYC_META,
+		    TMATE_PROTOCOL_VERSION)), received | KEYC_META);
+	}
+	ASSERT_EQ(tmate_key_from_wire(TMATE_WIRE_UNICODE | 0xd800), KEYC_UNKNOWN);
+	ASSERT_EQ(tmate_key_from_wire(TMATE_WIRE_UNICODE | 0x110000), KEYC_UNKNOWN);
+	ASSERT_EQ(tmate_key_from_wire(TMATE_WIRE_UNICODE | 'a'), KEYC_UNKNOWN);
+	ASSERT_EQ(tmate_key_from_wire(TMATE_WIRE_NONE), KEYC_NONE);
+	ASSERT_EQ(tmate_key_from_wire(tmate_key_to_wire(KEYC_LITERAL | 0xff,
+	    TMATE_PROTOCOL_VERSION)), KEYC_LITERAL | 0xff);
+	bufferevent_free(bev);
+	screen_free(&screen);
+}
+
 static struct cmdq_item *seen_item;
 static struct cmd_find_state *seen_fs;
 static struct args *seen_args;
@@ -834,6 +872,63 @@ TEST(layout_negotiation_holds_ready_and_sends_state_once) { negotiation_order(0)
 TEST(snapshot_negotiation_waits_for_layout_after_snapshot) { negotiation_order(1); }
 TEST(snapshot_negotiation_waits_for_snapshot_after_layout) { negotiation_order(2); }
 
+TEST(live_layout_failure_stops_sharing_once)
+{
+	struct window_pane *wp = create_pane();
+	struct session *s;
+	struct winlink *wl;
+	struct tmate_env *env;
+	struct tmate_decoder decoder;
+	struct reconnect_messages messages = { 0 };
+	char name[4098];
+
+	s = session_create(NULL, "layout-failure", "/", environ_create(),
+	    options_create(global_s_options), NULL);
+	wl = winlink_add(&s->windows, 0);
+	wl->session = s;
+	winlink_set_window(wl, wp->window);
+	s->curw = wl;
+	window_set_active_pane(wp->window, wp, 0);
+	TAILQ_INIT(&tmate_session.env);
+	tmate_session.layout_required = tmate_session.layout_capability = true;
+	tmate_session.snapshot_required = tmate_session.snapshot_capability = true;
+	tmate_encoder_init(&tmate_session.encoder, NULL, NULL);
+	tmate_sync_layout(&tmate_session, s);
+	ASSERT(!tmate_session.layout_failed);
+	ASSERT(evbuffer_get_length(tmate_session.encoder.buffer) > 0);
+	evbuffer_drain(tmate_session.encoder.buffer,
+	    evbuffer_get_length(tmate_session.encoder.buffer));
+	memset(name, 'x', sizeof name - 1); name[sizeof name - 1] = '\0';
+	window_set_name(wp->window, name, 0);
+	tmate_sync_layout(&tmate_session, s);
+	ASSERT(tmate_session.layout_failed);
+	tmate_sync_layout(&tmate_session, s);
+	tmate_send_reconnection_snapshot(&tmate_session);
+	tmate_pty_data(&tmate_session, wp, "WITHHELD", 8);
+	tmate_write_ready(&tmate_session);
+	tmate_decoder_init(&decoder, read_reconnect_message, &messages);
+	decode_reconnect_buffer(&decoder, 1);
+	ASSERT_EQ(messages.count, 1);
+	ASSERT_EQ(messages.opcode[0], TMATE_OUT_FIN);
+	tmate_decoder_destroy(&decoder);
+	tmate_encoder_destroy(&tmate_session.encoder);
+	tmate_session.encoder.buffer = NULL;
+	free(tmate_session.layout_sent);
+	tmate_session.layout_sent = NULL; tmate_session.layout_sent_len = 0;
+	tmate_session.layout_required = tmate_session.layout_capability = false;
+	tmate_session.snapshot_required = tmate_session.snapshot_capability = false;
+	tmate_session.layout_failed = false;
+	tmate_session.fin_sent = false;
+	while ((env = TAILQ_FIRST(&tmate_session.env)) != NULL) {
+		TAILQ_REMOVE(&tmate_session.env, env, entry);
+		free(env->name); free(env->value); free(env);
+	}
+	session_destroy(s, 0, __func__);
+	while (cmdq_next(NULL) != 0) ;
+	event_loop(EVLOOP_NONBLOCK);
+	destroy_pane(wp);
+}
+
 TEST(layout_timeout_cannot_be_revived_by_late_capability)
 {
 	struct tmate_env *env;
@@ -974,6 +1069,8 @@ main(int argc, char **argv)
 	RUN_TEST(host_pane_snapshot_preserves_alternate_state_and_exit);
 	RUN_TEST(host_parser_snapshot_preserves_colours_attributes_and_unicode);
 	RUN_TEST(sharing_key_numbers_stay_compatible);
+	RUN_TEST(sharing_unicode_keys_use_portable_scalars);
+	RUN_TEST(live_layout_failure_stops_sharing_once);
 	RUN_TEST(layout_negotiation_holds_ready_and_sends_state_once);
 	RUN_TEST(snapshot_negotiation_waits_for_layout_after_snapshot);
 	RUN_TEST(snapshot_negotiation_waits_for_snapshot_after_layout);

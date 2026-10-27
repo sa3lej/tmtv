@@ -86,12 +86,19 @@ void tmate_sync_layout(struct tmate_session *session, struct session *s)
 
 	if (session->layout_required) {
 		msgpack_sbuffer frame;
-		if (!session->layout_capability)
+		if (!session->layout_capability || session->layout_failed)
 			return;
 		if (s == NULL) s = tmate_find_session(session);
+		if (s == NULL || s->curw == NULL) return;
 		msgpack_sbuffer_init(&frame);
-		if (tmtv_layout_encode(s, &frame) == 0 &&
-		    (frame.size != session->layout_sent_len ||
+		if (tmtv_layout_encode(s, &frame) != 0) {
+			const char *message = "Cannot share this layout (unsupported state or size limit)";
+			msgpack_sbuffer_destroy(&frame);
+			tmate_set_env(session, "tmtv_layout_error", message);
+			tmate_snapshot_error(session, message);
+			return;
+		}
+		if ((frame.size != session->layout_sent_len ||
 		    memcmp(frame.data, session->layout_sent, frame.size) != 0) &&
 		    tmate_encoder_write_frame(&session->encoder, frame.data, frame.size) == 0) {
 			free(session->layout_sent);
@@ -729,6 +736,7 @@ void tmate_send_reconnection_snapshot(struct tmate_session *session)
 		msgpack_sbuffer frame;
 		if (!session->snapshot_capability || !session->layout_capability || session->layout_failed) return;
 		tmate_sync_layout(session, NULL);
+		if (session->layout_failed) return;
 		msgpack_sbuffer_init(&frame);
 		if (tmate_snapshot_encode(tmate_find_session(session), &frame) != 0 ||
 		    tmate_encoder_write_frame(&session->encoder, frame.data, frame.size) != 0)
