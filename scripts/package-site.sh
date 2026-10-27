@@ -9,7 +9,7 @@ fi
 case "$1" in /*) ;; *) echo "Output must be an absolute path" >&2; exit 2 ;; esac
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-for path in index.html viewer/index.html releases/index.html releases/3-0/index.html social-card.png sitemap.xml install.sh; do
+for path in index.html viewer/index.html releases/index.html releases/3-0/index.html social-card.png sitemap.xml robots.txt llms.txt install.sh; do
     test -s "$REPO_ROOT/site/dist/$path" || { echo "Missing build output: $path" >&2; exit 1; }
 done
 STAGE_DIR=$(mktemp -d)

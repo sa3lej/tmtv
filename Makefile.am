@@ -608,3 +608,5 @@ EXTRA_DIST += tests/test-snapshot-parser.h
 
 # Offline installer regression and its production script.
 EXTRA_DIST += tests/test-installer.py site/public/install.sh
+
+EXTRA_DIST += tests/test-web-deploy.py deploy/tmtv-deploy-web.py scripts/package-site.sh scripts/deploy-web.sh scripts/verify-web.py

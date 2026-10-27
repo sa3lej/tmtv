@@ -24,8 +24,8 @@ STAGING_USER="${STAGING_USER:-ubuntu}"
 STAGING_SSH_PORT="${STAGING_SSH_PORT:-22}"
 STAGING_TARGET="${STAGING_USER}@${STAGING_HOST}"
 
-SSH_OPTS="-o StrictHostKeyChecking=accept-new -p ${STAGING_SSH_PORT}"
-SCP_OPTS="-o StrictHostKeyChecking=accept-new -P ${STAGING_SSH_PORT}"
+SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -p ${STAGING_SSH_PORT}"
+SCP_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -P ${STAGING_SSH_PORT}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -81,19 +81,16 @@ if [ ! -d node_modules ]; then
 fi
 npm run build --silent
 
-scp $SCP_OPTS "$REPO_ROOT/site/dist/index.html" "${STAGING_TARGET}:/tmp/index.html"
-scp $SCP_OPTS "$REPO_ROOT/site/dist/viewer/index.html" "${STAGING_TARGET}:/tmp/viewer.html"
-scp $SCP_OPTS "$REPO_ROOT/web/viewer.js" "${STAGING_TARGET}:/tmp/viewer.js"
-for f in "$REPO_ROOT"/site/dist/*.txt "$REPO_ROOT"/site/dist/*.png "$REPO_ROOT"/site/dist/*.gif "$REPO_ROOT"/site/dist/favicon.*; do
-	[ -f "$f" ] && scp $SCP_OPTS "$f" "${STAGING_TARGET}:/tmp/" || true
-done
-remote "sudo mkdir -p /var/www/tmtv && \
-	sudo mv -f /tmp/index.html /var/www/tmtv/index.html && \
-	sudo mv -f /tmp/viewer.html /var/www/tmtv/viewer.html && \
-	sudo mv -f /tmp/viewer.js /var/www/tmtv/viewer.js && \
-	for f in /tmp/*.txt /tmp/*.png /tmp/*.gif /tmp/favicon.*; do \
-		[ -f \"\$f\" ] && sudo mv -f \"\$f\" /var/www/tmtv/ || true; \
-	done"
+WEB_BUNDLE_DIR=$(mktemp -d)
+sh "$REPO_ROOT/scripts/package-site.sh" "$WEB_BUNDLE_DIR/tmtv-web.tar.gz"
+# Staging administration already owns sudo installation; use the same helper contract.
+if ! sh "$REPO_ROOT/scripts/deploy-web.sh" "$WEB_BUNDLE_DIR/tmtv-web.tar.gz" \
+    "$STAGING_TARGET" "$STAGING_SSH_PORT" "https://$STAGING_HOST" --provision-helper; then
+    rm -rf "$WEB_BUNDLE_DIR"
+    exit 3
+fi
+rm -rf "$WEB_BUNDLE_DIR"
+
 echo "    Web assets deployed."
 
 # --- Run tests ---

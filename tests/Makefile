@@ -41,7 +41,7 @@ relay-browser-e2e:
 .PHONY: host
 host: unit core38-commands mode-lifecycle functional hooks prompt-history child-environment list-keys list-commands pane-lifetime event-payload events cmd-queue options-hooks monitor control-subscriptions
 
-all: host relay-copy-output server-unit session-cleanup installer
+all: host relay-copy-output server-unit session-cleanup installer web-deploy
 
 # Offline installer checks; real sha256sum and shasum tools, no live installs.
 .PHONY: installer
@@ -239,3 +239,7 @@ relay-copy-output:
 .PHONY: core38-commands
 core38-commands:
 	@TMTV=$(TMTV) $(PYTHON) test-core38-commands.py
+
+.PHONY: web-deploy
+web-deploy:
+	$(PYTHON) test-web-deploy.py

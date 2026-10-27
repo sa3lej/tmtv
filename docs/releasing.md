@@ -76,9 +76,11 @@ the whole bundle; a failed workflow does not automatically restore production.
 Keep the previous binaries available before changing the service. If the new
 relay or viewer fails, stop the rollout and restore the saved relay, host and web
 bundle using the deployment host's documented service procedure. The manual
-workflow can also deploy a previous published stable release with the same
-12-binary/checksum manifest, but rebuilds that tag's web assets and therefore
-requires working historical dependencies. A saved bundle avoids that dependency.
+workflow can also deploy a previous published stable release that contains the
+complete-site packaging contract and the same 12-binary/checksum manifest. Older
+tags without that contract fail before deployment. Rebuilding historical web
+assets requires working historical dependencies; a saved complete tree avoids
+that dependency.
 
 Restore the Homebrew formula and GitHub `latest` selection to the intended
 previous release as part of an authorized rollback; deploying an old tag does
@@ -107,16 +109,54 @@ The bundle includes the nested `/releases/` pages, all static assets, `sitemap.x
 and the top-level `viewer.html`/`viewer.js` used by Caddy's session routes. Caddy's
 existing static-file fallback can serve those nested pages.
 
-**Deployment integration remains necessary before publishing this redesign.**
-The current production workflow and staging upload scripts select individual
-root-level files; that selection omits nested release pages. Production delegates
-installation to an out-of-repository `/usr/local/bin/tmtv-deploy-web` helper.
-Inspect that helper and its permissions in the authorized deployment environment,
-then adapt upload and installation together to deliver the complete bundle. Do not
-assume copying a tarball means the helper installs it. Keep the previous complete
-web tree for rollback and verify `/`, `/releases/`, `/releases/3-0/`, the social card,
-installer and an actual authorized viewer route after deployment. This preparation
-has not changed or exercised that remote helper.
+Production and both staging entry points now use this complete bundle through
+`scripts/deploy-web.sh`. The driver verifies the installed helper contract before
+uploading, supplies the exact bundle SHA-256, verifies public assets byte-for-byte,
+and probes both `/s/` and `/j/` viewer shells. A failed probe rolls back that exact
+deployment ID; it cannot undo a newer deployment. Viewer-shell probes do not
+replace authenticated SSH/SSE/browser integration tests.
+
+The root-owned server helper is versioned at `deploy/tmtv-deploy-web.py`. It needs
+Linux `renameat2(RENAME_EXCHANGE)` and Python 3. For an existing site, install it
+once through authorized server administration:
+
+```sh
+sudo install -o root -g root -m 0755 deploy/tmtv-deploy-web.py /usr/local/bin/tmtv-deploy-web.new
+sudo mv -f /usr/local/bin/tmtv-deploy-web.new /usr/local/bin/tmtv-deploy-web
+sudo /usr/local/bin/tmtv-deploy-web --check
+```
+
+The production workflow checks this contract before restarting the relay. The
+admin-owned staging scripts provision the same helper during an authorized staging
+deployment. The deployment account must already be permitted to invoke this helper
+with sudo; no workflow changes sudoers. Bundles are read from the sudo caller's
+`~/staging/tmtv-web.tar.gz`. No-argument legacy invocations still overlay the old
+root-file upload set from `/home/deploy/staging`, preserving nested existing files.
+New deployments always replace the full tree, so obsolete assets disappear.
+
+The helper rejects invalid checksums, missing required pages, duplicate/traversal
+paths, links and special files before activation. It atomically exchanges the
+complete `/var/www/tmtv` directory with the prepared tree and retains the previous
+site under `/var/www/tmtv-web-backups/<deployment_id>`. It needs no Caddy reload or
+relay restart. Backups remain until an operator deliberately removes them.
+
+For a reviewed web-only rollback, use the ID returned by the deployment:
+
+```sh
+sudo /usr/local/bin/tmtv-deploy-web --rollback DEPLOYMENT_ID
+```
+
+A web rollback does not roll back the relay, host binaries, GitHub release or
+Homebrew formula. If the process is interrupted during activation, an
+`in-progress.json` record blocks further mutations until an operator inspects the
+current tree, receipt and preserved candidate/backup. Do not blindly retry or
+remove that record. The normal driver rolls back only after a confirmed install
+and failed HTTP verification; uncertain SSH replies require inspection.
+
+Local regressions (`make -C tests web-deploy`) exercise the real installer and
+upload driver against temporary trees and a local HTTP fixture, including complete
+replacement, malicious/missing bundles, failure preservation and rollback. They
+never contact a deployment host.
 
 For a local preview without deployment, use `npm run preview --prefix site --
 --host 127.0.0.1`. See `docs/release-positioning.md` for the researched positioning

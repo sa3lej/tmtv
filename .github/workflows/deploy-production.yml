@@ -64,19 +64,23 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci --prefix site && npm run build --prefix site
+      - name: Package complete website
+        run: sh scripts/package-site.sh "$RUNNER_TEMP/tmtv-web.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
           name: production-web
-          path: |
-            site/dist/
-            web/viewer.js
+          path: ${{ runner.temp }}/tmtv-web.tar.gz
+          if-no-files-found: error
 
   deploy-web:
     name: Deploy web assets
-    needs: [validate-release, deploy-server]
+    needs: [validate-release, prepare-web, deploy-server]
     environment: production
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: production-web
@@ -96,21 +100,8 @@ jobs:
           DEPLOY_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
           DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
         run: |
-          KEY="$HOME/.ssh/id_ci"
-          SCP_OPTS="-i $KEY -o BatchMode=yes -o StrictHostKeyChecking=yes -P ${DEPLOY_PORT}"
-          SSH_OPTS="-i $KEY -o BatchMode=yes -o StrictHostKeyChecking=yes -p ${DEPLOY_PORT}"
-
-          scp ${SCP_OPTS} site/dist/index.html "${DEPLOY_TARGET}:staging/"
-          scp ${SCP_OPTS} web/viewer.js "${DEPLOY_TARGET}:staging/"
-          scp ${SCP_OPTS} site/dist/viewer/index.html "${DEPLOY_TARGET}:staging/viewer.html"
-          scp ${SCP_OPTS} site/dist/install.sh "${DEPLOY_TARGET}:staging/"
-          for f in site/dist/*.txt site/dist/*.png site/dist/*.gif site/dist/favicon.*; do
-            if [ -f "$f" ]; then
-              scp ${SCP_OPTS} "$f" "${DEPLOY_TARGET}:staging/"
-            fi
-          done
-
-          ssh ${SSH_OPTS} "${DEPLOY_TARGET}" 'sudo /usr/local/bin/tmtv-deploy-web'
+          export DEPLOY_IDENTITY_FILE="$HOME/.ssh/id_ci"
+          sh scripts/deploy-web.sh "$PWD/tmtv-web.tar.gz" "$DEPLOY_TARGET" "$DEPLOY_PORT" https://tmtv.se
 
   deploy-server:
     name: Deploy server binary
@@ -134,6 +125,13 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ci
           chmod 600 ~/.ssh/id_ci
           ssh-keyscan -p ${{ secrets.DEPLOY_SSH_PORT }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Require complete-site installer before restarting the relay
+        env:
+          DEPLOY_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: |
+          test "$(ssh -i "$HOME/.ssh/id_ci" -o BatchMode=yes -o StrictHostKeyChecking=yes -p "$DEPLOY_PORT" "$DEPLOY_TARGET" 'sudo -n /usr/local/bin/tmtv-deploy-web --check')" = tmtv-web-bundle-v1
 
       - name: Upload and deploy binaries
         env:
