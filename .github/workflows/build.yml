@@ -126,12 +126,15 @@ jobs:
           OPENSSL="$(brew --prefix openssl@3)"
 
           STATIC_LIBS=""
-          for pkg in libevent libssh msgpack-c openssl@3 jemalloc; do
+          for pkg in libevent libssh msgpack-c openssl@3; do
             prefix=$(brew --prefix "$pkg")
             for a in "$prefix"/lib/*.a; do
               [ -f "$a" ] && STATIC_LIBS="$STATIC_LIBS $a"
             done
           done
+          # Keep jemalloc's Darwin zone-registration constructor: an ordinary
+          # archive link can discard zone.o and mix system/jemalloc allocations.
+          STATIC_LIBS="$STATIC_LIBS -Wl,-force_load,$(brew --prefix jemalloc)/lib/libjemalloc.a"
           STATIC_LIBS="$STATIC_LIBS /tmp/utf8proc-static/lib/libutf8proc.a"
 
           export PKG_CONFIG_PATH="/tmp/utf8proc-static/lib/pkgconfig:${PKG_CONFIG_PATH}"
@@ -145,7 +148,10 @@ jobs:
 
       - name: Verify binary
         run: |
-          ./tmtv -V
+          if ! ./tmtv -V; then
+            lldb --batch -o run -o 'thread backtrace all' -- ./tmtv -V
+            exit 1
+          fi
           otool -L tmtv
           if otool -L tmtv | grep -q '/opt/homebrew\|/usr/local/Cellar'; then
             echo "ERROR: Binary links to Homebrew shared libraries"
@@ -218,12 +224,14 @@ jobs:
             OPENSSL="$(/usr/local/bin/brew --prefix openssl@3)"
 
             STATIC_LIBS=""
-            for pkg in libevent libssh msgpack-c openssl@3 jemalloc; do
+            for pkg in libevent libssh msgpack-c openssl@3; do
               prefix=$(/usr/local/bin/brew --prefix "$pkg")
               for a in "$prefix"/lib/*.a; do
                 [ -f "$a" ] && STATIC_LIBS="$STATIC_LIBS $a"
               done
             done
+            # Retain the Darwin zone-registration constructor in the archive.
+            STATIC_LIBS="$STATIC_LIBS -Wl,-force_load,$(/usr/local/bin/brew --prefix jemalloc)/lib/libjemalloc.a"
             STATIC_LIBS="$STATIC_LIBS /tmp/utf8proc-static/lib/libutf8proc.a"
 
             export PKG_CONFIG_PATH="/tmp/utf8proc-static/lib/pkgconfig:${PKG_CONFIG_PATH}"
@@ -240,7 +248,10 @@ jobs:
         run: |
           file tmtv
           test "$(lipo -archs tmtv)" = x86_64
-          arch -x86_64 ./tmtv -V
+          if ! arch -x86_64 ./tmtv -V; then
+            lldb --batch -o run -o 'thread backtrace all' -- ./tmtv -V
+            exit 1
+          fi
           otool -L tmtv
           if otool -L tmtv | grep -q '/opt/homebrew\|/usr/local/'; then
             echo "ERROR: Binary links to Homebrew shared libraries"

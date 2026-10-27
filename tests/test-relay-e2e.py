@@ -400,8 +400,8 @@ set -g invalid-option-E2E_VIEW yes
         # Check bytes written by the host shell, not terminal echo. Pace scalar
         # input so it exercises tty key decoding rather than assume-paste.
         unicode_text = "å界🦊"
-        command = "printf '%s' '" + unicode_text + "' > /tmp/e2e/ssh-unicode\r"
-        for char in command:
+        unicode_command = "printf '%s' '" + unicode_text + "' > /tmp/e2e/ssh-unicode\r"
+        for char in unicode_command:
             ssh_rw.send(char.encode("utf-8"))
             time.sleep(0.02)
         wait_for(lambda: (ROOT / "ssh-unicode").exists(), "Unicode SSH input reaches host")
