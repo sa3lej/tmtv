@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import SiteNav from "../components/SiteNav.astro";
+import CollaborationDemo from "../components/CollaborationDemo.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import { release } from "../data/release";
 import "../styles/marketing.css";
@@ -56,112 +57,12 @@ const schema = {
           account
         </p>
       </div>
-      <figure
-        class="terminal-demo"
-        aria-label="Illustration of a shared terminal session"
-      >
-        <div class="terminal-top">
-          <span>
-            tmtv <span class="slash">/</span> example
-          </span>
-          <span class="terminal-live">
-            <i></i> CONNECTED
-          </span>
-        </div>
-        <div class="terminal-screen">
-          <p class="term-dim"># On the host</p>
-          <p>
-            <span class="prompt">$</span> tmtv
-          </p>
-          <div class="term-space"></div>
-          <p class="term-dim"># On a guest machine</p>
-          <p>
-            <span class="prompt">$</span> ssh{" "}
-            <span class="term-accent">TOKEN</span>@tmtv.se
-          </p>
-          <div class="term-space"></div>
-          <p class="term-dim"># Now working in the shared session</p>
-          <p>
-            <span class="prompt">$</span> git status
-          </p>
-          <p class="term-muted">On branch main</p>
-          <p class="term-muted">working tree clean</p>
-          <p>
-            <span class="prompt">$</span>{" "}
-            <span class="term-cursor" aria-hidden="true"></span>
-          </p>
-        </div>
-        <div class="terminal-bar">
-          <span>0: shell*</span>
-          <span>SSH / WEB</span>
-        </div>
-        <figcaption>
-          Illustrative session · tokens shown are placeholders
-        </figcaption>
-      </figure>
-    </section>
-    <div class="ribbon">
-      <div class="wrap">
-        <span>ONE SESSION</span>
-        <span aria-hidden="true">✳</span>
-        <span>YOUR TERMINAL</span>
-        <span aria-hidden="true">✳</span>
-        <span>MORE THAN ONE PAIR OF HANDS</span>
-      </div>
-    </div>
-    <section class="how wrap" id="how-it-works" aria-labelledby="how-title">
-      <div class="section-index">
-        <span>01 / THE IDEA</span>
-        <span>HOST → GUEST</span>
-      </div>
-      <div class="how-grid">
-        <div>
-          <h2 id="how-title">
-            How it works.
-          </h2>
-          <p>
-            Keep working where you already work. tmtv connects people to a
-            shared tmux session without asking them to change their setup.
-          </p>
-        </div>
-        <div class="workflow">
-          <article>
-            <span class="number">01</span>
-            <div>
-              <h3>Start</h3>
-              <p>
-                Run <code>tmtv</code> on your machine. Your shell and tools stay
-                there.
-              </p>
-            </div>
-          </article>
-          <article>
-            <span class="number">02</span>
-            <div>
-              <h3>Invite</h3>
-              <p>
-                Share a read-write token for a collaborator, or a read-only
-                token for an observer.
-              </p>
-            </div>
-          </article>
-          <article>
-            <span class="number">03</span>
-            <div>
-              <h3>Work together</h3>
-              <p>
-                Guests connect with SSH. Enable web sharing when a browser is
-                more convenient.
-              </p>
-            </div>
-          </article>
-        </div>
-      </div>
+      <CollaborationDemo />
     </section>
     <section class="install-band" id="install" aria-labelledby="install-title">
       <div class="wrap install-grid">
         <div class="install-intro">
-          <span class="section-kicker">02 / GET STARTED</span>
+          <span class="section-kicker">01 / GET STARTED</span>
           <h2 id="install-title">
             Install tmtv.
           </h2>
@@ -209,6 +110,64 @@ const schema = {
             <a href="/install.sh">Inspect the installer ↗</a>
             <span>STABLE {release.current}</span>
           </div>
+        </div>
+      </div>
+    </section>
+    <div class="ribbon">
+      <div class="wrap">
+        <span>ONE SESSION</span>
+        <span aria-hidden="true">✳</span>
+        <span>YOUR TERMINAL</span>
+        <span aria-hidden="true">✳</span>
+        <span>MORE THAN ONE PAIR OF HANDS</span>
+      </div>
+    </div>
+    <section class="how wrap" id="how-it-works" aria-labelledby="how-title">
+      <div class="section-index">
+        <span>02 / THE IDEA</span>
+        <span>HOST → GUEST</span>
+      </div>
+      <div class="how-grid">
+        <div>
+          <h2 id="how-title">
+            How it works.
+          </h2>
+          <p>
+            Keep working where you already work. tmtv connects people to a
+            shared tmux session without asking them to change their setup.
+          </p>
+        </div>
+        <div class="workflow">
+          <article>
+            <span class="number">01</span>
+            <div>
+              <h3>Start</h3>
+              <p>
+                Run <code>tmtv</code> on your machine. Your shell and tools stay
+                there.
+              </p>
+            </div>
+          </article>
+          <article>
+            <span class="number">02</span>
+            <div>
+              <h3>Invite</h3>
+              <p>
+                Share a read-write token for a collaborator, or a read-only
+                token for an observer.
+              </p>
+            </div>
+          </article>
+          <article>
+            <span class="number">03</span>
+            <div>
+              <h3>Work together</h3>
+              <p>
+                Guests connect with SSH. Enable web sharing when a browser is
+                more convenient.
+              </p>
+            </div>
+          </article>
         </div>
       </div>
     </section>

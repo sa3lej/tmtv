@@ -110,7 +110,7 @@
   padding-block: 38px 50px;
 }
 .marketing .site-footer p {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: var(--muted);
   margin-top: 10px;
 }
@@ -118,7 +118,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
 }
 .marketing .credit {
   text-align: right;
@@ -136,7 +136,7 @@
   align-items: center;
   color: #51644f;
   font:
-    500 0.68rem "JetBrains Mono",
+    500 0.8rem "JetBrains Mono",
     monospace;
   letter-spacing: 0.07em;
 }
@@ -200,95 +200,11 @@
   margin-top: 35px;
   color: #435b48;
   font:
-    500 0.68rem "JetBrains Mono",
+    500 0.8rem "JetBrains Mono",
     monospace;
 }
 .marketing .intro-meta span {
   margin: 0 8px;
-}
-.marketing .terminal-demo {
-  background: #15221c;
-  color: #edf4e2;
-  box-shadow: 16px 16px 0 #c5d0bd;
-  min-width: 0;
-}
-.marketing .terminal-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  border-bottom: 1px solid #415044;
-  padding: 18px 23px;
-  color: #c6d2bc;
-  font:
-    500 0.7rem "JetBrains Mono",
-    monospace;
-}
-.marketing .terminal-top .slash {
-  color: #80a27a;
-}
-.marketing .terminal-live {
-  font-size: 0.6rem;
-  color: #c7e37e;
-}
-.marketing .terminal-live i {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  background: #c7e37e;
-  border-radius: 100%;
-  margin-right: 5px;
-}
-.marketing .terminal-screen {
-  padding: 32px 30px;
-  min-height: 350px;
-  font:
-    400 clamp(0.75rem, 0.95vw, 0.92rem)/1.95 "JetBrains Mono",
-    monospace;
-  overflow-wrap: anywhere;
-}
-.marketing .term-muted {
-  color: #b8c6b2;
-}
-.marketing .term-dim {
-  color: #91a78e;
-}
-.marketing .term-space {
-  height: 18px;
-}
-.marketing .term-accent,
-.marketing .prompt {
-  color: #c7e37e;
-}
-.marketing .prompt {
-  margin-right: 8px;
-}
-.marketing .term-cursor {
-  display: inline-block;
-  width: 8px;
-  height: 1em;
-  background: #c7e37e;
-  vertical-align: middle;
-}
-.marketing .terminal-bar {
-  display: flex;
-  justify-content: space-between;
-  background: #c7e37e;
-  color: #203322;
-  padding: 7px 23px;
-  font:
-    500 0.68rem "JetBrains Mono",
-    monospace;
-}
-.marketing .terminal-demo figcaption {
-  color: #435b48;
-  background: var(--paper);
-  padding: 13px 0 0;
-  text-align: right;
-  font:
-    0.63rem "JetBrains Mono",
-    monospace;
-  position: relative;
-  top: 16px;
 }
 .marketing .ribbon {
   background: #d9e6cc;
@@ -302,7 +218,7 @@
   padding-block: 17px;
   color: #3a573c;
   font:
-    500 0.67rem "JetBrains Mono",
+    500 0.8rem "JetBrains Mono",
     monospace;
   letter-spacing: 0.08em;
 }
@@ -322,7 +238,7 @@
   padding-top: 14px;
   margin-bottom: 50px;
   color: #5b705e;
-  font-size: 0.66rem;
+  font-size: 0.8rem;
   letter-spacing: 0.08em;
 }
 .marketing .how-grid,
@@ -362,7 +278,7 @@
 .marketing .number,
 .marketing .detail-list article > span {
   font:
-    0.7rem "JetBrains Mono",
+    0.8rem "JetBrains Mono",
     monospace;
   color: #435b48;
   padding-top: 5px;
@@ -398,7 +314,7 @@
   margin-top: 45px !important;
   padding-top: 20px;
   color: #526258;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
 }
 .marketing .security-note strong {
   color: #25392c;
@@ -416,7 +332,7 @@
 }
 .marketing .section-kicker {
   color: #bcd2b3;
-  font-size: 0.66rem;
+  font-size: 0.8rem;
   letter-spacing: 0.1em;
 }
 .marketing .install-intro h2 {
@@ -451,7 +367,7 @@
 .marketing .command-head span,
 .marketing .command-bottom span {
   font:
-    0.65rem "JetBrains Mono",
+    0.8rem "JetBrains Mono",
     monospace;
   color: #b5c9af;
 }
@@ -459,7 +375,7 @@
   margin-top: 20px;
 }
 .marketing .command-option > span {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: #c3d2c0;
 }
 .marketing .copy-row {
@@ -469,7 +385,7 @@
   min-width: 0;
 }
 .marketing .copy-row code {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -482,13 +398,13 @@
   background: #34543a;
   color: #ebf4e5;
   padding: 10px 14px;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
 }
 .marketing .copy-row button:hover {
   background: #466b4b;
 }
 .marketing #copy-status {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: #c7e37e;
   min-height: 30px;
   padding-top: 8px;
@@ -497,7 +413,7 @@
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
 }
 .marketing .command-bottom a {
   text-decoration: underline;
@@ -505,7 +421,7 @@
 }
 .marketing .join-band {
   background: #d9e6cc;
-  padding-block: 65px;
+  padding-block: 38px;
 }
 .marketing .join-grid {
   display: grid;
@@ -530,7 +446,7 @@
 }
 .marketing .join-grid label {
   display: block;
-  font-size: 0.76rem;
+  font-size: 0.8rem;
   font-weight: 600;
   margin-bottom: 8px;
 }
@@ -546,7 +462,7 @@
   color: #17251f;
   padding: 14px;
   font:
-    0.85rem "JetBrains Mono",
+    1rem "JetBrains Mono",
     monospace;
 }
 .marketing .join-row button {
@@ -568,7 +484,7 @@
   display: none;
 }
 .marketing .join-help {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: #526258;
   margin-top: 10px !important;
 }
@@ -623,7 +539,7 @@
 .marketing .eyebrow,
 .marketing .outline-tag {
   font:
-    500 0.7rem "JetBrains Mono",
+    500 0.8rem "JetBrains Mono",
     monospace;
   letter-spacing: 0.07em;
   color: #507451;
@@ -646,10 +562,6 @@
   .marketing .intro h1 {
     font-size: clamp(3.6rem, 7.8vw, 5.7rem);
   }
-  .marketing .terminal-screen {
-    min-height: 310px;
-    padding: 26px 22px;
-  }
   .marketing .how-grid,
   .marketing .details-grid,
   .marketing .install-grid,
@@ -666,16 +578,16 @@
   }
   .marketing nav {
     gap: 18px;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
   }
   .marketing nav a:first-child,
-  .marketing .nav-join {
+  .marketing nav a:last-child {
     display: none;
   }
   .marketing .intro {
     grid-template-columns: 1fr;
-    gap: 48px;
-    padding-block: 48px 65px;
+    gap: 28px;
+    padding-block: 32px 38px;
   }
   .marketing .intro h1 {
     font-size: clamp(3.7rem, 13vw, 5.5rem);
@@ -688,27 +600,10 @@
     font-size: 0.92rem;
   }
   .marketing .intro-meta {
-    font-size: 0.6rem;
-  }
-  .marketing .terminal-demo {
-    width: calc(100% - 10px);
-    box-shadow: 10px 10px 0 #c5d0bd;
-  }
-  .marketing .terminal-screen {
-    font-size: 0.72rem;
-    min-height: 0;
-    padding: 24px 18px;
-  }
-  .marketing .terminal-top {
-    font-size: 0.6rem;
-    padding: 15px 18px;
-  }
-  .marketing .terminal-demo figcaption {
-    font-size: 0.55rem;
-    top: 10px;
+    font-size: 0.8rem;
   }
   .marketing .ribbon .wrap {
-    font-size: 0.55rem;
+    font-size: 0.8rem;
     gap: 8px;
   }
   .marketing .ribbon span:last-child,
@@ -717,18 +612,18 @@
   }
   .marketing .how,
   .marketing .details-section {
-    padding-block: 65px;
+    padding-block: 38px;
   }
   .marketing .section-index {
-    margin-bottom: 32px;
-    font-size: 0.58rem;
+    margin-bottom: 24px;
+    font-size: 0.8rem;
   }
   .marketing .how-grid,
   .marketing .details-grid,
   .marketing .install-grid,
   .marketing .join-grid {
     grid-template-columns: 1fr;
-    gap: 36px;
+    gap: 24px;
   }
   .marketing .how h2,
   .marketing .details-section h2,
@@ -736,19 +631,19 @@
     font-size: clamp(2.7rem, 10vw, 4rem);
   }
   .marketing .install-band {
-    padding-block: 60px;
+    padding-block: 38px;
   }
   .marketing .install-commands {
     padding: 22px 18px;
   }
   .marketing .copy-row code {
-    font-size: 0.67rem;
+    font-size: 0.8rem;
   }
   .marketing .security-note {
     margin-top: 30px !important;
   }
   .marketing .join-band {
-    padding-block: 55px;
+    padding-block: 38px;
   }
   .marketing .site-footer {
     flex-wrap: wrap;
@@ -767,4 +662,59 @@
 
 .marketing .install-band :focus-visible {
   outline-color: #c7e37e;
+}
+
+/* A shared session, shown from both sides. No live session is opened. */
+.marketing .collaboration-demo { min-width: 0; background: #15221c; color: #edf4e2; border: 1px solid #415044; box-shadow: 12px 12px 0 #c5d0bd; }
+.marketing .demo-heading { padding: 20px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.marketing .demo-heading strong { font-size: 1.05rem; }
+.marketing .demo-heading > span { font: 0.75rem "JetBrains Mono", monospace; color: #c7e37e; }
+.marketing .demo-terminals { display: grid; grid-template-columns: 1fr 1fr; }
+.marketing .demo-terminal { min-width: 0; border-block: 1px solid #415044; }
+.marketing .demo-terminal + .demo-terminal { border-left: 1px solid #415044; }
+.marketing .demo-person { padding: 12px 16px; background: #21382b; display: flex; flex-direction: column; gap: 5px; font-size: 0.9rem; }
+.marketing .demo-person small { margin-left: 6px; font-size: 0.75rem; color: #c2d1bb; }
+.marketing .demo-presence { font: 0.75rem "JetBrains Mono", monospace; color: #d2e997; }
+.marketing .demo-terminal pre { margin: 0; padding: 20px 16px; min-height: 190px; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.8rem/1.8 "JetBrains Mono", monospace; color: #edf4e2; }
+.marketing .demo-shared { padding: 10px 16px; display: flex; justify-content: space-between; gap: 8px; background: #c7e37e; color: #203322; font: 0.75rem/1.5 "JetBrains Mono", monospace; }
+.marketing .collaboration-demo figcaption { padding: 16px 20px 8px; min-height: 100px; font-size: 0.95rem; }
+.marketing .collaboration-demo figcaption > span { display: block; margin-top: 8px; font-size: 0.8rem; color: #bfceba; }
+.marketing .demo-controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 20px 20px; }
+.marketing .demo-controls button { border: 1px solid #759067; background: transparent; color: #edf4e2; min-height: 44px; padding: 8px 12px; font-size: 0.85rem; }
+.marketing .demo-steps { display: flex; gap: 4px; }
+.marketing .demo-steps button { min-width: 36px; padding-inline: 8px; }
+.marketing .demo-steps [aria-current] { background: #c7e37e; color: #203322; border-color: #c7e37e; }
+.marketing .collaboration-demo :focus-visible { outline-color: #c7e37e; }
+.marketing [id] { scroll-margin-top: 20px; }
+@media (max-width: 900px) and (min-width: 681px) { .marketing .intro { grid-template-columns: 1fr; gap: 32px; } }
+@media (max-width: 680px) {
+  .marketing .site-header { gap: 10px; min-height: 68px; }
+  .marketing .wordmark { font-size: 1.4rem; gap: 6px; }
+  .marketing nav { gap: 0; }
+  .marketing .nav-join { display: inline-flex; font-size: 0.8rem; padding: 10px; min-height: 44px; align-items: center; }
+  .marketing .edition { flex-wrap: wrap; gap: 8px 16px; }
+  .marketing .intro h1 { margin-block: 20px 16px; }
+  .marketing .intro-meta { margin-top: 20px; }
+  .marketing .intro-meta span { margin-inline: 3px; }
+  .marketing .ribbon { display: none; }
+  .marketing .collaboration-demo { box-shadow: 6px 6px 0 #c5d0bd; }
+  .marketing .demo-heading { padding: 16px; }
+  .marketing .demo-terminals { grid-template-columns: 1fr; }
+  .marketing .demo-terminal + .demo-terminal { border-left: 0; border-top: 0; }
+  .marketing .demo-person { flex-direction: row; justify-content: space-between; flex-wrap: wrap; padding: 8px 14px; }
+  .marketing .demo-terminal pre { min-height: 146px; padding: 12px 14px; line-height: 1.6; }
+  .marketing .demo-shared { flex-wrap: wrap; font-size: 0.7rem; }
+  .marketing .demo-controls { padding: 12px; gap: 8px; }
+  .marketing .demo-controls button { padding-inline: 8px; }
+  .marketing .demo-steps button { min-width: 32px; }
+  .marketing .collaboration-demo figcaption { padding: 14px; min-height: 108px; }
+  .marketing .command-head, .marketing .command-bottom { flex-wrap: wrap; gap: 8px; }
+  .marketing .section-index { letter-spacing: 0.02em; }
+}
+
+/* Adjacent explanation sections share their whitespace. */
+.marketing .how + .details-section { padding-top: 20px; }
+@media (max-width: 680px) {
+  .marketing .workflow article, .marketing .detail-list article { padding-block: 16px; grid-template-columns: 28px 1fr; gap: 12px; }
+  .marketing .how-grid > div:first-child > p, .marketing .details-grid > div:first-child > p { margin-top: 16px; }
 }

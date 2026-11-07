@@ -1,0 +1,70 @@
+<figure class="collaboration-demo" aria-labelledby="demo-heading">
+  <div class="demo-heading"><strong id="demo-heading">Two people. One terminal.</strong><span>ILLUSTRATED DEMO</span></div>
+  <div class="demo-terminals">
+    <div class="demo-terminal"><div class="demo-person"><span>Alex <small>HOST</small></span><span class="demo-presence" data-host-state>Sharing</span></div><pre data-host-screen>$ npm test
+
+✓ All tests passed
+
+$ ▋</pre></div>
+    <div class="demo-terminal"><div class="demo-person"><span>Sam <small>GUEST · SSH</small></span><span class="demo-presence" data-guest-state>Connected</span></div><pre data-guest-screen>$ npm test
+
+✓ All tests passed
+
+$ ▋</pre></div>
+  </div>
+  <div class="demo-shared">SAME SESSION <span aria-hidden="true">↔</span> SHARED INPUT &amp; OUTPUT</div>
+  <figcaption><p data-demo-caption aria-live="polite">Sam runs the tests. Both see the result.</p><span>No live connection. Example tokens only.</span></figcaption>
+  <div class="demo-controls" hidden>
+    <button type="button" data-demo-play>Play demo <span aria-hidden="true">▶</span></button>
+    <div class="demo-steps" aria-label="Demo steps">
+      {['Start', 'Invite', 'Collaborate', 'See the result'].map((label, i) => <button type="button" data-demo-step={i} aria-label={`${i + 1}. ${label}`} aria-current={i === 3 ? 'step' : undefined}>{i + 1}</button>)}
+    </div>
+  </div>
+</figure>
+<script>
+  const demo = document.querySelector<HTMLElement>('.collaboration-demo');
+  if (demo) {
+    const host = demo.querySelector<HTMLElement>('[data-host-screen]')!;
+    const guest = demo.querySelector<HTMLElement>('[data-guest-screen]')!;
+    const hostState = demo.querySelector<HTMLElement>('[data-host-state]')!;
+    const guestState = demo.querySelector<HTMLElement>('[data-guest-state]')!;
+    const caption = demo.querySelector<HTMLElement>('[data-demo-caption]')!;
+    const play = demo.querySelector<HTMLButtonElement>('[data-demo-play]')!;
+    const steps = [...demo.querySelectorAll<HTMLButtonElement>('[data-demo-step]')];
+    const scenes = [
+      { host: '$ tmtv\n\nSession ready.\nInvite a collaborator.', guest: '# Waiting for an invitation', h: 'Sharing', g: 'Not joined', text: 'Alex starts tmtv. The shell stays on Alex’s machine.' },
+      { host: '$ ▋\n\n# Shared session', guest: '$ ssh TOKEN@tmtv.se\n\n# Connected to Alex’s session\n$ ▋', h: 'Sharing', g: 'Connected', text: 'Sam joins over SSH using a read-write token.' },
+      { host: '$ npm test\n\nRunning tests…', guest: '$ npm test\n\nRunning tests…', h: 'Watching', g: 'Typing', text: 'Sam runs npm test. The command appears for both people.' },
+      { host: '$ npm test\n\n✓ All tests passed\n\n$ ▋', guest: '$ npm test\n\n✓ All tests passed\n\n$ ▋', h: 'Sharing', g: 'Connected', text: 'One command, one result. Both can keep working.' },
+    ];
+    let current = 3;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let playing = false;
+    function show(index: number) {
+      current = index;
+      const scene = scenes[index];
+      host.textContent = scene.host; guest.textContent = scene.guest;
+      hostState.textContent = scene.h; guestState.textContent = scene.g;
+      caption.textContent = scene.text;
+      steps.forEach((button, i) => i === index ? button.setAttribute('aria-current', 'step') : button.removeAttribute('aria-current'));
+    }
+    function pause() {
+      clearTimeout(timer); playing = false;
+      play.textContent = current === 3 ? 'Replay demo ↻' : 'Continue ▶';
+    }
+    function advance() {
+      timer = setTimeout(() => {
+        if (current < 3) show(current + 1);
+        if (current === 3) pause(); else advance();
+      }, 3000);
+    }
+    play.addEventListener('click', () => {
+      if (playing) { pause(); return; }
+      if (current === 3) show(0);
+      playing = true; play.textContent = 'Pause demo Ⅱ'; advance();
+    });
+    steps.forEach((button, i) => button.addEventListener('click', () => { pause(); show(i); play.textContent = i === 3 ? 'Replay demo ↻' : 'Continue ▶'; }));
+    document.addEventListener('visibilitychange', () => { if (document.hidden && playing) pause(); });
+    demo.querySelector<HTMLElement>('.demo-controls')!.hidden = false;
+  }
+</script>
