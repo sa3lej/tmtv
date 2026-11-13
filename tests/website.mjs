@@ -61,6 +61,10 @@ try {
     assert(llms.includes(`https://tmtv.se/docs/${doc}.md`), `llms.txt links ${doc}.md`);
     assert(full.includes(markdown.trim().split('\n')[0]), `llms-full.txt includes ${doc}`);
   }
+  for (const route of routes) {
+    // Agents reading raw HTML should meet the document, not comments or boilerplate.
+    assert.match(await text(route), /^<!DOCTYPE html>/i, `${route} starts with the doctype`);
+  }
   const robots = await text('/robots.txt');
   assert.match(robots, /Sitemap: https:\/\/tmtv\.se\/sitemap\.xml/);
   // Every internal link on every page resolves.
