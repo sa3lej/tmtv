@@ -12,19 +12,32 @@ on:
         required: true
         default: develop
         type: string
+  # GitHub only accepts manual dispatch of a workflow it has seen run. Pushing a change
+  # to this file on develop registers it; only the no-op registration job runs then.
+  push:
+    branches: [develop]
+    paths: ['.github/workflows/deploy-web.yml']
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  # Shared with the release deployment so web and relay deploys never overlap.
-  group: production-deployment
+  # Deploys share the release deployment group so web and relay deploys never overlap.
+  group: ${{ github.event_name == 'workflow_dispatch' && 'production-deployment' || format('deploy-web-registration-{0}', github.sha) }}
   cancel-in-progress: false
 
 jobs:
+  registration:
+    name: Register workflow (no deployment)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Deploy website is registered; deployments run only via workflow_dispatch."
+
   require-green-ci:
     name: Require green CI for the commit
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       commit: ${{ steps.resolve.outputs.commit }}
