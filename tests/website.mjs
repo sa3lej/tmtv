@@ -6,7 +6,8 @@
 import assert from 'node:assert/strict';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const base = (process.argv[2] || 'http://127.0.0.1:4187').replace(/\/$/, '');
-const routes = ['/', '/releases/', '/releases/3-0/'];
+const docs = ['index', 'install', 'sharing', 'joining', 'self-hosting', 'security', 'alternatives'];
+const routes = ['/', '/releases/', '/releases/3-0/', ...docs.map((d) => (d === 'index' ? '/docs/' : `/docs/${d}/`))];
 const browser = await chromium.launch(process.env.CHROME_BIN ? { executablePath: process.env.CHROME_BIN } : {});
 try {
   for (const viewport of [
@@ -39,6 +40,47 @@ try {
     assert.deepEqual(external, [], `third-party requests at ${viewport.width}`);
     await page.close();
   }
+
+  // Plain-text resources for agents and crawlers, readable without JavaScript.
+  const text = async (path) => {
+    const response = await fetch(base + path);
+    assert.equal(response.status, 200, path);
+    return response.text();
+  };
+  const llms = await text('/llms.txt');
+  assert.match(llms, /^# tmtv\n\n> /, 'llms.txt title and summary');
+  const sitemap = await text('/sitemap.xml');
+  for (const route of routes) {
+    assert(sitemap.includes(`<loc>https://tmtv.se${route}</loc>`), `sitemap lists ${route}`);
+  }
+  assert.equal((sitemap.match(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/g) || []).length, routes.length, 'sitemap lastmod');
+  const full = await text('/llms-full.txt');
+  for (const doc of docs) {
+    const markdown = await text(`/docs/${doc}.md`);
+    assert.match(markdown, /^# /, `${doc}.md starts with a heading`);
+    assert(llms.includes(`https://tmtv.se/docs/${doc}.md`), `llms.txt links ${doc}.md`);
+    assert(full.includes(markdown.trim().split('\n')[0]), `llms-full.txt includes ${doc}`);
+  }
+  const robots = await text('/robots.txt');
+  assert.match(robots, /Sitemap: https:\/\/tmtv\.se\/sitemap\.xml/);
+  // Every internal link on every page resolves.
+  const linkPage = await browser.newPage();
+  const seen = new Set();
+  for (const route of routes) {
+    await linkPage.goto(base + route);
+    const hrefs = await linkPage.$$eval('a[href]', (as) => as.map((a) => a.getAttribute('href')));
+    for (const href of hrefs) {
+      if (!href.startsWith('/') || href.startsWith('//')) continue;
+      const path = href.split('#')[0];
+      if (!path || seen.has(path) || /^\/(s|j)\//.test(path)) continue;
+      seen.add(path);
+      assert.equal((await fetch(base + path)).status, 200, `link ${href} on ${route}`);
+    }
+    for (const id of await linkPage.$$eval('a[href^="#"]', (as) => as.map((a) => a.getAttribute('href').slice(1)))) {
+      assert.equal(await linkPage.locator(`[id="${id}"]`).count(), 1, `anchor #${id} on ${route}`);
+    }
+  }
+  await linkPage.close();
 
   const context = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await context.newPage();

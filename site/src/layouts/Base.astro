@@ -12,6 +12,7 @@ interface Props {
   ogType?: string;
   current?: string;
   jsonLd?: object | object[];
+  markdownUrl?: string;
 }
 
 const {
@@ -23,6 +24,7 @@ const {
   ogType = 'website',
   current,
   jsonLd,
+  markdownUrl,
 } = Astro.props;
 const schemas = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [];
 ---
@@ -70,6 +72,7 @@ const schemas = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [];
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/favicon.ico" sizes="32x32">
   <link rel="alternate" type="text/plain" href="/llms.txt" title="tmtv for language models">
+  {markdownUrl && <link rel="alternate" type="text/markdown" href={markdownUrl} title="This page as Markdown">}
   <link rel="preload" href="/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/ibm-plex-sans-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
   {schemas.map((schema) => <script type="application/ld+json" set:html={JSON.stringify(schema)} />)}

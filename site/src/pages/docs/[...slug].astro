@@ -1,0 +1,84 @@
+---
+import Base from "../../layouts/Base.astro";
+import { docs, type Doc } from "../../data/docs";
+
+export function getStaticPaths() {
+  return docs.map((doc) => ({
+    params: { slug: doc.slug === "index" ? undefined : doc.slug },
+    props: { doc },
+  }));
+}
+
+const { doc } = Astro.props as { doc: Doc };
+// Show the title and first paragraph, then the contents list, then the rest.
+const html = await doc.html();
+const firstParagraphEnd = html.indexOf("</p>", html.indexOf("</h1>"));
+const splitAt = firstParagraphEnd === -1 ? html.indexOf("</h1>") + 5 : firstParagraphEnd + 4;
+const intro = html.slice(0, splitAt);
+const body = html.slice(splitAt);
+const site = "https://tmtv.se";
+const sections = doc.headings.filter((heading) => heading.depth === 2);
+const crumbs = [
+  { name: "tmtv", item: `${site}/` },
+  { name: "Docs", item: `${site}/docs/` },
+  ...(doc.slug === "index" ? [] : [{ name: doc.nav, item: `${site}${doc.url}` }]),
+];
+const schema = [
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    headline: doc.title,
+    description: doc.description,
+    url: `${site}${doc.url}`,
+    dateModified: doc.updated,
+    inLanguage: "en",
+    author: { "@type": "Person", name: "Lars-Erik Jonsson", url: "https://github.com/sa3lej" },
+    about: { "@type": "SoftwareApplication", name: "tmtv", url: `${site}/` },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: crumbs.map((crumb, index) => ({ "@type": "ListItem", position: index + 1, ...crumb })),
+  },
+];
+---
+
+<Base
+  title={`${doc.title} · tmtv docs`}
+  description={doc.description}
+  canonicalUrl={`${site}${doc.url}`}
+  ogType="article"
+  current="docs"
+  jsonLd={schema}
+  markdownUrl={doc.markdownUrl}
+>
+  <div class="docs">
+    <nav class="docs-nav" aria-labelledby="docs-nav-title">
+      <p id="docs-nav-title" class="docs-nav-title">Documentation</p>
+      <ul>
+        {docs.map((item) => (
+          <li>
+            <a href={item.url} aria-current={item.slug === doc.slug ? "page" : undefined}>{item.nav}</a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+    <article class="prose docs-body">
+      <Fragment set:html={intro} />
+      {sections.length > 2 && (
+        <nav class="toc" aria-labelledby="toc-title">
+          <h2 id="toc-title">On this page</h2>
+          <ul class="plain-list">
+            {sections.map((heading) => <li><a href={`#${heading.slug}`}>{heading.text}</a></li>)}
+          </ul>
+        </nav>
+      )}
+      <Fragment set:html={body} />
+      <p class="meta doc-meta">
+        Updated {doc.updated} ·
+        <a href={doc.markdownUrl}>Markdown source</a> ·
+        <a href={`https://github.com/sa3lej/tmtv/blob/develop/site/src/docs/${doc.slug}.md`}>Edit on GitHub</a>
+      </p>
+    </article>
+  </div>
+</Base>

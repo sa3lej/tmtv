@@ -60,6 +60,7 @@ const schema = [
       <p class="meta">
         Current release {release.current} ·
         <a href="/releases/3-0/">what changed in 3.0</a> ·
+        <a href="/docs/">documentation</a> ·
         <a href="#join">join a session</a>
       </p>
     </div>
@@ -110,12 +111,14 @@ ssh ro-TOKEN@tmtv.se  <span class="c"># read-only access</span></code></pre>
 [tmtv] web session: https://tmtv.se/s/TOKEN</code></pre>
       <p>
         People who open the link watch in their browser without installing
-        anything. They can only watch until you run
-        <code>tmtv set -g tmtv-web-input on</code>; after that, anyone with the
-        printed web link can type.
+        anything, and receive what you copy unless you turn off the shared
+        clipboard. They can type only after you run
+        <code>tmtv set -g tmtv-web-input on</code>; then anyone with the printed
+        web link can type.
       </p>
       <p>
-        To stop sharing, exit tmtv. Starting it again gives you new links.
+        To stop sharing, end the tmtv server: exit every shell or run
+        <code>tmtv kill-server</code>. Detaching leaves the session shared.
       </p>
     </div>
   </section>
@@ -146,8 +149,10 @@ ssh TOKEN@tmtv.se     tmtv.se/s/TOKEN</code></pre>
         guests. Use the public relay for things you would be comfortable
         sharing with its operator, or run your own: <code>docker compose up -d</code>
         in a checkout starts one with SSH on port 2222. The
-        <a href="https://github.com/sa3lej/tmtv#self-hosting">self-hosting guide</a>
-        covers TLS, web viewing and systemd.
+        <a href="/docs/self-hosting/">self-hosting guide</a>
+        covers TLS, the browser viewer and systemd, and
+        <a href="/docs/security/">Security</a> explains tokens, passwords and
+        names.
       </p>
     </div>
   </section>
@@ -169,12 +174,12 @@ ssh TOKEN@tmtv.se     tmtv.se/s/TOKEN</code></pre>
       <div class="option">
         <h3 id="name-option">Use a name instead of a random token</h3>
         <p>
-          Gives you <code>ssh ro-demo@tmtv.se</code> and
-          <code>https://tmtv.se/s/demo</code>; the read-write SSH link keeps a
-          32-character random prefix. Names are 3–32 letters, digits or
-          hyphens. They are easy to guess, and they are not reserved: while your
-          host is offline someone else can use the name. Set a password,
-          especially with web input on.
+          Gives you <code>ssh ro-demo@tmtv.se</code> and the web link
+          <code>https://tmtv.se/s/demo</code>, which counts as read-write; the
+          read-write SSH link keeps a 32-character random prefix. Names are
+          3–32 letters, digits or hyphens. They are easy to guess, stay the
+          same after a restart, and are not reserved while your host is
+          offline. Set a password, especially with web input on.
         </p>
         <pre class="conf"><code>set -g tmtv-session-name demo</code></pre>
       </div>
@@ -185,19 +190,18 @@ ssh TOKEN@tmtv.se     tmtv.se/s/TOKEN</code></pre>
       </div>
       <div class="option">
         <h3 id="ttl">End the session after a while</h3>
-        <p>Time to live in seconds. Viewers see the countdown.</p>
+        <p>The relay ends the session after this many seconds. The host may reconnect, so stop tmtv yourself when access must end.</p>
         <pre class="conf"><code>set -g tmtv-link-ttl 3600</code></pre>
       </div>
       <div class="option">
         <h3 id="clipboard">Turn off the shared clipboard</h3>
-        <p>On by default. Read-only viewers never get it.</p>
+        <p>On by default: what you copy reaches read-write viewers, including browser viewers without web input. Read-only viewers never get it.</p>
         <pre class="conf"><code>set -g tmtv-shared-clipboard off</code></pre>
       </div>
       <p>
         If the connection drops, the same running host reconnects and keeps its
-        links. The <a href="https://github.com/sa3lej/tmtv#readme">README</a>
-        covers status bar variables, the per-user input API and using tmtv as
-        plain tmux.
+        links, unless someone else took its session name meanwhile. <a href="/docs/sharing/">Sharing options</a> covers every
+        setting, status bar variables and the per-user input API.
       </p>
     </div>
   </section>

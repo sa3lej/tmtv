@@ -70,3 +70,25 @@ Their findings and resolutions:
 | `/releases/3-0/` kept slogan headings; 2.0.4 lacked a date. | 1, 2, 3 | Headings are factual ("Changes", "tmux 3.8 core", "Upgrading", "Thanks"). The intro is plain. The upgrade notice and a contents list come after the title. 2.0.4 is dated 6 September 2026. |
 | The README lacked Homebrew and the relay-trust statement. | 3 | Both added to the README. |
 | Open: a comparison with tmate and upterm; how to stop sharing beyond "exit tmtv"; docs pages. | 2, 3 | Planned for the `/docs/` stage, using verifiable claims only. |
+
+## Documentation pages and fact-check (2026-11-13)
+
+`/docs/` adds Getting started, Install, Sharing options, Joining, Self-hosting,
+Security and Alternatives, written from the README and checked against the
+source. Each page is also published as Markdown (`/docs/<page>.md`), all of
+them together as `/llms-full.txt`, and they are listed in `/llms.txt` and the
+sitemap. An independent fact-check against the C sources corrected these claims,
+on the homepage and the README as well as the docs:
+
+- Restarting with the same session name brings back the same read-only and web
+  links, and the bare-name web link is read-write.
+- Browser viewers on the printed link receive the host's clipboard even with web
+  input off.
+- Passwords are kept as salted PBKDF2-SHA256 hashes, and browsers send them in the
+  stream URL.
+- Expiry shows no countdown to viewers, a running host may reconnect afterwards,
+  and the `/j/` path is chosen by expiry, not by web input.
+- Ending sharing means ending the tmtv server; detaching keeps it shared.
+
+Claims about other tools on the Alternatives page come only from
+`docs/release-positioning.md`, which links each source.

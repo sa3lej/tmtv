@@ -614,6 +614,96 @@ pre.conf::before {
   margin-top: 0.25rem;
 }
 
+/* Documentation */
+
+.docs-nav {
+  padding: 1.25rem 0 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.docs-nav-title {
+  font-size: 0.95rem;
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.docs-nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.1rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.docs-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.docs-nav a:hover,
+.docs-nav a[aria-current="page"] {
+  text-decoration: underline;
+  text-decoration-color: var(--link);
+}
+
+.docs-nav a[aria-current="page"] {
+  font-weight: 600;
+}
+
+.doc-meta {
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.doc-meta a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+@media (min-width: 60rem) {
+  .docs {
+    display: grid;
+    grid-template-columns: var(--margin) minmax(0, var(--measure));
+    column-gap: var(--gap);
+  }
+
+  .docs-nav {
+    border-bottom: 0;
+    padding-top: 2.75rem;
+  }
+
+  .docs-nav ul {
+    display: block;
+    position: sticky;
+    top: 1rem;
+  }
+
+  .docs-nav a {
+    min-height: 36px;
+  }
+}
+
+@media (min-width: 60rem) {
+  .toc ul {
+    columns: 2;
+    column-gap: 2rem;
+  }
+
+  .toc li {
+    break-inside: avoid;
+  }
+
+  .toc a {
+    min-height: 32px;
+  }
+}
+
 /* Footer */
 
 .site-footer {

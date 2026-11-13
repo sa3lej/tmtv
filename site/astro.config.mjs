@@ -5,6 +5,8 @@ import tailwind from '@astrojs/tailwind';
 export default defineConfig({
   integrations: [tailwind({ applyBaseStyles: false })],
   output: 'static',
+  // Code blocks are styled by site.css; no syntax-highlighting colours.
+  markdown: { syntaxHighlight: false },
   build: {
     inlineStylesheets: 'always',
   },

@@ -140,7 +140,7 @@ Set a time-to-live for your session:
 set -g tmtv-link-ttl 3600    # expire after 1 hour
 ```
 
-The session auto-terminates after the TTL. Viewers see the countdown in the session notification.
+The relay ends the session after the TTL (checked every 30 seconds); the host is told the expiry time when it connects. A host that is still running may reconnect, so stop tmtv (`tmtv kill-server`) when access must end. With a TTL set, the web link uses `/j/` instead of `/s/`.
 
 ### All sharing options
 
@@ -174,7 +174,7 @@ set -g tmtv-link-ttl 3600
 All options can be combined freely. A named session with password and web input gives you:
 - `ssh <32-character-prefix>-demo@tmtv.se` — SSH read-write (password required)
 - `ssh ro-demo@tmtv.se` — SSH read-only (password required)
-- `https://tmtv.se/j/demo` — web viewer with typing enabled (password prompt shown)
+- `https://tmtv.se/s/demo` — web viewer with typing enabled (password prompt shown; `/j/demo` when a TTL is set)
 
 Options can also be toggled at runtime:
 
