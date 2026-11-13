@@ -9,7 +9,8 @@ ROUTES = {'/': 'index.html', '/releases/': 'releases/index.html',
           '/releases/3-0/': 'releases/3-0/index.html', '/sitemap.xml': 'sitemap.xml',
           '/robots.txt': 'robots.txt', '/llms.txt': 'llms.txt',
           '/social-card.png': 'social-card.png', '/install.sh': 'install.sh',
-          '/viewer.js': 'viewer.js'}
+          '/viewer.js': 'viewer.js',
+          '/fonts/ibm-plex-sans-latin-400-normal.woff2': 'fonts/ibm-plex-sans-latin-400-normal.woff2'}
 
 
 def verify(bundle, base):

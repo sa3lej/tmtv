@@ -1,0 +1,662 @@
+/* tmtv.se — "a well-kept man page". See docs/website/design-review-2026-11.md. */
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-sans-latin-400-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+}
+
+:root {
+  --paper: #f4f2ec;
+  --paper-2: #ebe8df;
+  --ink: #1a1d1a;
+  --ink-2: #4a514b;
+  --rule: #d6d3c8;
+  --rule-strong: #767b72;
+  --link: #2f5d3a;
+  --term: #121412;
+  --term-text: #d8dcd2;
+  --term-dim: #9aa196;
+  --accent: #9fc53a;
+  --error: #9b2c1c;
+  --sans: "IBM Plex Sans", ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, "DejaVu Sans Mono", monospace;
+  --measure: 40rem;
+  --margin: 11rem;
+  --gap: 2.5rem;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (min-width: 48rem) {
+  body {
+    font-size: 1.125rem;
+  }
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+a {
+  color: var(--link);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--link);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(1.75rem, 1.2rem + 2.4vw, 2.75rem);
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+  max-width: 20ch;
+}
+
+h2 {
+  font-size: 1.25rem;
+}
+
+h3 {
+  font-size: 1.0625rem;
+}
+
+p,
+ul,
+ol,
+dl,
+pre {
+  margin: 0 0 1em;
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+:not(pre) > code {
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: -4rem;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0.6rem 1rem;
+  z-index: 10;
+}
+
+.skip-link:focus {
+  top: 0.5rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Page frame */
+
+.page {
+  width: 100%;
+  max-width: calc(var(--margin) + var(--gap) + var(--measure) + 4rem);
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+@media (min-width: 48rem) {
+  .page {
+    padding: 0 2rem;
+  }
+}
+
+/* Header */
+
+.site-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 1.5rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.wordmark {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 1.125rem;
+  color: var(--ink);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+/* tmtv followed by a static block cursor: the one use of the accent on paper. */
+.wordmark::after {
+  content: "";
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 0.1em;
+  background: var(--accent);
+  vertical-align: -0.15em;
+}
+
+.site-nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.site-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.site-nav a:hover,
+.site-nav a[aria-current="page"] {
+  text-decoration: underline;
+  text-decoration-color: var(--link);
+}
+
+/* Sections: heading in the margin on wide screens, like a man page */
+
+.section {
+  padding: 2.25rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.section:last-of-type {
+  border-bottom: 0;
+}
+
+.section > h2 {
+  margin-bottom: 0.9rem;
+}
+
+.section-body {
+  max-width: var(--measure);
+}
+
+@media (min-width: 60rem) {
+  .section {
+    display: grid;
+    grid-template-columns: var(--margin) minmax(0, var(--measure));
+    column-gap: var(--gap);
+    padding: 3rem 0;
+  }
+
+  .section > h2 {
+    margin: 0;
+    padding-top: 0.05em;
+  }
+}
+
+.lead-section {
+  padding: 2.5rem 0 2rem;
+}
+
+@media (min-width: 60rem) {
+  .lead-section {
+    padding: 4.5rem 0 3rem;
+    grid-template-columns: var(--margin) minmax(0, calc(var(--measure) + 6rem));
+  }
+}
+
+.lead {
+  font-size: 1.125rem;
+  color: var(--ink);
+  max-width: var(--measure);
+  margin-top: 1.25rem;
+}
+
+@media (min-width: 48rem) {
+  .lead {
+    font-size: 1.1875rem;
+  }
+}
+
+@media (min-width: 60rem) {
+  .lead-section .lead-body {
+    grid-column: 2;
+  }
+}
+
+.meta {
+  font-size: 0.95rem;
+  color: var(--ink-2);
+}
+
+.muted {
+  color: var(--ink-2);
+}
+
+/* Commands with copy buttons */
+
+.command {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--rule-strong);
+  background: #fbfaf6;
+  margin: 0 0 0.75rem;
+  max-width: 100%;
+}
+
+.command code {
+  flex: 1;
+  min-width: 0;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.95rem;
+  overflow-x: auto;
+  white-space: nowrap;
+  background: none;
+}
+
+@media (max-width: 30rem) {
+  .command code {
+    white-space: pre-wrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+}
+
+.command code::before {
+  content: "$ ";
+  color: var(--ink-2);
+  user-select: none;
+}
+
+.copy {
+  flex: none;
+  min-width: 4.5rem;
+  min-height: 44px;
+  border: 0;
+  border-left: 1px solid var(--rule-strong);
+  background: transparent;
+  color: var(--ink);
+  font: 500 0.875rem var(--sans);
+  cursor: pointer;
+}
+
+.copy:hover {
+  background: var(--paper-2);
+}
+
+.copy-status {
+  min-height: 1.5em;
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-2);
+}
+
+/* Terminal transcripts */
+
+.terminal {
+  background: var(--term);
+  color: var(--term-text);
+  padding: 0.9rem 0.85rem;
+  overflow-x: auto;
+  line-height: 1.55;
+  font-size: 0.85rem;
+  margin: 0 0 1.25rem;
+}
+
+@media (min-width: 48rem) {
+  .terminal {
+    font-size: 0.9rem;
+    padding: 1.25rem 1.5rem;
+  }
+}
+
+.terminal .p {
+  color: var(--accent);
+  user-select: none;
+}
+
+.terminal .c {
+  color: var(--term-dim);
+}
+
+.terminal .add {
+  color: var(--accent);
+}
+
+.terminal .del {
+  color: #e2a08f;
+}
+
+.caption {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+}
+
+/* Options */
+
+.option {
+  margin: 0 0 1.75rem;
+}
+
+.option h3 {
+  margin: 0 0 0.3rem;
+}
+
+.option p {
+  margin: 0 0 0.5rem;
+}
+
+/* Config lines are labelled so nobody pastes them into a shell. */
+pre.conf {
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  font-size: 0.9rem;
+}
+
+pre.conf::before {
+  content: "~/.tmtv.conf";
+  display: block;
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  color: var(--ink-2);
+}
+
+.plain-list {
+  padding-left: 1.2rem;
+}
+
+.plain-list li + li {
+  margin-top: 0.35rem;
+}
+
+/* Join form */
+
+.join-form label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.join-row {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 32rem;
+}
+
+.join-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 0;
+  background: #fbfaf6;
+  color: var(--ink);
+  font: 400 1rem var(--mono);
+}
+
+.join-row input::placeholder {
+  color: #646b63;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0.5rem 1.1rem;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  font: 600 0.95rem var(--sans);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--link);
+  border-color: var(--link);
+}
+
+.form-error {
+  min-height: 1.5em;
+  margin: 0.4rem 0 0;
+  color: var(--error);
+  font-size: 0.95rem;
+}
+
+/* Prose pages (release log, release notes) */
+
+.prose {
+  max-width: var(--measure);
+  padding: 2.5rem 0 3rem;
+}
+
+.prose h1 {
+  margin-bottom: 1rem;
+}
+
+.prose h2 {
+  font-size: 1.3rem;
+  margin: 2.25rem 0 0.75rem;
+}
+
+.prose h3 {
+  font-size: 1.1rem;
+  margin: 1.75rem 0 0.5rem;
+}
+
+.prose pre {
+  background: var(--term);
+  color: var(--term-text);
+  padding: 0.9rem 1.1rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
+
+.prose pre code {
+  background: none;
+  padding: 0;
+}
+
+.prose table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 1.25rem;
+  font-size: 0.95rem;
+  display: block;
+  overflow-x: auto;
+}
+
+.prose th,
+.prose td {
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+  padding: 0.45rem 0.75rem 0.45rem 0;
+  vertical-align: top;
+}
+
+.prose blockquote {
+  margin: 0 0 1em;
+  padding-left: 1rem;
+  border-left: 3px solid var(--rule-strong);
+  color: var(--ink-2);
+}
+
+.prose li + li {
+  margin-top: 0.3rem;
+}
+
+.notice {
+  border-left: 3px solid var(--link);
+  background: var(--paper-2);
+  padding: 0.8rem 1rem;
+}
+
+.toc {
+  margin: 1.5rem 0 2rem;
+}
+
+.prose .toc h2 {
+  font-size: 1rem;
+  margin: 0 0 0.4rem;
+}
+
+.crumb {
+  font-size: 0.95rem;
+  margin-bottom: 1rem;
+}
+
+.crumb a,
+.toc a,
+.release h2 a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.toc ul {
+  margin: 0;
+}
+
+.toc li + li {
+  margin-top: 0;
+}
+
+.release {
+  padding: 1.5rem 0;
+  border-top: 1px solid var(--rule);
+}
+
+.release h2 {
+  margin-top: 0.25rem;
+}
+
+/* Footer */
+
+.site-footer {
+  border-top: 1px solid var(--rule);
+  padding: 2rem 0 2.5rem;
+  font-size: 0.95rem;
+  color: var(--ink-2);
+}
+
+.site-footer ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.25rem;
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
+.site-footer li a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.site-footer li a:hover {
+  color: var(--link);
+  text-decoration: underline;
+}
+
+.colophon {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  margin-top: 0.75rem !important;
+}
+
+.site-footer p {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}

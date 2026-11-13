@@ -31,3 +31,14 @@ jobs:
       - run: npm run build --prefix site
       - name: Package complete website
         run: sh scripts/package-site.sh "$RUNNER_TEMP/tmtv-web.tar.gz"
+      - name: Install Playwright
+        run: |
+          npm install --prefix "$RUNNER_TEMP/website-node" playwright@1.59.1
+          "$RUNNER_TEMP/website-node/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Browser checks (layout, metadata, join form, copy)
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/website-node/node_modules/playwright/index.mjs
+        run: |
+          npx --prefix site astro preview --root site --host 127.0.0.1 --port 4187 > "$RUNNER_TEMP/preview.log" 2>&1 &
+          for _ in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:4187/ && break; sleep 1; done
+          node tests/website.mjs http://127.0.0.1:4187

@@ -1,17 +1,30 @@
 ---
+import "../styles/site.css";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+
 interface Props {
   title: string;
   description?: string;
   canonicalUrl?: string;
   ogImage?: string;
+  ogImageAlt?: string;
+  ogType?: string;
+  current?: string;
+  jsonLd?: object | object[];
 }
 
 const {
   title,
-  description = 'Share your terminal over SSH or an optional browser viewer. Pair, troubleshoot and teach with tmtv. Open source and self-hostable.',
+  description = 'tmtv shares a tmux session over SSH or in a browser. Open source, self-hostable, for Linux and macOS.',
   canonicalUrl = 'https://tmtv.se/',
   ogImage = 'https://tmtv.se/social-card.png',
+  ogImageAlt = 'tmtv: share a tmux session over SSH or in a browser',
+  ogType = 'website',
+  current,
+  jsonLd,
 } = Astro.props;
+const schemas = jsonLd ? (Array.isArray(jsonLd) ? jsonLd : [jsonLd]) : [];
 ---
 <!--
   Copyright (c) 2026 Lars-Erik Jonsson <l@jonsson.es>
@@ -33,49 +46,42 @@ const {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
   <meta name="description" content={description}>
-
-  <!-- Canonical -->
   <link rel="canonical" href={canonicalUrl}>
+  <meta name="theme-color" content="#f4f2ec">
 
-  <!-- Open Graph -->
-  <meta property="og:type" content="website">
+  <meta property="og:type" content={ogType}>
   <meta property="og:site_name" content="tmtv">
+  <meta property="og:locale" content="en">
   <meta property="og:title" content={title}>
   <meta property="og:description" content={description}>
   <meta property="og:url" content={canonicalUrl}>
   <meta property="og:image" content={ogImage}>
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="tmtv — SSH terminal sharing built on modern tmux">
-
-  <!-- Twitter / X -->
+  <meta property="og:image:alt" content={ogImageAlt}>
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content={title}>
   <meta name="twitter:description" content={description}>
   <meta name="twitter:image" content={ogImage}>
+  <meta name="twitter:image:alt" content={ogImageAlt}>
 
-  <!-- Favicons -->
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/favicon.ico" sizes="32x32">
-
-  <!-- Fonts — preloaded to avoid render-blocking @import -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600;700&display=swap">
-
-  <title>{title}</title>
+  <link rel="alternate" type="text/plain" href="/llms.txt" title="tmtv for language models">
+  <link rel="preload" href="/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/ibm-plex-sans-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+  {schemas.map((schema) => <script type="application/ld+json" set:html={JSON.stringify(schema)} />)}
 </head>
-<body class="bg-tmtv-bg min-h-screen font-sans text-gray-200 antialiased">
-  <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:bg-tmtv-blue focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm focus:font-semibold">
-    Skip to content
-  </a>
-  <main id="main">
-    <slot />
-  </main>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="page">
+    <SiteNav current={current} />
+    <main id="main">
+      <slot />
+    </main>
+    <SiteFooter />
+  </div>
 </body>
 </html>
-
-<style is:global>
-  @import '../styles/global.css';
-</style>

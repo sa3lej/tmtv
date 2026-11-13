@@ -1,15 +1,25 @@
-<header class="site-header wrap">
-  <a class="wordmark" href="/" aria-label="tmtv home">
-    <span aria-hidden="true">&gt;_</span> tmtv
-  </a>
-  <nav aria-label="Main navigation">
-    <a href="/#how-it-works">How it works</a>
-    <a href="/releases/">Releases</a>
-    <a href="https://github.com/sa3lej/tmtv">
-      GitHub <span aria-hidden="true">↗</span>
-    </a>
+---
+interface Props {
+  current?: string;
+}
+const { current } = Astro.props;
+const links = [
+  { href: "/#install", label: "Install", key: "install" },
+  { href: "/#options", label: "Options", key: "options" },
+  { href: "/releases/", label: "Releases", key: "releases" },
+  { href: "https://github.com/sa3lej/tmtv", label: "Source", key: "source" },
+  { href: "/#join", label: "Join", key: "join" },
+];
+---
+<header class="site-header">
+  <a class="wordmark" href="/">tmtv</a>
+  <nav class="site-nav" aria-label="Main">
+    <ul>
+      {links.map((link) => (
+        <li>
+          <a href={link.href} aria-current={current === link.key ? "page" : undefined}>{link.label}</a>
+        </li>
+      ))}
+    </ul>
   </nav>
-  <a class="nav-join" href="/#join">
-    Join a session <span aria-hidden="true">↗</span>
-  </a>
 </header>

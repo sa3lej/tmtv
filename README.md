@@ -9,6 +9,8 @@ Your terminal. Better together. Share a session over SSH or an optional web view
 ```sh
 # Install
 curl -fsSL https://tmtv.se/install.sh | sh
+# or, with Homebrew
+brew install sa3lej/tap/tmtv
 
 # Start sharing
 tmtv
@@ -236,6 +238,8 @@ flowchart LR
 ```
 
 The host runs `tmtv`, which opens an SSH tunnel to the relay server. The server authenticates viewers and forwards the terminal stream — read-write or read-only over SSH, view-only over SSE to browsers. Web viewers see exactly what SSH viewers see, rendered by xterm.js.
+
+The relay can read the terminal data it forwards: SSH encrypts each connection, but there is no end-to-end encryption between host and viewers through the relay. Use a relay you trust, or [host your own](#self-hosting).
 
 ## Features
 

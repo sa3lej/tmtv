@@ -47,3 +47,26 @@ they agreed on and how each one is resolved.
 - Each page gets a title, description, canonical URL and Open Graph data. JSON-LD uses `SoftwareApplication` plus `WebSite`, and `TechArticle` with `BreadcrumbList` on docs pages.
 - The sitemap is generated with `lastmod`. `llms.txt` lists every docs page, `llms-full.txt` holds the full docs as plain markdown, and each docs page is also served as `.md`. Everything is readable without JavaScript.
 - Production deploys need a website-only workflow that reuses `scripts/package-site.sh` and `scripts/deploy-web.sh` with the existing secrets and host, with green CI as a precondition. It must not touch relay binaries.
+
+## Proposal review (round 2, 2026-11-13)
+
+The same three perspectives reviewed the built proposal (homepage and release pages,
+three viewports) before it shipped. All three found it no longer read as template-made.
+Their findings and resolutions:
+
+| Finding | Raised by | Resolution |
+|---------|-----------|------------|
+| "Only the read-write link can type" misleads: the printed web link *is* the read-write link, and a bare session name is read-write. | 3 | Copy now says anyone with the printed web link can type once web input is on, and the names option says to set a password. |
+| Options mixed shell flags, config lines and runtime commands without saying which was which. Config lines pasted into bash fail. | 1, 2, 3 | Every option shows its `~/.tmtv.conf` line with a visible label. The intro says which settings can be toggled live with `tmtv set -g`. `tmtv -p` is described as a start-up flag. |
+| Inverted hierarchy: margin headings were smaller than option titles. | 1, 2 | Section h2 is 1.25rem. Option titles are real h3 elements at 1.0625rem with ids. |
+| Four code treatments, including a green-border callout and inline code chips. | 1 | Square dark terminals, bordered command boxes and plain labelled config lines. Inline code has no chip. |
+| The `>_` wordmark is the stock terminal icon. | 1 | "tmtv" followed by a static lime block cursor. |
+| The grey lead is the SaaS hero pattern; the `tmtv(1)` label read as a wink. | 1, 3 | The lead is set in ink. `tmtv(1)` moved to a mono colophon line in the footer. |
+| No guest entry point (regression); the join form rejected the links and ssh commands guests actually receive; weak error handling. | 2 | "Join" is in the nav and the lead. The form accepts tokens, names, `/s/` and `/j/` links and ssh commands; it keeps `ro-` tokens whole and refuses other relays' links with guidance. It sets `aria-invalid` and focuses the field, and the empty-field message is separate. |
+| Input and command borders measured 2.95:1. | 2 | `--rule-strong` is now #767b72 (over 3:1). |
+| The install command broke mid-word on mobile; terminal text was 11 px and couldn't be scrolled by keyboard. | 1, 2, 3 | Commands break only at spaces. Terminal text is 0.85rem minimum. Scrollable blocks are focusable and labelled. |
+| "How it works" should come before Options, and the diagram's arrows suggested the relay dials out. | 3 | The section moved up. A vertical diagram shows the host and guests each connecting to the relay, and fits a 375 px screen. |
+| Nav "Usage" landed on "Options". | 2, 3 | The nav says "Options". |
+| `/releases/3-0/` kept slogan headings; 2.0.4 lacked a date. | 1, 2, 3 | Headings are factual ("Changes", "tmux 3.8 core", "Upgrading", "Thanks"). The intro is plain. The upgrade notice and a contents list come after the title. 2.0.4 is dated 6 September 2026. |
+| The README lacked Homebrew and the relay-trust statement. | 3 | Both added to the README. |
+| Open: a comparison with tmate and upterm; how to stop sharing beyond "exit tmtv"; docs pages. | 2, 3 | Planned for the `/docs/` stage, using verifiable claims only. |

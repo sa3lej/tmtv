@@ -1,19 +1,17 @@
-<footer class="site-footer wrap">
-  <div>
-    <a class="wordmark" href="/">
-      <span aria-hidden="true">&gt;_</span> tmtv
-    </a>
-    <p>Made for the work you do together.</p>
-  </div>
-  <div class="footer-links">
-    <a href="https://github.com/sa3lej/tmtv">Source & documentation ↗</a>
-    <a href="https://github.com/sa3lej/tmtv/blob/develop/LICENSE">
-      ISC license
-    </a>
-    <a href="https://buymeacoffee.com/lejo">Support the project ↗</a>
-  </div>
-  <p class="credit">
-    Built by <a href="https://github.com/sa3lej">Lars-Erik Jonsson</a>.<br />
-    With thanks to tmux and tmate.
+---
+import { release } from "../data/release";
+---
+<footer class="site-footer">
+  <ul>
+    <li><a href="https://github.com/sa3lej/tmtv">Source on GitHub</a></li>
+    <li><a href="/releases/">Releases</a></li>
+    <li><a href="https://github.com/sa3lej/tmtv/blob/main/LICENSE">ISC license</a></li>
+    <li><a href="/llms.txt">llms.txt</a></li>
+    <li><a href="https://buymeacoffee.com/lejo">Support the project</a></li>
+  </ul>
+  <p>
+    tmtv is written by <a href="https://github.com/sa3lej">Lars-Erik Jonsson</a>.
+    It is built on tmux and owes a lot to tmate.
   </p>
+  <p class="colophon">tmtv {release.current} · {release.date} · tmtv(1)</p>
 </footer>

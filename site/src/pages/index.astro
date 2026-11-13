@@ -1,308 +1,316 @@
 ---
 import Base from "../layouts/Base.astro";
-import SiteNav from "../components/SiteNav.astro";
-import CollaborationDemo from "../components/CollaborationDemo.astro";
-import SiteFooter from "../components/SiteFooter.astro";
 import { release } from "../data/release";
-import "../styles/marketing.css";
-const schema = {
-  "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  name: "tmtv",
-  description:
-    "Open-source terminal sharing over SSH and an optional web viewer.",
-  url: "https://tmtv.se",
-  applicationCategory: "DeveloperApplication",
-  operatingSystem: "Linux, macOS",
-  softwareVersion: release.current,
-  license: "https://github.com/sa3lej/tmtv/blob/develop/LICENSE",
-  codeRepository: release.repository,
-  author: { "@type": "Person", name: "Lars-Erik Jonsson" },
-};
+
+const site = "https://tmtv.se/";
+const schema = [
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": `${site}#website`,
+    name: "tmtv",
+    url: site,
+    inLanguage: "en",
+    publisher: { "@id": `${site}#author` },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "@id": `${site}#software`,
+    name: "tmtv",
+    description:
+      "Open-source terminal sharing built on tmux 3.8. Share a tmux session over SSH with read-write and read-only tokens, or in a browser.",
+    url: site,
+    applicationCategory: "DeveloperApplication",
+    operatingSystem: "Linux, macOS",
+    softwareVersion: release.current,
+    downloadUrl: "https://github.com/sa3lej/tmtv/releases/latest",
+    installUrl: "https://tmtv.se/install.sh",
+    releaseNotes: "https://tmtv.se/releases/3-0/",
+    license: "https://opensource.org/license/isc-license-txt",
+    isAccessibleForFree: true,
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    sameAs: [release.repository],
+    author: { "@id": `${site}#author` },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Person",
+    "@id": `${site}#author`,
+    name: "Lars-Erik Jonsson",
+    url: "https://github.com/sa3lej",
+  },
+];
 ---
 
 <Base
-  title="tmtv — Share your terminal"
-  description="Share your terminal over SSH or in a browser. tmtv is open source, built on tmux, and ready for pair programming, troubleshooting and teaching."
+  title="tmtv — share a tmux session over SSH or in a browser"
+  description="tmtv shares your terminal. Run tmtv and it prints an ssh command for people who should type and one for people who should only watch. Open source, built on tmux 3.8, for Linux and macOS."
+  jsonLd={schema}
 >
-  <script type="application/ld+json" set:html={JSON.stringify(schema)} />
-  <div class="marketing home">
-    <SiteNav />
-    <section class="intro wrap" aria-labelledby="intro-title">
-      <div class="intro-copy">
-        <div class="edition">
-          <span>OPEN SOURCE / TERMINAL SHARING</span>
-          <a href="/releases/3-0/">v{release.current} ↗</a>
-        </div>
-        <h1 id="intro-title">
-          Your terminal,
-          <br />
-          <em>shared.</em>
-        </h1>
-        <p class="intro-lead">Work in the same terminal, from anywhere.</p>
-        <p class="intro-text">
-          Start a session on your machine. Invite someone over SSH, or let them
-          follow along in a browser. Your shell, your tools, together.
-        </p>
-        <div class="intro-links">
-          <a class="button primary" href="#install">
-            Get started <span aria-hidden="true">↘</span>
-          </a>
-          <a class="under-link" href="#how-it-works">
-            See how it works ↓
-          </a>
-        </div>
-        <p class="intro-meta">
-          Built on tmux <span>·</span> Linux &amp; macOS <span>·</span> No
-          account
-        </p>
-      </div>
-      <CollaborationDemo />
-    </section>
-    <section class="install-band" id="install" aria-labelledby="install-title">
-      <div class="wrap install-grid">
-        <div class="install-intro">
-          <span class="section-kicker">01 / GET STARTED</span>
-          <h2 id="install-title">
-            Install tmtv.
-          </h2>
-          <p>
-            Install tmtv, then run <code>tmtv</code>. Your guests don't need to
-            install it to join over SSH.
-          </p>
-          <a href="https://github.com/sa3lej/tmtv/releases/latest">
-            Download binaries ↗
-          </a>
-        </div>
-        <div class="install-commands">
-          <div class="command-head">
-            <strong>Install tmtv</strong>
-            <span>LINUX / macOS</span>
-          </div>
-          <div class="command-option">
-            <span>Install script</span>
-            <div class="copy-row">
-              <code id="install-command">{release.installer}</code>
-              <button
-                type="button"
-                data-copy={release.installer}
-                aria-label="Copy install script command"
-              >
-                Copy
-              </button>
-            </div>
-          </div>
-          <div class="command-option">
-            <span>Homebrew · macOS</span>
-            <div class="copy-row">
-              <code id="brew-command">{release.homebrew}</code>
-              <button
-                type="button"
-                data-copy={release.homebrew}
-                aria-label="Copy Homebrew command"
-              >
-                Copy
-              </button>
-            </div>
-          </div>
-          <p id="copy-status" role="status" aria-live="polite"></p>
-          <div class="command-bottom">
-            <a href="/install.sh">Inspect the installer ↗</a>
-            <span>STABLE {release.current}</span>
-          </div>
-        </div>
-      </div>
-    </section>
-    <div class="ribbon">
-      <div class="wrap">
-        <span>ONE SESSION</span>
-        <span aria-hidden="true">✳</span>
-        <span>YOUR TERMINAL</span>
-        <span aria-hidden="true">✳</span>
-        <span>MORE THAN ONE PAIR OF HANDS</span>
-      </div>
-    </div>
-    <section class="how wrap" id="how-it-works" aria-labelledby="how-title">
-      <div class="section-index">
-        <span>02 / THE IDEA</span>
-        <span>HOST → GUEST</span>
-      </div>
-      <div class="how-grid">
-        <div>
-          <h2 id="how-title">
-            How it works.
-          </h2>
-          <p>
-            Keep working where you already work. tmtv connects people to a
-            shared tmux session without asking them to change their setup.
-          </p>
-        </div>
-        <div class="workflow">
-          <article>
-            <span class="number">01</span>
-            <div>
-              <h3>Start</h3>
-              <p>
-                Run <code>tmtv</code> on your machine. Your shell and tools stay
-                there.
-              </p>
-            </div>
-          </article>
-          <article>
-            <span class="number">02</span>
-            <div>
-              <h3>Invite</h3>
-              <p>
-                Share a read-write token for a collaborator, or a read-only
-                token for an observer.
-              </p>
-            </div>
-          </article>
-          <article>
-            <span class="number">03</span>
-            <div>
-              <h3>Work together</h3>
-              <p>
-                Guests connect with SSH. Enable web sharing when a browser is
-                more convenient.
-              </p>
-            </div>
-          </article>
-        </div>
-      </div>
-    </section>
-    <section class="details-section wrap" aria-labelledby="details-title">
-      <div class="section-index">
-        <span>03 / THE DETAILS</span>
-        <span>BUILT FOR REAL WORK</span>
-      </div>
-      <div class="details-grid">
-        <div>
-          <h2 id="details-title">
-            Sharing, on your terms.
-          </h2>
-          <p>
-            Pair on a fix, walk through a command, or invite another set of
-            eyes. Choose how each person joins.
-          </p>
-          <a
-            class="under-link"
-            href="https://github.com/sa3lej/tmtv#self-hosting"
-          >
-            Explore self-hosting ↗
-          </a>
-        </div>
-        <div class="detail-list">
-          <article>
-            <span>01</span>
-            <div>
-              <h3>Read-write or read-only</h3>
-              <p>
-                Separate tokens let you invite someone to type or simply watch.
-                Browser sharing and browser input are opt-in.
-              </p>
-            </div>
-          </article>
-          <article>
-            <span>02</span>
-            <div>
-              <h3>Your choice of relay</h3>
-              <p>
-                Use the public service or run your own. The relay processes
-                terminal data, so choose one you trust.
-              </p>
-            </div>
-          </article>
-          <article>
-            <span>03</span>
-            <div>
-              <h3>Familiar tmux, shared</h3>
-              <p>
-                Windows, panes, colour and Unicode travel with the session.
-                Version 3.0 is built on tmux 3.8.
-              </p>
-              <a href="/releases/3-0/">What's new in 3.0 ↗</a>
-            </div>
-          </article>
-        </div>
-      </div>
-      <p class="security-note">
-        <strong>A note on access.</strong> Treat session tokens as credentials.
-        Named public URLs are not a substitute for a password. SSH transport is
-        not end-to-end encryption through an untrusted relay.
+  <section class="section lead-section" aria-labelledby="name">
+    <div class="lead-body">
+      <h1 id="name">Share a tmux session over SSH or in a browser.</h1>
+      <p class="lead">
+        Run <code>tmtv</code> and it prints two ssh commands: one for people who
+        should type, one for people who should only watch. Guests need nothing
+        but <code>ssh</code>. Built on tmux 3.8, ISC licensed, runs on Linux and
+        macOS.
       </p>
-    </section>
-    <section class="join-band">
-      <div class="wrap join-grid" id="join">
-        <div>
-          <span class="section-kicker">HAVE AN INVITATION?</span>
-          <h2>
-            Join a session<span>.</span>
-          </h2>
-          <p>
-            Enter the token or session name from your host. Web sharing must be
-            enabled for the session.
-          </p>
-        </div>
-        <form id="session-form">
-          <label for="token">Session token or name</label>
-          <div class="join-row">
-            <input
-              id="token"
-              name="token"
-              type="text"
-              required
-              maxlength="256"
-              placeholder="Paste your token"
-              autocomplete="off"
-              spellcheck="false"
-              aria-describedby="join-error"
-            />
-            <button type="submit">Join ↗</button>
-          </div>
-          <p id="join-error" role="alert"></p>
-          <p class="join-help">
-            Have a full link? Open it directly in your browser.
-          </p>
-        </form>
+      <p class="meta">
+        Current release {release.current} ·
+        <a href="/releases/3-0/">what changed in 3.0</a> ·
+        <a href="#join">join a session</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="install" aria-labelledby="install-title">
+    <h2 id="install-title">Install</h2>
+    <div class="section-body">
+      <div class="command">
+        <code tabindex="0">{release.installer}</code>
+        <button class="copy" type="button" data-copy={release.installer}>
+          Copy<span class="visually-hidden"> install command</span>
+        </button>
       </div>
-    </section>
-    <SiteFooter />
-  </div>
+      <div class="command">
+        <code tabindex="0">{release.homebrew}</code>
+        <button class="copy" type="button" data-copy={release.homebrew}>
+          Copy<span class="visually-hidden"> Homebrew command</span>
+        </button>
+      </div>
+      <p class="copy-status" role="status" aria-live="polite"></p>
+      <p>
+        The script downloads the published release for your platform, checks its
+        SHA-256 checksum and installs nothing if the check fails.
+        <a href="/install.sh">Read install.sh</a> before you run it, or download
+        <a href="https://github.com/sa3lej/tmtv/releases/latest">binaries and checksums</a>
+        from GitHub. People who only join a session do not need to install anything.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="start" aria-labelledby="start-title">
+    <h2 id="start-title">Start sharing</h2>
+    <div class="section-body">
+      <pre class="terminal" tabindex="0" aria-label="Terminal output of tmtv"><code><span class="p">$ </span>tmtv
+ssh TOKEN@tmtv.se     <span class="c"># read-write access</span>
+ssh ro-TOKEN@tmtv.se  <span class="c"># read-only access</span></code></pre>
+      <p>
+        <code>tmtv</code> starts tmux, connects to the relay at tmtv.se and
+        prints your tokens. Send the first line to someone you want to type
+        with and the second to someone who should only watch. Treat tokens like
+        passwords: anyone who has one can join. The status bar shows how many
+        people are watching, for example <code>S:2 W:1</code> for two over SSH
+        and one in a browser.
+      </p>
+      <p>Browser sharing is off until you turn it on:</p>
+      <pre class="terminal" tabindex="0" aria-label="Turning on web sharing"><code><span class="p">$ </span>tmtv set -g tmtv-web-sharing on
+[tmtv] web session: https://tmtv.se/s/TOKEN</code></pre>
+      <p>
+        People who open the link watch in their browser without installing
+        anything. They can only watch until you run
+        <code>tmtv set -g tmtv-web-input on</code>; after that, anyone with the
+        printed web link can type.
+      </p>
+      <p>
+        To stop sharing, exit tmtv. Starting it again gives you new links.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="how" aria-labelledby="how-title">
+    <h2 id="how-title">How it works</h2>
+    <div class="section-body">
+      <pre class="terminal" tabindex="0" aria-label="Diagram: your machine and every guest connect to the relay; the relay checks tokens and passwords and forwards the terminal between them."><code>your machine: tmtv + tmux
+     │
+     │ ssh
+     ▼
+relay (tmtv.se): checks tokens
+     ▲                  ▲
+     │ ssh              │ https
+     │                  │
+guest                 browser
+ssh TOKEN@tmtv.se     tmtv.se/s/TOKEN</code></pre>
+      <p>
+        Your shell and programs run on your machine. tmtv opens an SSH
+        connection to a relay, and guests connect to the same relay. The relay
+        checks each guest's token and password, then forwards the terminal
+        between you. Browsers get the same screen over HTTPS, drawn with
+        xterm.js.
+      </p>
+      <p>
+        <strong>The relay can read your terminal.</strong> SSH encrypts each
+        connection, but it is not end-to-end encryption between you and your
+        guests. Use the public relay for things you would be comfortable
+        sharing with its operator, or run your own: <code>docker compose up -d</code>
+        in a checkout starts one with SSH on port 2222. The
+        <a href="https://github.com/sa3lej/tmtv#self-hosting">self-hosting guide</a>
+        covers TLS, web viewing and systemd.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="options" aria-labelledby="options-title">
+    <h2 id="options-title">Options</h2>
+    <div class="section-body">
+      <p>
+        Settings go in <code>~/.tmtv.conf</code>. Web sharing, web input,
+        recording and the shared clipboard can also be switched in a running
+        session by putting <code>tmtv</code> in front, as in
+        <code>tmtv set -g tmtv-recording on</code>.
+      </p>
+      <div class="option">
+        <h3 id="password">Require a password</h3>
+        <p>SSH viewers must enter it, and browser viewers get a prompt before the terminal loads. Either start with <code>tmtv -p secret</code> or set it in the config:</p>
+        <pre class="conf"><code>set -g tmtv-session-password secret</code></pre>
+      </div>
+      <div class="option">
+        <h3 id="name-option">Use a name instead of a random token</h3>
+        <p>
+          Gives you <code>ssh ro-demo@tmtv.se</code> and
+          <code>https://tmtv.se/s/demo</code>; the read-write SSH link keeps a
+          32-character random prefix. Names are 3–32 letters, digits or
+          hyphens. They are easy to guess, and they are not reserved: while your
+          host is offline someone else can use the name. Set a password,
+          especially with web input on.
+        </p>
+        <pre class="conf"><code>set -g tmtv-session-name demo</code></pre>
+      </div>
+      <div class="option">
+        <h3 id="record">Record the session</h3>
+        <p>Writes an asciinema <code>.cast</code> file to <code>~/.tmtv/recordings/</code>.</p>
+        <pre class="conf"><code>set -g tmtv-recording on</code></pre>
+      </div>
+      <div class="option">
+        <h3 id="ttl">End the session after a while</h3>
+        <p>Time to live in seconds. Viewers see the countdown.</p>
+        <pre class="conf"><code>set -g tmtv-link-ttl 3600</code></pre>
+      </div>
+      <div class="option">
+        <h3 id="clipboard">Turn off the shared clipboard</h3>
+        <p>On by default. Read-only viewers never get it.</p>
+        <pre class="conf"><code>set -g tmtv-shared-clipboard off</code></pre>
+      </div>
+      <p>
+        If the connection drops, the same running host reconnects and keeps its
+        links. The <a href="https://github.com/sa3lej/tmtv#readme">README</a>
+        covers status bar variables, the per-user input API and using tmtv as
+        plain tmux.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="ci" aria-labelledby="ci-title">
+    <h2 id="ci-title">GitHub Actions</h2>
+    <div class="section-body">
+      <p>
+        <a href="https://github.com/sa3lej/action-tmtv">action-tmtv</a> opens a
+        tmtv session on a failed GitHub Actions runner so you can ssh in and
+        look around. Coming from action-tmate, the change is one line:
+      </p>
+      <pre class="terminal" tabindex="0" aria-label="Workflow change from action-tmate to action-tmtv"><code><span class="del">- uses: mxschmitt/action-tmate@v3</span>
+<span class="add">+ uses: sa3lej/action-tmtv@v1</span></code></pre>
+    </div>
+  </section>
+
+  <section class="section" id="join" aria-labelledby="join-title">
+    <h2 id="join-title">Join a session</h2>
+    <div class="section-body">
+      <p>
+        If someone sent you a link, a token or a session name and has web
+        sharing turned on, you can watch in this browser. Over SSH, run the
+        <code>ssh</code> command they sent instead.
+      </p>
+      <form class="join-form" id="session-form" novalidate>
+        <label for="token">Link, token or session name</label>
+        <div class="join-row">
+          <input
+            id="token"
+            name="token"
+            type="text"
+            required
+            maxlength="512"
+            placeholder="for example demo"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            aria-describedby="join-error"
+          />
+          <button class="button" type="submit">Open</button>
+        </div>
+        <p class="form-error" id="join-error" role="alert"></p>
+      </form>
+    </div>
+  </section>
+
   <script>
-    document
-      .querySelectorAll<HTMLButtonElement>("[data-copy]")
-      .forEach((button) =>
-        button.addEventListener("click", async () => {
-          const status = document.getElementById("copy-status")!;
-          try {
-            await navigator.clipboard.writeText(button.dataset.copy!);
-            status.textContent = "Command copied.";
-            button.textContent = "Copied";
-            setTimeout(() => {
-              button.textContent = "Copy";
-            }, 2000);
-          } catch {
-            status.textContent =
-              "Copy unavailable. Select and copy the command manually.";
-          }
-        }),
-      );
-    document
-      .getElementById("session-form")
-      ?.addEventListener("submit", (event) => {
-        event.preventDefault();
-        const token = (
-          document.getElementById("token") as HTMLInputElement
-        ).value.trim();
-        const error = document.getElementById("join-error")!;
-        if (!/^[A-Za-z0-9_-]{1,256}$/.test(token)) {
-          error.textContent =
-            "Enter a session token or name, without a URL or spaces.";
-          return;
+    document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) =>
+      button.addEventListener("click", async () => {
+        const status = document.querySelector(".copy-status");
+        const label = button.firstChild!;
+        try {
+          await navigator.clipboard.writeText(button.dataset.copy!);
+          if (status) status.textContent = "Copied to the clipboard.";
+          label.textContent = "Copied";
+          setTimeout(() => {
+            label.textContent = "Copy";
+          }, 2000);
+        } catch {
+          if (status) status.textContent = "Could not copy. Select the command and copy it by hand.";
         }
-        error.textContent = "";
-        window.location.assign("/s/" + encodeURIComponent(token));
-      });
+      }),
+    );
+    const form = document.getElementById("session-form") as HTMLFormElement | null;
+    const input = document.getElementById("token") as HTMLInputElement | null;
+    const error = document.getElementById("join-error");
+    // Accept what guests are actually sent: a bare token or name, a /s/ or /j/
+    // link, or an ssh command. The token is kept whole (a read-only "ro-" token
+    // stays read-only) and the link's own path is preserved.
+    const parseInvite = (value: string) => {
+      const text = value.trim();
+      if (/^https?:\/\//i.test(text)) {
+        let url: URL;
+        try {
+          url = new URL(text);
+        } catch {
+          return null;
+        }
+        if (url.host !== window.location.host) return { other: url.href };
+      }
+      const link = text.match(/\/(s|j)\/([A-Za-z0-9_-]{1,256})\/?(?:[?#].*)?$/);
+      if (link) return { path: link[1], token: link[2] };
+      const ssh = text.match(/^(?:ssh\s+)?([A-Za-z0-9_-]{1,256})@[A-Za-z0-9.-]+(?:\s+-p\s*\d+)?$/);
+      if (ssh) return { path: "s", token: ssh[1] };
+      if (/^[A-Za-z0-9_-]{1,256}$/.test(text)) return { path: "s", token: text };
+      return null;
+    };
+    const showError = (message: string) => {
+      error!.textContent = message;
+      input!.setAttribute("aria-invalid", "true");
+      input!.focus();
+    };
+    input?.addEventListener("input", () => {
+      error!.textContent = "";
+      input.removeAttribute("aria-invalid");
+    });
+    form?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!input!.value.trim()) {
+        showError("Paste the link, token or session name you were sent.");
+        return;
+      }
+      const invite = parseInvite(input!.value);
+      if (!invite) {
+        showError("That does not look like a tmtv link, token or session name.");
+        return;
+      }
+      if ("other" in invite) {
+        showError("That link is for another relay. Open it directly in your browser.");
+        return;
+      }
+      window.location.assign("/" + invite.path + "/" + encodeURIComponent(invite.token));
+    });
   </script>
 </Base>

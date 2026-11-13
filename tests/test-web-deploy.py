@@ -52,6 +52,7 @@ class Deployment(unittest.TestCase):
         self.files = {name: ('new ' + name).encode() for name in m.REQUIRED}
         self.files['viewer.html'] = b'<html><form id="password-form"></form><script src="/viewer.js"></script></html>'
         self.files['_astro/styles.css'] = b'body { color: lime; }'
+        self.files['fonts/ibm-plex-sans-latin-400-normal.woff2'] = b'wOF2 test font'
         self.installer = m.Installer(self.web, self.stage)
 
     def tearDown(self):
