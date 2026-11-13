@@ -1,0 +1,33 @@
+name: Website
+
+# Builds and packages the public website (site/) on every develop push and PR so that
+# website-only deploys can require a green, website-specific check for the exact commit.
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and package site
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix site
+      - run: npm run build --prefix site
+      - name: Package complete website
+        run: sh scripts/package-site.sh "$RUNNER_TEMP/tmtv-web.tar.gz"

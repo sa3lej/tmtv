@@ -1,0 +1,126 @@
+name: Deploy website
+
+# Deploys only the public website bundle (site/ plus web/viewer.js) to production.
+# It never touches the relay server, binaries, releases or tags. It reuses
+# scripts/package-site.sh and scripts/deploy-web.sh (install, live verification and
+# automatic rollback) with the existing deployment secrets and host.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit SHA or branch to deploy (must be on develop or main, with green CI)'
+        required: true
+        default: develop
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  # Shared with the release deployment so web and relay deploys never overlap.
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  require-green-ci:
+    name: Require green CI for the commit
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.resolve.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve commit on develop or main
+        id: resolve
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          [[ "$REF" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "Invalid ref" >&2; exit 1; }
+          if git rev-parse --verify --quiet "origin/$REF^{commit}" >/dev/null; then
+            commit=$(git rev-parse "origin/$REF^{commit}")
+          else
+            commit=$(git rev-parse --verify "$REF^{commit}")
+          fi
+          if ! git merge-base --is-ancestor "$commit" origin/develop &&
+             ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "Commit $commit is not on develop or main" >&2; exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "Deploying website from $commit"
+      - name: Require successful Build, Develop validation and Website runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT: ${{ steps.resolve.outputs.commit }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs?head_sha=$COMMIT&per_page=100" > runs.json
+          status=0
+          for workflow in 'Build' 'Develop validation' 'Website'; do
+            # The newest push run of each required workflow for this exact commit must have succeeded.
+            conclusion=$(jq -r --arg name "$workflow" '
+              [.workflow_runs[] | select(.name == $name and .event == "push")]
+              | sort_by(.created_at) | last | if . == null then "missing" else (.conclusion // .status) end' runs.json)
+            echo "$workflow: $conclusion"
+            [ "$conclusion" = success ] || status=1
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "CI for $COMMIT is not green; refusing to deploy." >&2
+            exit 1
+          fi
+
+  prepare-web:
+    needs: [require-green-ci]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.require-green-ci.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix site && npm run build --prefix site
+      - name: Package complete website
+        run: sh scripts/package-site.sh "$RUNNER_TEMP/tmtv-web.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: website-bundle
+          path: ${{ runner.temp }}/tmtv-web.tar.gz
+          if-no-files-found: error
+
+  deploy-web:
+    name: Deploy web assets
+    needs: [require-green-ci, prepare-web]
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.require-green-ci.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: website-bundle
+          path: .
+
+      - name: Set up SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ci
+          chmod 600 ~/.ssh/id_ci
+          ssh-keyscan -p ${{ secrets.DEPLOY_SSH_PORT }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload, install and verify web assets (rolls back on failure)
+        env:
+          DEPLOY_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+        run: |
+          export DEPLOY_IDENTITY_FILE="$HOME/.ssh/id_ci"
+          sh scripts/deploy-web.sh "$PWD/tmtv-web.tar.gz" "$DEPLOY_TARGET" "$DEPLOY_PORT" https://tmtv.se
